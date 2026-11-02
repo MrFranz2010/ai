@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="it" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#191817">
+  <title>NOKK · Assistente AI</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="NOKK, home">
+        <span class="brand-icon">N</span>
+        <span class="brand-copy"><strong>NOKK</strong><small>PERSONAL AI</small></span>
+      </a>
+      <button class="new-chat" id="new-chat" type="button"><span aria-hidden="true">＋</span><span>Nuova chat</span></button>
+      <div class="sidebar-section-label">APPLICAZIONI</div>
+      <nav class="app-menu" aria-label="Applicazioni">
+        <button class="app-menu-item" type="button" data-open-app="calendar"><span aria-hidden="true">▦</span><span>Calendario</span></button>
+        <button class="app-menu-item" type="button" data-open-app="tasks"><span aria-hidden="true">☑</span><span>Attività</span></button>
+        <button class="app-menu-item" id="workflows-toggle" type="button" data-open-app="workflows"
+          aria-label="Procedure" aria-controls="workflow-panel" aria-expanded="false">
+          <span aria-hidden="true">≡</span><span>Procedure</span>
+        </button>
+        <button class="app-menu-item" type="button" data-open-app="machine"><span aria-hidden="true">▤</span><span>Stato macchina</span></button>
+      </nav>
+      <div class="sidebar-section-label">STATO</div>
+      <div class="sidebar-note">
+        <span class="status-dot"></span>
+        <span><small>CONNESSIONE</small><strong id="connection-label">Configura un provider</strong></span>
+      </div>
+      <div class="window-dock" id="window-dock" aria-label="Finestre ridotte a icona"></div>
+      <div class="sidebar-bottom">
+        <p><span class="system-pulse"></span> NOKK · LOCALE</p>
+        <p>Le risposte AI possono contenere errori.</p>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">NOKK <span>·</span> IL TUO ASSISTENTE</div>
+          <h1 id="page-title">Una nuova conversazione</h1>
+        </div>
+        <div class="topbar-actions">
+          <button class="launcher-trigger" id="launcher-open" type="button" aria-label="Cerca applicazioni e impostazioni">
+            <span aria-hidden="true">⌕</span><span>Cerca in NOKK...</span><kbd>Ctrl K</kbd>
+          </button>
+          <button class="theme-button" id="theme-toggle" type="button" aria-label="Attiva tema chiaro" title="Attiva tema chiaro">
+            <span aria-hidden="true">☼</span><span>Tema scuro</span>
+          </button>
+          <button class="settings-button" id="settings-toggle" type="button" data-open-app="settings">
+            <span aria-hidden="true">⚙</span><span>Impostazioni</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="desktop-workspace" id="desktop-workspace">
+        <div id="app-windows"></div>
+      </div>
+
+      <section class="launcher-overlay" id="launcher-overlay" hidden>
+        <div class="launcher-card" role="dialog" aria-modal="true" aria-labelledby="launcher-label">
+          <label class="sr-only" id="launcher-label" for="launcher-input">Cerca in NOKK</label>
+          <div class="launcher-input-row">
+            <span aria-hidden="true">⌕</span>
+            <input id="launcher-input" type="search" autocomplete="off" placeholder="Cerca impostazioni, calendario, attività...">
+            <kbd>ESC</kbd>
+          </div>
+          <div class="launcher-results" id="launcher-results" role="listbox" aria-label="Risultati"></div>
+          <p class="launcher-hint">Usa ↑ ↓ per navigare · Invio per aprire</p>
+        </div>
+      </section>
+
+      <section class="workflow-panel" id="workflow-panel" aria-labelledby="workflow-title" hidden>
+        <div class="workflow-heading">
+          <div>
+            <p class="eyebrow">IL TUO SPAZIO DI LAVORO</p>
+            <h2 id="workflow-title">Procedure salvate</h2>
+            <p class="workflow-description">Riutilizza istruzioni frequenti. Apri una procedura per rivederla e modificarla prima di inviarla.</p>
+          </div>
+          <button class="save-button" id="workflow-create" type="button">＋ Nuova procedura</button>
+        </div>
+        <div class="workflow-list" id="workflow-list"></div>
+        <p class="workflow-empty" id="workflow-empty">Ancora nessuna procedura. Creane una per salvare un’attività che ripeti spesso.</p>
+      </section>
+
+      <section class="conversation" id="conversation" aria-live="polite">
+        <div class="welcome" id="welcome">
+          <div class="welcome-mark" aria-hidden="true"><span>N</span><i></i></div>
+          <p class="eyebrow">NOKK <span>·</span> UNA NUOVA CONVERSAZIONE</p>
+          <h2>Da dove vuoi iniziare?</h2>
+          <p class="welcome-copy">Scrivi un messaggio: ti aiuto a lavorare, ragionare e trovare risposte.</p>
+          <div class="welcome-capabilities" aria-label="Funzioni disponibili">
+            <span>CONVERSAZIONE</span><span>VOCE</span><span>FILE</span>
+          </div>
+          <button class="welcome-setup" id="welcome-setup" type="button">Configura connessione <span>→</span></button>
+        </div>
+      </section>
+
+      <section class="settings-overlay" id="workflow-overlay" hidden>
+        <div class="settings-card workflow-card" role="dialog" aria-modal="true" aria-labelledby="workflow-form-title">
+          <div class="settings-heading">
+            <div>
+              <p class="eyebrow">PROCEDURA RIUTILIZZABILE</p>
+              <h2 id="workflow-form-title">Nuova procedura</h2>
+            </div>
+            <button class="close-button" id="workflow-close" type="button" aria-label="Chiudi procedura">×</button>
+          </div>
+          <p class="settings-description">Salva le istruzioni per un’attività ricorrente. Quando la usi, potrai rivederle e modificarle nella chat prima dell’invio.</p>
+          <form id="workflow-form">
+            <label for="workflow-name">Nome</label>
+            <input id="workflow-name" maxlength="80" required placeholder="Es. Riassumi le note">
+            <label for="workflow-prompt">Istruzioni</label>
+            <textarea id="workflow-prompt" rows="7" maxlength="4000" required
+              placeholder="Descrivi il risultato desiderato e i passaggi da seguire."></textarea>
+            <div class="settings-error" id="workflow-error" role="alert" hidden></div>
+            <div class="settings-actions">
+              <button class="cancel-button" id="workflow-cancel" type="button">Annulla</button>
+              <button class="save-button" id="workflow-save" type="submit">Salva procedura</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <form class="composer" id="chat-form">
+        <div class="composer-attachments" id="attachment-list" aria-live="polite" hidden></div>
+        <label class="sr-only" for="message-input">Scrivi un messaggio</label>
+        <textarea id="message-input" rows="1" maxlength="12000"
+          placeholder="Scrivi un messaggio o trascina qui un file..." disabled></textarea>
+        <input id="file-input" type="file" multiple hidden
+          accept=".txt,.md,.csv,.json,.log,.py,.js,.ts,.html,.css,.xml,.yaml,.yml,.toml,.ini,.sql,.sh,.pdf,.docx,.png,.jpg,.jpeg,.webp,.gif">
+        <div class="composer-footer">
+          <span id="voice-status" role="status" aria-live="polite">Microfono pronto · i file partono solo al tuo invio</span>
+          <div class="composer-actions">
+            <button class="attach-button" id="attach-button" type="button" aria-label="Allega file" title="Allega file" disabled>
+              <span aria-hidden="true">＋</span><span>Allega</span>
+            </button>
+            <button class="voice-button" id="mic-toggle" type="button" disabled
+              aria-label="Detta un messaggio" title="Detta un messaggio">🎙</button>
+            <button class="voice-button" id="wake-toggle" type="button"
+              aria-label="Attiva wake word Nok" title="Attiva wake word Nok">◉</button>
+            <button class="send-button" id="send-button" type="submit" disabled aria-label="Invia messaggio">↑</button>
+          </div>
+        </div>
+      </form>
+
+      <section class="settings-overlay" id="settings-overlay" hidden>
+        <div class="settings-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+          <div class="settings-heading">
+            <div>
+              <p class="eyebrow">COLLEGAMENTO AI</p>
+              <h2 id="settings-title">Impostazioni</h2>
+            </div>
+            <button class="close-button" id="settings-close" type="button" aria-label="Chiudi impostazioni">×</button>
+          </div>
+          <p class="settings-description">Configura la connessione e personalizza il comportamento di NOKK. Le modifiche vengono salvate in locale.</p>
+          <form id="settings-form">
+            <details class="settings-section" open>
+              <summary><span class="section-index">01</span><span>Connessione AI<small>Provider, modello e chiave</small></span></summary>
+              <div class="settings-section-body">
+            <label for="provider">Provider AI</label>
+            <select id="provider" name="provider">
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="google">Google Gemini</option>
+              <option value="openrouter">OpenRouter · modelli gratuiti automatici</option>
+            </select>
+
+            <label for="model">Nome del modello</label>
+            <input id="model" name="model" value="gpt-4o-mini" maxlength="120" required>
+            <p class="field-help" id="model-help">Il nome deve corrispondere a un modello disponibile nel tuo account.</p>
+
+            <label for="api-key">Chiave API</label>
+            <input id="api-key" name="api_key" type="password" autocomplete="off"
+              placeholder="Incolla la chiave API">
+            <p class="field-help" id="api-key-help">Non inserire la chiave in una chat. Le chiamate al provider partono dal backend.</p>
+              </div>
+            </details>
+
+            <details class="settings-section">
+              <summary><span class="section-index">02</span><span>Personalità<small>Istruzioni permanenti</small></span></summary>
+              <div class="settings-section-body">
+            <label for="system-prompt">Istruzioni per NOKK</label>
+            <textarea id="system-prompt" name="system_prompt" rows="5" maxlength="10000"
+              placeholder="Es. Rispondi in italiano, in modo chiaro e conciso."></textarea>
+            <p class="field-help">Queste istruzioni vengono aggiunte a ogni conversazione. Lascia vuoto per usare le istruzioni predefinite.</p>
+              </div>
+            </details>
+
+            <details class="settings-section">
+              <summary><span class="section-index">03</span><span>Voce<small>Wake word e sintesi vocale</small></span></summary>
+              <div class="settings-section-body">
+            <div class="voice-settings">
+              <p class="voice-settings-title">Voce</p>
+              <label for="wake-phrase">Wake word</label>
+              <input id="wake-phrase" name="wake_phrase" maxlength="40" value="Nok" required>
+              <p class="field-help">Premi il pulsante ◉ nella chat per attivarla. Resta in ascolto e prova a riprendere anche se cambi scheda o il browser interrompe la sessione. Non parte da sola all’apertura e non invia messaggi senza il tuo invio.</p>
+              <label class="toggle-label" for="tts-auto-play">
+                <input id="tts-auto-play" name="tts_auto_play" type="checkbox">
+                <span>Leggi automaticamente le risposte</span>
+              </label>
+              <p class="field-help">La sintesi vocale usa le voci disponibili nel browser.</p>
+              <p class="field-help voice-privacy">Il riconoscimento vocale usa il servizio del browser e può inviare l’audio a terzi. L’indicatore nella chat mostra quando il microfono è attivo.</p>
+            </div>
+              </div>
+            </details>
+
+            <details class="settings-section">
+              <summary><span class="section-index">04</span><span>Strumenti<small>Accesso locale al terminale</small></span></summary>
+              <div class="settings-section-body">
+            <div class="terminal-settings">
+              <label class="toggle-label" for="terminal-enabled">
+                <input id="terminal-enabled" name="terminal_enabled" type="checkbox">
+                <span>Consenti all’assistente di usare il terminale</span>
+              </label>
+              <p class="field-help">I comandi modificano il computer con i tuoi permessi. La cartella indicata è quella di partenza, non una sandbox.</p>
+
+              <label for="workspace">Cartella di lavoro</label>
+              <input id="workspace" name="workspace" type="text" autocomplete="off" required>
+
+              <label for="approval-mode">Approvazione dei comandi</label>
+              <select id="approval-mode" name="approval_mode">
+                <option value="manual">Chiedi conferma per ogni comando</option>
+                <option value="auto_readonly">Automatico solo per letture consentite</option>
+              </select>
+              <p class="field-help">L’automatico consente solo pwd, ls e lettura di file locali non sensibili (fino a 100 KB). Gli altri comandi richiedono conferma.</p>
+            </div>
+              </div>
+            </details>
+
+            <details class="settings-section">
+              <summary><span class="section-index">05</span><span>Telegram<small>Chat privata con NOKK</small></span></summary>
+              <div class="settings-section-body">
+                <div class="telegram-settings">
+                  <p class="telegram-status" id="telegram-status" role="status">Bot non collegato</p>
+                  <label for="telegram-token">Token del bot</label>
+                  <input id="telegram-token" type="password" autocomplete="off"
+                    placeholder="Incolla il token creato con BotFather">
+                  <p class="field-help">Crea un bot con @BotFather e incolla qui il token. Il token resta nel file locale e non viene mostrato all’assistente. NOKK comunica con Telegram tramite polling locale; non serve esporre il computer a Internet.</p>
+                  <div class="telegram-actions">
+                    <button class="telegram-action" id="telegram-connect" type="button">Collega bot</button>
+                    <button class="telegram-action" id="telegram-pair" type="button" disabled>Genera codice di collegamento</button>
+                    <button class="telegram-action telegram-disconnect" id="telegram-disconnect" type="button" hidden>Disconnetti</button>
+                  </div>
+                  <p class="telegram-pair-code" id="telegram-pair-code" hidden></p>
+                  <p class="field-help">Dopo il collegamento, genera il codice e invia <code>/pair CODICE</code> al tuo bot in una chat privata. Solo la chat associata può usare NOKK. Le conversazioni Telegram vengono inviate al provider AI configurato.</p>
+                </div>
+              </div>
+            </details>
+
+            <div class="settings-error" id="settings-error" role="alert" hidden></div>
+            <div class="settings-actions">
+              <button class="cancel-button" id="settings-cancel" type="button">Annulla</button>
+              <button class="save-button" id="settings-save" type="submit">Salva e collega</button>
+            </div>
+          </form>
+          <p class="privacy-note"><span>🔒</span> La chiave viene salvata in chiaro nel file locale con accesso limitato al tuo utente. I comandi approvati vengono eseguiti sul computer con i tuoi permessi. Non condividere il file di configurazione.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
