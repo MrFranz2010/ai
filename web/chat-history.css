@@ -1,0 +1,10 @@
+.chat-history-panel { min-height: 0; max-height: 35vh; margin: 15px 0 8px; overflow-y: auto; }
+.chat-history-heading { padding: 0 8px 7px; color: var(--muted); font-size: 9px; letter-spacing: 1.5px; }
+.chat-history-list { display: grid; gap: 3px; }
+.chat-history-row { display: flex; align-items: center; gap: 3px; min-width: 0; }
+.chat-history-open { flex: 1; min-width: 0; overflow: hidden; padding: 8px; color: var(--text); background: transparent; border: 1px solid transparent; border-radius: 5px; text-align: left; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; cursor: pointer; }
+.chat-history-open:hover, .chat-history-open.active { background: var(--panel-hover); border-color: var(--border); }
+.chat-history-delete { flex: 0 0 27px; width: 27px; height: 27px; color: var(--muted); background: transparent; border: 0; border-radius: 5px; cursor: pointer; }
+.chat-history-delete:hover { color: var(--text); background: var(--panel-hover); }
+.chat-history-empty { margin: 5px 8px; color: var(--muted); font-size: 10px; }
+@media (max-width: 680px) { .chat-history-panel { width: 100%; max-height: 30vh; } .chat-history-heading, .chat-history-open, .chat-history-delete { display: none; } .chat-history-panel.has-chats { display: none; } }
