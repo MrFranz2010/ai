@@ -1,26 +1,3 @@
-app = "nokk-ai-change-this-name"
-primary_region = "ams"
-
-[build]
-  dockerfile = "Dockerfile"
-
-[env]
-  HOST = "0.0.0.0"
-  PORT = "8080"
-  AI_CONFIG_FILE = "/data/config.json"
-
-[http_service]
-  internal_port = 8080
-  force_https = true
-  auto_stop_machines = "stop"
-  auto_start_machines = true
-  min_machines_running = 0
-
-[[mounts]]
-  source = "nokk_data"
-  destination = "/data"
-
-[[vm]]
-  cpu_kind = "shared"
-  cpus = 1
-  memory = "512mb"
+# Fly.io deployment config retired; use Render's render.yaml instead.
+# See RENDER_DEPLOY.md for setup. This file is intentionally left as a notice
+# because repository file deletion is not available in this update operation.
