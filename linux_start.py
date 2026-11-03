@@ -1,74 +1,27 @@
 import json
-import re
-import threading
-import time
-from http.server import ThreadingHTTPServer
+from pathlib import Path
 
 import app
+from user_memory import install, validate_memories
 
 
-CHAT_FILE = app.CONFIG_FILE.with_name("chats.json")
-CHAT_LOCK = threading.Lock()
-CHAT_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
-MAX_CHATS = 100
-MAX_MESSAGES_PER_CHAT = 500
+MEMORY_FILE = app.CONFIG_FILE.with_name("memories.json")
 
 
-def validate_chats(chats):
-    if not isinstance(chats, list) or len(chats) > MAX_CHATS:
-        raise ValueError(f"Puoi conservare al massimo {MAX_CHATS} conversazioni.")
-    clean_chats = []
-    seen_ids = set()
-    for chat in chats:
-        if not isinstance(chat, dict):
-            raise ValueError("Formato conversazione non valido.")
-        chat_id = chat.get("id")
-        title = chat.get("title")
-        updated_at = chat.get("updated_at")
-        messages = chat.get("messages")
-        if not isinstance(chat_id, str) or not CHAT_ID_PATTERN.fullmatch(chat_id):
-            raise ValueError("Identificativo conversazione non valido.")
-        if chat_id in seen_ids:
-            raise ValueError("Gli identificativi delle conversazioni devono essere unici.")
-        if not isinstance(title, str) or len(title) > 120:
-            raise ValueError("Titolo conversazione non valido.")
-        if not isinstance(updated_at, (int, float)) or isinstance(updated_at, bool):
-            raise ValueError("Data conversazione non valida.")
-        if not isinstance(messages, list) or len(messages) > MAX_MESSAGES_PER_CHAT:
-            raise ValueError("La conversazione supera il limite di messaggi.")
-        clean_messages = []
-        for message in messages:
-            if (
-                not isinstance(message, dict)
-                or message.get("role") not in {"user", "assistant"}
-                or not isinstance(message.get("content"), str)
-                or len(message["content"]) > 12000
-            ):
-                raise ValueError("Messaggio conversazione non valido.")
-            clean_messages.append({"role": message["role"], "content": message["content"]})
-        seen_ids.add(chat_id)
-        clean_chats.append({
-            "id": chat_id,
-            "title": title,
-            "updated_at": updated_at,
-            "messages": clean_messages,
-        })
-    return sorted(clean_chats, key=lambda item: item["updated_at"], reverse=True)
-
-
-def load_chats():
+def load_memories():
     try:
-        with CHAT_FILE.open("r", encoding="utf-8") as state_file:
-            saved = json.load(state_file)
+        with MEMORY_FILE.open("r", encoding="utf-8") as memory_file:
+            saved = json.load(memory_file)
     except FileNotFoundError:
         return []
-    return validate_chats(saved)
+    return validate_memories(saved)
 
 
-def save_chats(chats):
-    clean = validate_chats(chats)
-    app.save_json_file(CHAT_FILE, clean)
-    return clean
+def save_memories(memories):
+    app.save_json_file(MEMORY_FILE, validate_memories(memories))
+
+
+install(app, app.AppHandler, load_memories, save_memories)
 
 
 class LocalAppHandler(app.AppHandler):
@@ -93,6 +46,7 @@ class LocalAppHandler(app.AppHandler):
                 insert = (
                     b'<link rel="stylesheet" href="/chat-history.css">'
                     b'<script src="/chat-history.js" defer></script>'
+                    b'<script src="/user-memory.js" defer></script>'
                 )
                 body = body.replace(b"</head>", insert + b"</head>")
             except OSError:
@@ -116,6 +70,9 @@ class LocalAppHandler(app.AppHandler):
             return
         if self.path == "/chat-history.css":
             self._send_static("chat-history.css", "text/css; charset=utf-8")
+            return
+        if self.path == "/user-memory.js":
+            self._send_static("user-memory.js", "text/javascript; charset=utf-8")
             return
         if self.path == "/api/chats":
             try:
