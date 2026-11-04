@@ -1156,6 +1156,9 @@ class TelegramFormattingTests(unittest.TestCase):
 
 
 class WebSearchToolTests(unittest.TestCase):
+    def setUp(self):
+        app.SEARCH_CACHE.clear()
+
     def test_search_falls_back_to_bing_when_duckduckgo_is_blocked(self):
         challenge = FakeStatusHtmlResponse(
             "<html><body>Please complete the following challenge</body></html>",
@@ -1368,6 +1371,28 @@ class WebSearchToolTests(unittest.TestCase):
         self.assertEqual(request.full_url, app.DUCKDUCKGO_SEARCH_URL)
         self.assertIn(b"q=meteo+Roma", request.data)
 
+    def test_repeated_query_is_served_from_the_cache(self):
+        page = """
+        <div class="result">
+          <a class="result__a"
+             href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Ftorino">
+            Meteo Torino
+          </a>
+          <a class="result__snippet">Sole e 22 gradi.</a>
+        </div>
+        """
+        with (
+            patch.multiple(
+                app, EXA_API_KEY="", TAVILY_API_KEY="", SERPER_API_KEY="",
+            ),
+            patch("app.urlopen", return_value=FakeHtmlResponse(page)) as search_call,
+        ):
+            first = app.execute_app_tool("web_search", {"query": "meteo Torino"})
+            second = app.execute_app_tool("web_search", {"query": "  meteo   Torino "})
+        self.assertEqual(search_call.call_count, 1)
+        self.assertEqual(first["results"], second["results"])
+        self.assertIn("non ripetuta", second["note"].lower())
+
     def test_search_uses_exa_when_key_is_configured(self):
         payload = {
             "results": [{
@@ -1404,6 +1429,23 @@ class WebSearchToolTests(unittest.TestCase):
             with self.subTest(arguments=arguments):
                 with self.assertRaises(ValueError):
                     app.execute_app_tool("web_search", arguments)
+
+
+class ToolLimitTests(unittest.TestCase):
+    CONFIG = {"provider": "openai", "model": "gpt-test", "api_key": "chiave"}
+
+    def test_final_answer_is_requested_without_tools(self):
+        payload = {"choices": [{"message": {"content": "Ecco cosa ho trovato."}}]}
+        with patch("app.urlopen", return_value=FakeResponse(payload)) as request_call:
+            reply = app._final_answer_without_tools(self.CONFIG, [], None)
+        self.assertEqual(reply, "Ecco cosa ho trovato.")
+        body = json.loads(request_call.call_args.args[0].data)
+        self.assertFalse(body.get("tools"))
+
+    def test_final_answer_falls_back_when_the_provider_fails(self):
+        with patch("app.urlopen", side_effect=OSError("rete assente")):
+            reply = app._final_answer_without_tools(self.CONFIG, [], None)
+        self.assertEqual(reply, app.TOOL_LIMIT_REPLY)
 
 
 if __name__ == "__main__":
