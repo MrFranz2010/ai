@@ -631,6 +631,7 @@ class AppRouteTests(unittest.TestCase):
             "model": "gpt-4o-mini",
             "api_key": "test-secret",
             "api_keys": {"openai": "test-secret"},
+            "models": {"openai": "gpt-4o-mini"},
             "base_url": "",
             "terminal_enabled": False,
             "approval_mode": "manual",
@@ -753,6 +754,25 @@ class AppRouteTests(unittest.TestCase):
                 self.assertEqual(response.exception.code, 400)
                 response.exception.close()
 
+    def test_config_remembers_model_per_provider(self):
+        self.request_json("/api/config", {
+            "provider": "mistral",
+            "model": "mistral-large-latest",
+            "api_key": "mistral-secret",
+        })
+        self.request_json("/api/config", {
+            "provider": "openai",
+            "model": "gpt-4.1-mini",
+            "api_key": "openai-secret",
+        })
+        with urlopen(f"{self.base_url}/api/config") as response:
+            public_config = json.loads(response.read())
+        self.assertEqual(public_config["model"], "gpt-4.1-mini")
+        self.assertEqual(public_config["models"], {
+            "mistral": "mistral-large-latest",
+            "openai": "gpt-4.1-mini",
+        })
+
     def test_legacy_config_file_keeps_its_api_key(self):
         app.CONFIG_FILE.write_text(json.dumps({
             "provider": "google",
@@ -768,6 +788,7 @@ class AppRouteTests(unittest.TestCase):
         loaded = app.load_config_file()
         self.assertEqual(loaded["api_key"], "legacy-secret")
         self.assertEqual(loaded["api_keys"], {"google": "legacy-secret"})
+        self.assertEqual(loaded["models"], {"google": "gemini-2.0-flash"})
 
     def test_public_config_reports_search_configuration(self):
         with patch.multiple(
