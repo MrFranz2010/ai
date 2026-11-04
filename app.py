@@ -49,7 +49,29 @@ MAX_WORKFLOWS = 30
 MAX_WORKFLOW_NAME_LENGTH = 80
 MAX_WORKFLOW_PROMPT_LENGTH = 4000
 APP_DIR = Path(__file__).resolve().parent
-PROVIDERS = {"openai", "anthropic", "google", "openrouter"}
+PROVIDERS = {
+    "openai", "anthropic", "google", "openrouter",
+    "mistral", "groq", "deepseek", "xai", "custom",
+}
+OPENAI_COMPATIBLE_ENDPOINTS = {
+    "openai": "https://api.openai.com/v1/chat/completions",
+    "mistral": "https://api.mistral.ai/v1/chat/completions",
+    "groq": "https://api.groq.com/openai/v1/chat/completions",
+    "deepseek": "https://api.deepseek.com/v1/chat/completions",
+    "xai": "https://api.x.ai/v1/chat/completions",
+}
+OPENAI_COMPATIBLE_PROVIDERS = set(OPENAI_COMPATIBLE_ENDPOINTS) | {
+    "openrouter", "custom",
+}
+IMAGE_PROVIDERS = {"openai", "openrouter", "mistral", "xai", "custom"}
+MAX_BASE_URL_LENGTH = 300
+BASE_URL_PATTERN = re.compile(
+    r"^https?://([A-Za-z0-9.-]+|\[[0-9a-fA-F:]+\])(:[0-9]{1,5})?"
+    r"(/[A-Za-z0-9._~%+-]+)*$"
+)
+LOOPBACK_BASE_URL_PATTERN = re.compile(
+    r"^http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]{1,5})?(/|$)"
+)
 OPENROUTER_FREE_MODEL = "openrouter/free"
 MODEL_PATTERN = re.compile(r"^[A-Za-z0-9._:/-]{1,120}$")
 MAX_TOOL_ROUNDS = 4
@@ -340,7 +362,7 @@ def _provider_user_message(provider, message):
     attachments = message.get("attachments", [])
     text = _message_attachment_text(message)
     images = [item for item in attachments if item["kind"] == "image"]
-    if provider in {"openai", "openrouter"} and attachments:
+    if provider in IMAGE_PROVIDERS and attachments:
         if not images:
             return {"role": "user", "content": text}
         content = [{"type": "text", "text": text or "Esamina le immagini allegate."}]
@@ -1488,6 +1510,42 @@ def google_schema_value(schema):
     return converted
 
 
+def normalize_base_url(value):
+    """Validate the base URL of an OpenAI-compatible endpoint."""
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ValueError("Indirizzo API non valido.")
+    value = value.strip().rstrip("/")
+    if not value:
+        return ""
+    if len(value) > MAX_BASE_URL_LENGTH:
+        raise ValueError("L'indirizzo API è troppo lungo.")
+    suffix = "/chat/completions"
+    if value.endswith(suffix):
+        value = value[: -len(suffix)].rstrip("/")
+    if not BASE_URL_PATTERN.fullmatch(value):
+        raise ValueError(
+            "L'indirizzo API deve iniziare con https:// (o http:// per "
+            "localhost) e non contenere parametri o credenziali."
+        )
+    if value.startswith("http://") and not LOOPBACK_BASE_URL_PATTERN.match(value):
+        raise ValueError(
+            "Usa https:// per gli indirizzi API remoti; http:// è consentito "
+            "solo per localhost."
+        )
+    return value
+
+
+def custom_chat_endpoint(base_url):
+    base = normalize_base_url(base_url)
+    if not base:
+        raise ValueError(
+            "Inserisci l'indirizzo API del provider personalizzato."
+        )
+    return f"{base}/chat/completions"
+
+
 def validate_config(
     provider,
     model,
@@ -1500,6 +1558,7 @@ def validate_config(
     tts_auto_play=False,
     api_keys=None,
     notifications_enabled=False,
+    base_url=None,
 ):
     if not isinstance(provider, str) or provider not in PROVIDERS:
         raise ValueError("Provider non supportato nel file di configurazione.")
@@ -1507,6 +1566,11 @@ def validate_config(
         raise ValueError("Nome modello non valido nel file di configurazione.")
     if provider == "openrouter" and model != OPENROUTER_FREE_MODEL:
         raise ValueError("Modello OpenRouter non valido nel file di configurazione.")
+    base_url = normalize_base_url(base_url)
+    if provider == "custom" and not base_url:
+        raise ValueError(
+            "Inserisci l'indirizzo API del provider personalizzato."
+        )
     saved_keys = collect_api_keys(provider, api_key, api_keys)
     api_key = saved_keys[provider]
     if not isinstance(terminal_enabled, bool):
@@ -1547,6 +1611,7 @@ def validate_config(
         "model": model,
         "api_key": api_key,
         "api_keys": saved_keys,
+        "base_url": base_url,
         "terminal_enabled": terminal_enabled,
         "approval_mode": approval_mode,
         "workspace": str(workspace_path.resolve()),
@@ -1563,6 +1628,7 @@ def default_config():
         "model": None,
         "api_key": None,
         "api_keys": {},
+        "base_url": "",
         "terminal_enabled": False,
         "approval_mode": "manual",
         "workspace": str(APP_DIR),
@@ -1600,6 +1666,7 @@ def load_config_file():
             saved.get("tts_auto_play", False),
             saved.get("api_keys", {}),
             saved.get("notifications_enabled", False),
+            saved.get("base_url", ""),
         )
     except ValueError as error:
         raise RuntimeError(f"File di configurazione non valido: {error}") from error
@@ -1783,6 +1850,7 @@ def _final_answer_without_tools(active_config, messages, system_prompt):
             system_prompt=system_prompt,
             enable_tools=False,
             enable_app_tools=False,
+            base_url=active_config.get("base_url", ""),
         )
         with urlopen(request, timeout=60) as response:
             result = json.loads(response.read().decode("utf-8"))
@@ -1805,7 +1873,7 @@ def _final_answer_without_tools(active_config, messages, system_prompt):
 
 def build_provider_request(
     provider, model, api_key, messages, system_prompt=None, enable_tools=False,
-    enable_app_tools=False,
+    enable_app_tools=False, base_url=None,
 ):
     tool_definitions = []
     if enable_tools:
@@ -1992,6 +2060,26 @@ def build_provider_request(
                 for tool in tool_definitions
             ]
             payload["tool_choice"] = "auto"
+    elif provider in OPENAI_COMPATIBLE_PROVIDERS:
+        url = (
+            custom_chat_endpoint(base_url) if provider == "custom"
+            else OPENAI_COMPATIBLE_ENDPOINTS[provider]
+        )
+        headers["Authorization"] = f"Bearer {api_key}"
+        compatible_messages = [
+            message for message in messages if message["role"] == "system"
+        ] + tool_messages
+        if system_prompt:
+            compatible_messages.insert(
+                0, {"role": "system", "content": system_prompt}
+            )
+        payload = {"model": model, "messages": compatible_messages}
+        if tool_definitions:
+            payload["tools"] = [
+                {"type": "function", "function": tool}
+                for tool in tool_definitions
+            ]
+            payload["tool_choice"] = "auto"
     else:
         raise ValueError("Provider non supportato.")
 
@@ -2004,7 +2092,7 @@ def build_provider_request(
 
 
 def extract_reply(provider, response):
-    if provider == "openai":
+    if provider in OPENAI_COMPATIBLE_PROVIDERS:
         return response["choices"][0]["message"]["content"]
     if provider == "anthropic":
         return "\n".join(
@@ -2017,13 +2105,11 @@ def extract_reply(provider, response):
             for part in response["candidates"][0]["content"]["parts"]
             if "text" in part
         )
-    if provider == "openrouter":
-        return response["choices"][0]["message"]["content"]
     raise ValueError("Provider non supportato.")
 
 
 def parse_tool_response(provider, response):
-    if provider in {"openai", "openrouter"}:
+    if provider in OPENAI_COMPATIBLE_PROVIDERS:
         message = response["choices"][0]["message"]
         tool_calls = message.get("tool_calls", [])
         normalized_calls = []
@@ -2395,6 +2481,7 @@ def run_chat_job(job_id, messages, active_config):
                 system_prompt=system_prompt,
                 enable_tools=active_config["terminal_enabled"],
                 enable_app_tools=active_config.get("app_tools_enabled", True),
+                base_url=active_config.get("base_url", ""),
             )
             with urlopen(request, timeout=60) as response:
                 result = json.loads(response.read().decode("utf-8"))
@@ -3054,7 +3141,7 @@ def execute_app_tool(name, arguments):
                 safe_config = {
                     key: config[key]
                     for key in (
-                        "provider", "model", "terminal_enabled",
+                        "provider", "model", "base_url", "terminal_enabled",
                         "approval_mode", "wake_phrase", "tts_auto_play",
                         "notifications_enabled",
                     )
@@ -3309,6 +3396,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 public_config = {
                     "provider": config["provider"],
                     "model": config["model"],
+                    "base_url": config["base_url"],
                     "configured": bool(config["api_key"]),
                     "configured_providers": configured_providers(config),
                     "search_configured": search_configured(),
@@ -3464,6 +3552,9 @@ class AppHandler(BaseHTTPRequestHandler):
                 "OpenRouter usa il router gratuito automatico; "
                 "il modello deve essere openrouter/free."
             )
+        base_url = data.get("base_url", current_config.get("base_url", ""))
+        if base_url is not None and not isinstance(base_url, str):
+            raise ValueError("Indirizzo API non valido.")
         submitted_key = data.get("api_key")
         if submitted_key is not None and not isinstance(submitted_key, str):
             raise ValueError("Chiave API non valida.")
@@ -3493,6 +3584,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 "notifications_enabled",
                 current_config.get("notifications_enabled", False),
             ),
+            base_url=base_url,
         )
         with config_lock:
             try:

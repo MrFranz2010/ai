@@ -171,12 +171,22 @@
               <option value="openai">OpenAI</option>
               <option value="anthropic">Anthropic</option>
               <option value="google">Google Gemini</option>
+              <option value="mistral">Mistral AI</option>
+              <option value="groq">Groq</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="xai">xAI (Grok)</option>
               <option value="openrouter">OpenRouter · modelli gratuiti automatici</option>
+              <option value="custom">API compatibile OpenAI</option>
             </select>
 
             <label for="model">Nome del modello</label>
             <input id="model" name="model" value="gpt-4o-mini" maxlength="120" required>
             <p class="field-help" id="model-help">Il nome deve corrispondere a un modello disponibile nel tuo account.</p>
+
+            <label for="base-url" id="base-url-label" hidden>Indirizzo API</label>
+            <input id="base-url" name="base_url" type="url" autocomplete="off"
+              maxlength="300" placeholder="https://api.example.com/v1" hidden>
+            <p class="field-help" id="base-url-help" hidden>Base dell'API compatibile OpenAI: NOKK aggiunge /chat/completions. Serve https://, mentre http:// funziona solo per un server locale come Ollama o LM Studio.</p>
 
             <label for="api-key">Chiave API</label>
             <input id="api-key" name="api_key" type="password" autocomplete="off"

@@ -631,6 +631,7 @@ class AppRouteTests(unittest.TestCase):
             "model": "gpt-4o-mini",
             "api_key": "test-secret",
             "api_keys": {"openai": "test-secret"},
+            "base_url": "",
             "terminal_enabled": False,
             "approval_mode": "manual",
             "workspace": str(Path(app.APP_DIR).resolve()),
@@ -714,6 +715,43 @@ class AppRouteTests(unittest.TestCase):
         saved = json.loads(app.CONFIG_FILE.read_text(encoding="utf-8"))
         self.assertEqual(saved["provider"], "openai")
         self.assertEqual(saved["api_keys"], {"openai": "openai-secret"})
+
+    def test_config_saves_custom_provider_base_url(self):
+        self.request_json("/api/config", {
+            "provider": "custom",
+            "model": "my-model",
+            "api_key": "custom-secret",
+            "base_url": "https://llm.example.com/v1/",
+        })
+        with urlopen(f"{self.base_url}/api/config") as response:
+            public_config = json.loads(response.read())
+        self.assertEqual(public_config["provider"], "custom")
+        self.assertEqual(public_config["base_url"], "https://llm.example.com/v1")
+        self.assertEqual(public_config["configured_providers"], ["custom"])
+        self.assertNotIn("api_key", public_config)
+
+    def test_config_rejects_insecure_custom_base_url(self):
+        for base_url in (
+            "",
+            "http://api.example.com/v1",
+            "https://llm.example.com/v1?key=1",
+        ):
+            with self.subTest(base_url=base_url):
+                request = Request(
+                    f"{self.base_url}/api/config",
+                    data=json.dumps({
+                        "provider": "custom",
+                        "model": "my-model",
+                        "api_key": "custom-secret",
+                        "base_url": base_url,
+                    }).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with self.assertRaises(HTTPError) as response:
+                    urlopen(request)
+                self.assertEqual(response.exception.code, 400)
+                response.exception.close()
 
     def test_legacy_config_file_keeps_its_api_key(self):
         app.CONFIG_FILE.write_text(json.dumps({
