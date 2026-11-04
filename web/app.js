@@ -107,6 +107,14 @@ const providerLabels = {
   openrouter: "OpenRouter gratuito",
 };
 
+let configuredProviders = new Set();
+
+function apiKeyPlaceholder(provider) {
+  return configuredProviders.has(provider)
+    ? "Chiave salvata per questo provider · lascia vuoto per mantenerla"
+    : "Incolla la chiave API";
+}
+
 function updateProviderFields() {
   const isOpenRouter = providerSelect.value === "openrouter";
   modelInput.value = providerDefaults[providerSelect.value];
@@ -115,8 +123,9 @@ function updateProviderFields() {
     ? "OpenRouter sceglie automaticamente un modello gratuito disponibile. Non usa modelli a pagamento."
     : "Il nome deve corrispondere a un modello disponibile nel tuo account.";
   apiKeyHelp.textContent = isOpenRouter
-    ? "Crea una chiave su openrouter.ai/keys. Non inserirla in una chat."
-    : "Non inserire la chiave in una chat. Le chiamate al provider partono dal backend.";
+    ? "Crea una chiave su openrouter.ai/keys. Non inserirla in una chat. La chiave resta salvata per ogni provider."
+    : "Non inserire la chiave in una chat. Le chiamate al provider partono dal backend. La chiave resta salvata per ogni provider.";
+  apiKeyInput.placeholder = apiKeyPlaceholder(providerSelect.value);
 }
 
 function openSettings(sectionName = "") {
@@ -1816,6 +1825,8 @@ async function loadConfig() {
   if (!response.ok) throw new Error("Non riesco a leggere la configurazione.");
   const saved = await response.json();
   workflows = saved.workflows || [];
+  configuredProviders = new Set(saved.configured_providers || []);
+  if (saved.configured && saved.provider) configuredProviders.add(saved.provider);
   wakePhraseInput.value = saved.wake_phrase || "Nok";
   ttsAutoPlayInput.checked = saved.tts_auto_play === true;
   ttsAutoPlayInput.disabled = !(
@@ -1831,9 +1842,7 @@ async function loadConfig() {
   systemPromptInput.value = saved.system_prompt || "";
   terminalEnabledInput.checked = saved.terminal_enabled === true;
   approvalModeSelect.value = saved.approval_mode || "manual";
-  apiKeyInput.placeholder = saved.configured
-    ? "Lascia vuoto per mantenere la chiave salvata"
-    : "Incolla la chiave API";
+  apiKeyInput.placeholder = apiKeyPlaceholder(providerSelect.value);
   setConfigured(saved.configured, saved.provider, saved.model);
   renderWorkflows();
   updateVoiceButtons();
@@ -2055,6 +2064,8 @@ settingsForm.addEventListener("submit", async (event) => {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "Configurazione non riuscita.");
     apiKeyInput.value = "";
+    configuredProviders.add(providerSelect.value);
+    apiKeyInput.placeholder = apiKeyPlaceholder(providerSelect.value);
     setConfigured(
       true,
       providerSelect.value,

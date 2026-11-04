@@ -492,6 +492,39 @@ def load_workflows_file():
         ) from error
 
 
+def collect_api_keys(provider, api_key, api_keys=None):
+    """Return the saved key of every provider, keeping the active one in sync."""
+    if api_keys is None:
+        api_keys = {}
+    if not isinstance(api_keys, dict):
+        raise ValueError(
+            "Archivio delle chiavi API non valido nel file di configurazione."
+        )
+    saved_keys = {}
+    for name, value in api_keys.items():
+        if name not in PROVIDERS or value is None:
+            continue
+        if not isinstance(value, str):
+            raise ValueError("Chiave API non valida nel file di configurazione.")
+        if value.strip():
+            saved_keys[name] = value.strip()
+    if isinstance(api_key, str) and api_key.strip():
+        saved_keys[provider] = api_key.strip()
+    if provider not in saved_keys:
+        raise ValueError("Chiave API mancante nel file di configurazione.")
+    return saved_keys
+
+
+def configured_providers(saved):
+    """List providers with a stored key without exposing the keys themselves."""
+    names = {
+        name for name, key in (saved.get("api_keys") or {}).items() if key
+    }
+    if saved.get("api_key") and saved.get("provider"):
+        names.add(saved["provider"])
+    return sorted(names)
+
+
 def validate_config(
     provider,
     model,
@@ -502,6 +535,7 @@ def validate_config(
     system_prompt="",
     wake_phrase="Nok",
     tts_auto_play=False,
+    api_keys=None,
 ):
     if not isinstance(provider, str) or provider not in PROVIDERS:
         raise ValueError("Provider non supportato nel file di configurazione.")
@@ -509,8 +543,8 @@ def validate_config(
         raise ValueError("Nome modello non valido nel file di configurazione.")
     if provider == "openrouter" and model != OPENROUTER_FREE_MODEL:
         raise ValueError("Modello OpenRouter non valido nel file di configurazione.")
-    if not isinstance(api_key, str) or not api_key.strip():
-        raise ValueError("Chiave API mancante nel file di configurazione.")
+    saved_keys = collect_api_keys(provider, api_key, api_keys)
+    api_key = saved_keys[provider]
     if not isinstance(terminal_enabled, bool):
         raise ValueError("Impostazione terminale non valida.")
     if not isinstance(approval_mode, str) or approval_mode not in {
@@ -545,7 +579,8 @@ def validate_config(
     return {
         "provider": provider,
         "model": model,
-        "api_key": api_key.strip(),
+        "api_key": api_key,
+        "api_keys": saved_keys,
         "terminal_enabled": terminal_enabled,
         "approval_mode": approval_mode,
         "workspace": str(workspace_path.resolve()),
@@ -560,6 +595,7 @@ def default_config():
         "provider": None,
         "model": None,
         "api_key": None,
+        "api_keys": {},
         "terminal_enabled": False,
         "approval_mode": "manual",
         "workspace": str(APP_DIR),
@@ -594,6 +630,7 @@ def load_config_file():
             saved.get("system_prompt", ""),
             saved.get("wake_phrase", "Nok"),
             saved.get("tts_auto_play", False),
+            saved.get("api_keys", {}),
         )
     except ValueError as error:
         raise RuntimeError(f"File di configurazione non valido: {error}") from error
@@ -1803,6 +1840,7 @@ def execute_app_tool(name, arguments):
                     )
                 }
                 safe_config["configured"] = bool(config["api_key"])
+                safe_config["configured_providers"] = configured_providers(config)
             return safe_config
         if section == "workflows":
             with config_lock:
@@ -1949,6 +1987,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     "provider": config["provider"],
                     "model": config["model"],
                     "configured": bool(config["api_key"]),
+                    "configured_providers": configured_providers(config),
                     "terminal_enabled": config["terminal_enabled"],
                     "approval_mode": config["approval_mode"],
                     "workspace": config["workspace"],
@@ -2076,9 +2115,6 @@ class AppHandler(BaseHTTPRequestHandler):
             current_config = config.copy()
         provider = data.get("provider", current_config["provider"])
         model = data.get("model", current_config["model"])
-        api_key = data.get("api_key")
-        if not api_key and provider == current_config["provider"]:
-            api_key = current_config["api_key"]
         if provider not in PROVIDERS:
             raise ValueError("Seleziona un provider supportato.")
         if not isinstance(model, str) or not MODEL_PATTERN.fullmatch(model):
@@ -2088,8 +2124,20 @@ class AppHandler(BaseHTTPRequestHandler):
                 "OpenRouter usa il router gratuito automatico; "
                 "il modello deve essere openrouter/free."
             )
-        if not isinstance(api_key, str) or not api_key.strip():
-            raise ValueError("Inserisci la chiave API.")
+        submitted_key = data.get("api_key")
+        if submitted_key is not None and not isinstance(submitted_key, str):
+            raise ValueError("Chiave API non valida.")
+        api_keys = dict(current_config.get("api_keys") or {})
+        if submitted_key and submitted_key.strip():
+            api_keys[provider] = submitted_key.strip()
+        api_key = api_keys.get(provider)
+        if not api_key and provider == current_config["provider"]:
+            api_key = current_config["api_key"]
+        if not api_key:
+            raise ValueError(
+                "Inserisci la chiave API per il provider selezionato. "
+                "Le chiavi degli altri provider restano salvate."
+            )
         new_config = validate_config(
             provider,
             model,
@@ -2100,6 +2148,7 @@ class AppHandler(BaseHTTPRequestHandler):
             data.get("system_prompt", current_config["system_prompt"]),
             data.get("wake_phrase", current_config["wake_phrase"]),
             data.get("tts_auto_play", current_config["tts_auto_play"]),
+            api_keys,
         )
         with config_lock:
             try:
