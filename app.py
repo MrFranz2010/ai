@@ -2360,6 +2360,7 @@ def execute_app_tool(name, arguments):
                 }
                 safe_config["configured"] = bool(config["api_key"])
                 safe_config["configured_providers"] = configured_providers(config)
+                safe_config["search_configured"] = bool(SERPER_API_KEY)
             return safe_config
         if section == "workflows":
             with config_lock:
@@ -2526,6 +2527,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     "model": config["model"],
                     "configured": bool(config["api_key"]),
                     "configured_providers": configured_providers(config),
+                    "search_configured": bool(SERPER_API_KEY),
                     "terminal_enabled": config["terminal_enabled"],
                     "approval_mode": config["approval_mode"],
                     "workspace": config["workspace"],
