@@ -317,6 +317,30 @@ class ProviderTests(unittest.TestCase):
                         base_url=base_url,
                     )
 
+    def test_compatible_providers_drop_internal_message_fields(self):
+        messages = [{
+            "role": "user",
+            "content": "Quando è nato Fabrizio Corona?",
+            "attachments": [],
+            "created_at": 1700000000,
+        }]
+        for provider, extra in (
+            ("mistral", {}),
+            ("groq", {}),
+            ("deepseek", {}),
+            ("xai", {}),
+            ("custom", {"base_url": "https://llm.example.com/v1"}),
+        ):
+            with self.subTest(provider=provider):
+                request = build_provider_request(
+                    provider, "my-model", "secret", messages, **extra
+                )
+                payload = json.loads(request.data)
+                self.assertEqual(
+                    payload["messages"],
+                    [{"role": "user", "content": "Quando è nato Fabrizio Corona?"}],
+                )
+
     def test_auto_approval_only_accepts_restricted_read_commands(self):
         workspace = Path(__file__).resolve().parents[1]
         self.assertTrue(is_read_only_command("pwd", workspace))

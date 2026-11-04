@@ -1871,6 +1871,18 @@ def _final_answer_without_tools(active_config, messages, system_prompt):
     return TOOL_LIMIT_REPLY
 
 
+def _clean_provider_message(message):
+    """Drop NOKK-only fields: strict APIs reject unknown message keys."""
+    cleaned = {
+        key: message[key]
+        for key in ("role", "content", "name", "tool_call_id", "tool_calls")
+        if key in message
+    }
+    if "content" in cleaned and cleaned["content"] is None:
+        cleaned["content"] = ""
+    return cleaned
+
+
 def build_provider_request(
     provider, model, api_key, messages, system_prompt=None, enable_tools=False,
     enable_app_tools=False, base_url=None,
@@ -1961,7 +1973,7 @@ def build_provider_request(
                 "parts": [{"text": message.get("content") or ""}],
             })
         else:
-            tool_messages.append(message)
+            tool_messages.append(_clean_provider_message(message))
 
     if provider == "openai":
         url = "https://api.openai.com/v1/chat/completions"
