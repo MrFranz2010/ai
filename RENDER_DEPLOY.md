@@ -37,6 +37,20 @@ Set `SERPER_API_KEY` as a secret environment variable to enable the
 `google_search` tool. Without it the assistant still works and the tool reports
 that search is not configured. Search queries are sent to Serper.
 
+## Troubleshooting Google search
+
+- The Render service must deploy the `copilot/supabase-config-storage` branch.
+  `main` no longer contains `render_start.py` or `render.yaml`.
+- `sync: false` in `render.yaml` only asks for a value when the Blueprint is
+  applied. For an existing service add `SERPER_API_KEY` under **Environment**
+  and redeploy.
+- Startup logs show `Google search: configured` or
+  `not configured (set SERPER_API_KEY)`.
+- `GET /api/config` with Basic Authentication includes
+  `search_configured`; `false` means the running instance does not see the
+  variable.
+- HTTP 401 or 402 from the search service means an invalid key or no credits.
+
 ## Run locally
 
 `python app.py` still runs the app on `127.0.0.1:8000` with local JSON files and

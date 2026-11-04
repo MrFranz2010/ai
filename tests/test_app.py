@@ -549,6 +549,7 @@ class AppRouteTests(unittest.TestCase):
         with urlopen(f"{self.base_url}/api/config") as response:
             public_config = json.loads(response.read())
         self.assertTrue(public_config["configured"])
+        self.assertIsInstance(public_config["search_configured"], bool)
         self.assertNotIn("api_key", public_config)
         self.assertEqual(
             public_config["system_prompt"],
@@ -661,6 +662,12 @@ class AppRouteTests(unittest.TestCase):
         loaded = app.load_config_file()
         self.assertEqual(loaded["api_key"], "legacy-secret")
         self.assertEqual(loaded["api_keys"], {"google": "legacy-secret"})
+
+    def test_public_config_reports_search_configuration(self):
+        with patch.object(app, "SERPER_API_KEY", "test-serper-key"):
+            with urlopen(f"{self.base_url}/api/config") as response:
+                public_config = json.loads(response.read())
+        self.assertTrue(public_config["search_configured"])
 
     def test_config_rejects_system_prompt_over_limit(self):
         request = Request(

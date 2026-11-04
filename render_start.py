@@ -349,5 +349,10 @@ if __name__ == "__main__":
     app.HOST = "0.0.0.0"
     app.PORT = int(os.environ.get("PORT", "10000"))
     app.start_telegram_polling()
-    print(f"NOKK listening on {app.HOST}:{app.PORT}")
+    print(
+        "Google search: "
+        + ("configured" if app.SERPER_API_KEY else "not configured (set SERPER_API_KEY)"),
+        flush=True,
+    )
+    print(f"NOKK listening on {app.HOST}:{app.PORT}", flush=True)
     ThreadingHTTPServer((app.HOST, app.PORT), AuthenticatedAppHandler).serve_forever()
