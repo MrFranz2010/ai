@@ -251,6 +251,21 @@
               </div>
             </details>
 
+            <details class="settings-section">
+              <summary><span class="section-index">06</span><span>Dati e notifiche<small>Backup, calendario e avvisi</small></span></summary>
+              <div class="settings-section-body">
+                <label class="toggle-label" for="notifications-enabled">
+                  <input id="notifications-enabled" name="notifications_enabled" type="checkbox">
+                  <span>Avvisami per appuntamenti e attività in scadenza</span>
+                </label>
+                <p class="field-help">Le notifiche usano il browser e richiedono il permesso. Funzionano quando NOKK è aperto; su Telegram i promemoria arrivano anche dalla chat collegata.</p>
+                <div class="data-actions">
+                  <button class="telegram-action" id="export-data" type="button">Esporta dati (JSON)</button>
+                  <a class="telegram-action" href="/api/calendar.ics" download="nokk-calendario.ics">Esporta calendario (.ics)</a>
+                </div>
+              </div>
+            </details>
+
             <div class="settings-error" id="settings-error" role="alert" hidden></div>
             <div class="settings-actions">
               <button class="cancel-button" id="settings-cancel" type="button">Annulla</button>

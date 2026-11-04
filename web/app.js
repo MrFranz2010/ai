@@ -38,6 +38,8 @@ const workflowSave = document.querySelector("#workflow-save");
 const workflowTitle = document.querySelector("#workflow-form-title");
 const wakePhraseInput = document.querySelector("#wake-phrase");
 const ttsAutoPlayInput = document.querySelector("#tts-auto-play");
+const notificationsInput = document.querySelector("#notifications-enabled");
+const exportDataButton = document.querySelector("#export-data");
 const themeToggle = document.querySelector("#theme-toggle");
 const launcherOverlay = document.querySelector("#launcher-overlay");
 const launcherInput = document.querySelector("#launcher-input");
@@ -526,6 +528,7 @@ async function loadPlanner() {
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || "Calendario e attività non disponibili.");
   planner = result;
+  checkPlannerNotifications();
 }
 
 async function refreshNokkData() {
@@ -606,7 +609,10 @@ function renderCalendarApp(container) {
     selectedCalendarDate = dateKey(new Date());
     renderCalendarWindows();
   });
-  toolbar.append(previous, monthTitle, next, today);
+  const exportIcs = makeElement("a", "calendar-export", "Esporta .ics");
+  exportIcs.href = "/api/calendar.ics";
+  exportIcs.download = "nokk-calendario.ics";
+  toolbar.append(previous, monthTitle, next, today, exportIcs);
 
   const calendar = makeElement("div", "calendar-grid");
   calendar.setAttribute("role", "grid");
@@ -1820,6 +1826,67 @@ function finishApprovalCards(jobId) {
   }
 }
 
+function checkPlannerNotifications() {
+  if (
+    !notificationsInput?.checked
+    || !("Notification" in window)
+    || Notification.permission !== "granted"
+  ) return;
+  const now = Date.now();
+  const today = dateKey(new Date());
+  let sent = {};
+  try {
+    sent = JSON.parse(localStorage.getItem("nokk-notified") || "{}") || {};
+  } catch (error) {
+    sent = {};
+  }
+  const items = [];
+  for (const event of planner.events) {
+    const starts = new Date(event.starts_at).getTime();
+    if (starts >= now && starts <= now + 24 * 60 * 60 * 1000) {
+      items.push({
+        key: `event:${event.id}:${today}`,
+        title: "Appuntamento",
+        body: `${event.starts_at.slice(11, 16)} · ${event.title}`,
+      });
+    }
+  }
+  for (const task of planner.tasks) {
+    if (!task.completed && task.due_date && task.due_date <= today) {
+      items.push({
+        key: `task:${task.id}:${today}`,
+        title: "Attività",
+        body: `${task.title}${task.due_date === today ? " · scade oggi" : " · scaduta"}`,
+      });
+    }
+  }
+  for (const item of items.filter((entry) => !sent[entry.key]).slice(0, 3)) {
+    try {
+      new Notification(`NOKK · ${item.title}`, { body: item.body, tag: item.key });
+      sent[item.key] = true;
+    } catch (error) {
+      console.warn("Notifica non mostrata:", error);
+    }
+  }
+  try {
+    localStorage.setItem("nokk-notified", JSON.stringify(sent));
+  } catch (error) {
+    console.warn("Stato notifiche non salvato:", error);
+  }
+}
+
+async function exportData() {
+  const response = await fetch("/api/export");
+  if (!response.ok) throw new Error("Esportazione non riuscita.");
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "nokk-backup.json";
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 async function loadConfig() {
   const response = await fetch("/api/config");
   if (!response.ok) throw new Error("Non riesco a leggere la configurazione.");
@@ -1829,6 +1896,7 @@ async function loadConfig() {
   if (saved.configured && saved.provider) configuredProviders.add(saved.provider);
   wakePhraseInput.value = saved.wake_phrase || "Nok";
   ttsAutoPlayInput.checked = saved.tts_auto_play === true;
+  notificationsInput.checked = saved.notifications_enabled === true;
   ttsAutoPlayInput.disabled = !(
     "speechSynthesis" in window
     && "SpeechSynthesisUtterance" in window
@@ -1931,6 +1999,14 @@ newChatButton.addEventListener("click", () => {
 });
 
 providerSelect.addEventListener("change", updateProviderFields);
+notificationsInput.addEventListener("change", async () => {
+  if (notificationsInput.checked && "Notification" in window && Notification.permission === "default") {
+    await Notification.requestPermission();
+  }
+});
+exportDataButton.addEventListener("click", () => {
+  exportData().catch((error) => window.alert(error.message));
+});
 
 settingsOverlay.addEventListener("click", (event) => {
   if (event.target === settingsOverlay) closeSettings();
@@ -2059,6 +2135,7 @@ settingsForm.addEventListener("submit", async (event) => {
         system_prompt: systemPromptInput.value,
         wake_phrase: wakePhraseInput.value.trim(),
         tts_auto_play: ttsAutoPlayInput.checked,
+        notifications_enabled: notificationsInput.checked,
       }),
     });
     const result = await response.json();
@@ -2071,6 +2148,9 @@ settingsForm.addEventListener("submit", async (event) => {
       providerSelect.value,
       modelInput.value.trim(),
     );
+    if (notificationsInput.checked && "Notification" in window && Notification.permission === "default") {
+      await Notification.requestPermission();
+    }
     closeSettings();
     welcome.hidden = true;
     input.focus();
