@@ -49,6 +49,12 @@ class FakeHtmlResponse:
         return self.html.encode("utf-8")
 
 
+class FakeStatusHtmlResponse(FakeHtmlResponse):
+    def __init__(self, html, status=200):
+        super().__init__(html)
+        self.status = status
+
+
 class AppRouteTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -970,7 +976,128 @@ class AppRouteTests(unittest.TestCase):
 
 
 
+class TelegramFormattingTests(unittest.TestCase):
+    def test_markdown_is_converted_to_telegram_html(self):
+        converted = app.markdown_to_telegram_html(
+            "# Titolo\n\n"
+            "**grassetto** e *corsivo* con `codice`.\n\n"
+            "- uno\n- due\n\n"
+            "```python\nif a < b and c > d:\n    print('x')\n```\n\n"
+            "[Sito](https://example.com/a?b=1&c=2)\n\n"
+            "| Nome | Valore |\n| --- | --- |\n| A | 1 |"
+        )
+        self.assertIn("<b>Titolo</b>", converted)
+        self.assertIn("<b>grassetto</b>", converted)
+        self.assertIn("<i>corsivo</i>", converted)
+        self.assertIn("<code>codice</code>", converted)
+        self.assertIn("• uno", converted)
+        self.assertIn("<pre>if a &lt; b and c &gt; d:", converted)
+        self.assertIn(
+            '<a href="https://example.com/a?b=1&amp;c=2">Sito</a>', converted,
+        )
+        self.assertIn("Nome · Valore", converted)
+        self.assertNotIn("**", converted)
+        self.assertNotIn("| --- |", converted)
+
+    def test_telegram_message_uses_html_parse_mode(self):
+        with patch("app.telegram_api_call") as api_call:
+            app._send_telegram_message("token", 42, "**ciao** a tutti")
+        api_call.assert_called_once()
+        method = api_call.call_args.args[1]
+        payload = api_call.call_args.args[2]
+        self.assertEqual(method, "sendMessage")
+        self.assertEqual(payload["parse_mode"], "HTML")
+        self.assertEqual(payload["text"], "<b>ciao</b> a tutti")
+
+    def test_telegram_message_falls_back_to_plain_text(self):
+        with patch(
+            "app.telegram_api_call",
+            side_effect=[RuntimeError("Telegram ha rifiutato la richiesta API."), None],
+        ) as api_call:
+            app._send_telegram_message("token", 42, "**ciao**")
+        self.assertEqual(api_call.call_count, 2)
+        self.assertEqual(api_call.call_args.args[2]["text"], "**ciao**")
+        self.assertNotIn("parse_mode", api_call.call_args.args[2])
+
+    def test_telegram_message_splits_long_replies(self):
+        with patch("app.telegram_api_call") as api_call:
+            app._send_telegram_message("token", 42, "riga di prova\n" * 1500)
+        self.assertGreater(api_call.call_count, 1)
+        for call in api_call.call_args_list:
+            self.assertLessEqual(
+                len(call.args[2]["text"]), app.MAX_TELEGRAM_REPLY_LENGTH,
+            )
+
+
 class WebSearchToolTests(unittest.TestCase):
+    def test_search_falls_back_to_bing_when_duckduckgo_is_blocked(self):
+        challenge = FakeStatusHtmlResponse(
+            "<html><body>Please complete the following challenge</body></html>",
+            status=202,
+        )
+        target = base64.urlsafe_b64encode(
+            b"https://example.com/roma"
+        ).decode("utf-8")
+        bing_page = f"""
+        <ol id="b_results">
+          <li class="b_algo" data-id iid=SERP.1>
+            <h2><a target="_blank" href="https://www.bing.com/ck/a?!&amp;&amp;p=abc&amp;u=a1{target}&amp;ntb=1">
+              Meteo <strong>Roma</strong>
+            </a></h2>
+            <div class="b_caption"><p>Sole e 24 gradi.</p></div>
+          </li>
+          <li class="b_algo" data-id iid=SERP.2>
+            <h2><a href="https://www.example.org/altro">Altro risultato</a></h2>
+            <p>Secondo estratto.</p>
+          </li>
+        </ol>
+        """
+        with (
+            patch.multiple(
+                app, EXA_API_KEY="", TAVILY_API_KEY="", SERPER_API_KEY="",
+            ),
+            patch(
+                "app.urlopen",
+                side_effect=[challenge, FakeHtmlResponse(bing_page)],
+            ) as search_call,
+        ):
+            result = app.execute_app_tool("web_search", {
+                "query": " meteo Roma ",
+                "num_results": 3,
+            })
+        self.assertEqual(result["provider"], "bing")
+        self.assertEqual(result["results"], [
+            {
+                "title": "Meteo Roma",
+                "url": "https://example.com/roma",
+                "snippet": "Sole e 24 gradi.",
+            },
+            {
+                "title": "Altro risultato",
+                "url": "https://www.example.org/altro",
+                "snippet": "Secondo estratto.",
+            },
+        ])
+        bing_request = search_call.call_args_list[1].args[0]
+        self.assertTrue(bing_request.full_url.startswith(app.BING_SEARCH_URL))
+        self.assertIn("q=meteo+Roma", bing_request.full_url)
+
+    def test_search_reports_antibot_challenge_when_nothing_answers(self):
+        challenge = FakeStatusHtmlResponse("<html>challenge</html>", status=202)
+        with (
+            patch.multiple(
+                app, EXA_API_KEY="", TAVILY_API_KEY="", SERPER_API_KEY="",
+            ),
+            patch(
+                "app.urlopen",
+                side_effect=[challenge, FakeHtmlResponse("<html></html>")],
+            ),
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                app.execute_app_tool("web_search", {"query": "meteo Roma"})
+        self.assertIn("anti-bot", str(raised.exception))
+        self.assertIn("Bing", str(raised.exception))
+
     def test_search_works_without_any_api_key(self):
         page = """
         <div class="result">

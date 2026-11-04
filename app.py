@@ -165,8 +165,8 @@ APP_TOOLS = [
         "name": "web_search",
         "description": (
             "Cerca sul web e restituisce i risultati principali con titolo, URL "
-            "ed estratto. Usa DuckDuckGo senza chiave oppure Exa/Tavily se "
-            "configurati. Usalo per informazioni aggiornate o verificabili e "
+            "ed estratto. Usa DuckDuckGo o Bing senza chiave oppure Exa/Tavily "
+            "se configurati. Usalo per informazioni aggiornate o verificabili e "
             "cita gli URL restituiti."
         ),
         "parameters": {
@@ -195,6 +195,9 @@ TAVILY_SEARCH_URL = os.environ.get(
 ).rstrip("/")
 DUCKDUCKGO_SEARCH_URL = os.environ.get(
     "DUCKDUCKGO_SEARCH_URL", "https://html.duckduckgo.com/html/"
+)
+BING_SEARCH_URL = os.environ.get(
+    "BING_SEARCH_URL", "https://www.bing.com/search"
 )
 MAX_SEARCH_QUERY_LENGTH = 400
 MAX_SEARCH_RESULTS = 8
@@ -687,6 +690,73 @@ class _DuckDuckGoParser(HTMLParser):
             self.results[-1]["snippet"] += data
 
 
+class _BingParser(HTMLParser):
+    """Extract title, link and snippet from Bing's result blocks."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.results = []
+        self._current = None
+        self._depth = 0
+        self._in_heading = False
+        self._in_title = False
+        self._in_snippet = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "li":
+            if self._current is not None:
+                self._depth += 1
+            elif "b_algo" in (dict(attrs).get("class") or "").split():
+                self._current = {"title": "", "url": "", "snippet": ""}
+                self._depth = 0
+            return
+        if self._current is None:
+            return
+        if tag == "h2":
+            self._in_heading = True
+        elif tag == "a":
+            href = dict(attrs).get("href") or ""
+            if not href:
+                return
+            if self._in_heading:
+                # The heading link is the result: drop any site name or
+                # breadcrumb captured from the smaller links before it.
+                self._current["url"] = href
+                self._current["title"] = ""
+                self._in_title = True
+            elif not self._current["url"]:
+                self._current["url"] = href
+                self._in_title = True
+        elif tag == "p" and self._current["url"] and not self._current["snippet"]:
+            self._in_snippet = True
+
+    def handle_endtag(self, tag):
+        if tag == "li":
+            if self._current is None:
+                return
+            if self._depth:
+                self._depth -= 1
+            else:
+                self.results.append(self._current)
+                self._current = None
+                self._in_title = False
+                self._in_snippet = False
+        elif tag in {"a", "h2"}:
+            self._in_title = False
+            if tag == "h2":
+                self._in_heading = False
+        elif tag == "p":
+            self._in_snippet = False
+
+    def handle_data(self, data):
+        if self._current is None:
+            return
+        if self._in_title:
+            self._current["title"] += data
+        elif self._in_snippet:
+            self._current["snippet"] += data
+
+
 def _normalize_search_result(title, url, snippet):
     if not isinstance(url, str):
         return None
@@ -858,6 +928,7 @@ def _duckduckgo_search(query, num_results):
     )
     try:
         with urlopen(request, timeout=20) as response:
+            status = getattr(response, "status", 200)
             page = response.read(2_000_000).decode("utf-8", "replace")
     except HTTPError as error:
         code = error.code
@@ -871,6 +942,11 @@ def _duckduckgo_search(query, num_results):
         ) from None
     except (OSError, TimeoutError):
         raise RuntimeError("Timeout durante la ricerca con DuckDuckGo.") from None
+    if status == 202 or "anomaly.js" in page or "bots use DuckDuckGo too" in page:
+        raise RuntimeError(
+            "DuckDuckGo ha richiesto una verifica anti-bot e ha bloccato "
+            "la ricerca automatica."
+        )
     parser = _DuckDuckGoParser()
     parser.feed(page)
     results = []
@@ -892,6 +968,82 @@ def _duckduckgo_search(query, num_results):
     return results
 
 
+def _bing_target(url):
+    """Resolve the real destination of a Bing result link."""
+    if not isinstance(url, str):
+        return None
+    target = url.strip()
+    if target.startswith("//"):
+        target = "https:" + target
+    parsed = urlsplit(target)
+    if parsed.hostname in {"bing.com", "www.bing.com"}:
+        redirect = parse_qs(parsed.query).get("u", [""])[0]
+        if redirect.startswith("a1"):
+            encoded = redirect[2:]
+            encoded += "=" * (-len(encoded) % 4)
+            try:
+                decoded = base64.urlsafe_b64decode(encoded).decode("utf-8")
+            except (ValueError, binascii.Error, UnicodeDecodeError):
+                return None
+            if decoded.startswith(("http://", "https://")):
+                return decoded
+        return None
+    if not target.startswith(("http://", "https://")):
+        return None
+    return target
+
+
+def _bing_search(query, num_results):
+    request = Request(
+        BING_SEARCH_URL
+        + "?"
+        + urlencode({"q": query, "mkt": "it-IT", "setlang": "it"}),
+        headers={
+            "Accept": "text/html",
+            "Accept-Language": "it-IT,it;q=0.9,en;q=0.6",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0 Safari/537.36"
+            ),
+        },
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            page = response.read(2_000_000).decode("utf-8", "replace")
+    except HTTPError as error:
+        code = error.code
+        error.close()
+        raise RuntimeError(
+            f"Bing ha rifiutato la richiesta (HTTP {code})."
+        ) from None
+    except URLError:
+        raise RuntimeError(
+            "Impossibile raggiungere Bing. Controlla la connessione."
+        ) from None
+    except (OSError, TimeoutError):
+        raise RuntimeError("Timeout durante la ricerca con Bing.") from None
+    parser = _BingParser()
+    parser.feed(page)
+    results = []
+    seen = set()
+    for item in parser.results:
+        target = _bing_target(item.get("url"))
+        result = _normalize_search_result(
+            item.get("title"), target, item.get("snippet"),
+        )
+        if result and result["url"] not in seen:
+            seen.add(result["url"])
+            results.append(result)
+        if len(results) >= num_results:
+            break
+    if not results:
+        raise RuntimeError(
+            "Bing non ha restituito risultati (possibile blocco temporaneo)."
+        )
+    return results
+
+
 def search_providers():
     providers = []
     if EXA_API_KEY:
@@ -899,6 +1051,7 @@ def search_providers():
     if TAVILY_API_KEY:
         providers.append("tavily")
     providers.append("duckduckgo")
+    providers.append("bing")
     if SERPER_API_KEY:
         providers.append("serper")
     return providers
@@ -929,6 +1082,7 @@ def web_search(query, num_results=DEFAULT_SEARCH_RESULTS):
         "exa": "Exa",
         "tavily": "Tavily",
         "duckduckgo": "DuckDuckGo",
+        "bing": "Bing",
         "serper": "Google/Serper",
     }
     errors = []
@@ -940,6 +1094,8 @@ def web_search(query, num_results=DEFAULT_SEARCH_RESULTS):
                 results = _tavily_search(clean_query, num_results)
             elif provider == "serper":
                 results = _serper_search(clean_query, num_results)
+            elif provider == "bing":
+                results = _bing_search(clean_query, num_results)
             else:
                 results = _duckduckgo_search(clean_query, num_results)
         except RuntimeError as error:
@@ -954,7 +1110,7 @@ def web_search(query, num_results=DEFAULT_SEARCH_RESULTS):
             }
         errors.append(f"{labels[provider]}: nessun risultato.")
     raise RuntimeError(
-        "Ricerca web non disponibile. " + " | ".join(errors[-4:])
+        "Ricerca web non disponibile. " + " | ".join(errors)
     )
 
 
@@ -1984,9 +2140,10 @@ def run_chat_job(job_id, messages, active_config):
         )
         app_prompt += (
             " You can use web_search to look up current or external information "
-            "on the web. It uses DuckDuckGo without an API key and optionally "
-            "Exa or Tavily when configured. Cite the returned URLs and never "
-            "invent results. Search queries are sent to the search provider."
+            "on the web. It uses DuckDuckGo and falls back to Bing without an "
+            "API key, plus optionally Exa or Tavily when configured. Cite the "
+            "returned URLs and never invent results. Search queries are sent "
+            "to the search provider."
         )
         system_prompt = "\n\n".join(
             part for part in (system_prompt, app_prompt) if part
@@ -2168,16 +2325,182 @@ def run_chat_job(job_id, messages, active_config):
         )
 
 
+_TELEGRAM_INLINE_CODE = re.compile(r"`([^`\n]+)`")
+_TELEGRAM_BOLD = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*")
+_TELEGRAM_STRIKE = re.compile(r"~~(?=\S)(.+?)(?<=\S)~~")
+_TELEGRAM_ITALIC_STAR = re.compile(
+    r"(?<![\w*])\*(?=\S)([^*\n]+?)(?<=\S)\*(?![\w*])"
+)
+_TELEGRAM_ITALIC_UNDERSCORE = re.compile(
+    r"(?<![\w])_(?=\S)([^_\n]+?)(?<=\S)_(?![\w])"
+)
+_TELEGRAM_LINK_URL = re.compile(r"\]\((https?://[^\s)]+)\)")
+_TELEGRAM_LINK = re.compile(r"\[([^\]\n]+)\]\((\d+)\x02\)")
+_TELEGRAM_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$")
+_TELEGRAM_RULE = re.compile(r"^\s{0,3}([-*_])(?:\s*\1){2,}\s*$")
+_TELEGRAM_BULLET = re.compile(r"^(\s*)[-*+]\s+(.*)$")
+_TELEGRAM_QUOTE = re.compile(r"^\s{0,3}>\s?(.*)$")
+_TELEGRAM_TABLE_RULE = re.compile(r"^:?-{2,}:?$")
+
+
+def _telegram_escape(text):
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _telegram_inline(text):
+    """Convert inline Markdown of an already escaped line into Telegram HTML."""
+    codes = []
+
+    def stash_code(match):
+        codes.append(match.group(1))
+        return f"\x01{len(codes) - 1}\x01"
+
+    text = _TELEGRAM_INLINE_CODE.sub(stash_code, text)
+    urls = []
+
+    def stash_url(match):
+        urls.append(match.group(1))
+        return f"]({len(urls) - 1}\x02)"
+
+    text = _TELEGRAM_LINK_URL.sub(stash_url, text)
+    text = _TELEGRAM_BOLD.sub(r"<b>\1</b>", text)
+    text = _TELEGRAM_STRIKE.sub(r"<s>\1</s>", text)
+    text = _TELEGRAM_ITALIC_STAR.sub(r"<i>\1</i>", text)
+    text = _TELEGRAM_ITALIC_UNDERSCORE.sub(r"<i>\1</i>", text)
+    text = _TELEGRAM_LINK.sub(
+        lambda match: '<a href="{}">{}</a>'.format(
+            urls[int(match.group(2))].replace('"', "&quot;"), match.group(1),
+        ),
+        text,
+    )
+    return re.sub(
+        r"\x01(\d+)\x01",
+        lambda match: "<code>{}</code>".format(codes[int(match.group(1))]),
+        text,
+    )
+
+
+def markdown_to_telegram_html(text):
+    """Turn assistant Markdown into the HTML subset Telegram can render."""
+    if not isinstance(text, str):
+        text = ""
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    output = []
+    code_lines = []
+    in_code = False
+    for line in lines:
+        if line.strip().startswith("```"):
+            if in_code:
+                output.append(
+                    "<pre>" + _telegram_escape("\n".join(code_lines)) + "</pre>"
+                )
+                code_lines = []
+                in_code = False
+            else:
+                in_code = True
+            continue
+        if in_code:
+            code_lines.append(line)
+            continue
+        if not line.strip():
+            output.append("")
+            continue
+        heading = _TELEGRAM_HEADING.match(line)
+        if heading:
+            output.append(
+                "<b>" + _telegram_inline(_telegram_escape(heading.group(1))) + "</b>"
+            )
+            continue
+        if _TELEGRAM_RULE.match(line):
+            output.append("─" * 12)
+            continue
+        stripped = line.strip()
+        if stripped.startswith("|") and stripped.endswith("|"):
+            cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+            if cells and all(
+                _TELEGRAM_TABLE_RULE.match(cell) for cell in cells if cell
+            ):
+                continue
+            output.append(
+                " · ".join(
+                    _telegram_inline(_telegram_escape(cell)) for cell in cells if cell
+                )
+            )
+            continue
+        bullet = _TELEGRAM_BULLET.match(line)
+        if bullet:
+            output.append(
+                bullet.group(1)
+                + "• "
+                + _telegram_inline(_telegram_escape(bullet.group(2)))
+            )
+            continue
+        quote = _TELEGRAM_QUOTE.match(line)
+        if quote:
+            output.append(
+                "<blockquote>"
+                + _telegram_inline(_telegram_escape(quote.group(1)))
+                + "</blockquote>"
+            )
+            continue
+        output.append(_telegram_inline(_telegram_escape(line)))
+    if in_code:
+        output.append("<pre>" + _telegram_escape("\n".join(code_lines)) + "</pre>")
+    return "\n".join(output)
+
+
+def _telegram_chunks(text, limit):
+    """Split Markdown on line boundaries so converted messages stay valid."""
+    chunk = []
+    size = 0
+    for line in text.split("\n"):
+        while len(line) > limit:
+            if chunk:
+                yield "\n".join(chunk)
+                chunk = []
+                size = 0
+            yield line[:limit]
+            line = line[limit:]
+        extra = len(line) + (1 if chunk else 0)
+        if chunk and size + extra > limit:
+            yield "\n".join(chunk)
+            chunk = []
+            size = 0
+            extra = len(line)
+        chunk.append(line)
+        size += extra
+    if chunk:
+        yield "\n".join(chunk)
+
+
 def _send_telegram_message(token, chat_id, text):
-    for start in range(0, len(text), MAX_TELEGRAM_REPLY_LENGTH):
-        telegram_api_call(
-            token,
-            "sendMessage",
-            {
-                "chat_id": chat_id,
-                "text": text[start:start + MAX_TELEGRAM_REPLY_LENGTH],
-            },
-        )
+    if not isinstance(text, str) or not text.strip():
+        return
+    for chunk in _telegram_chunks(text, MAX_TELEGRAM_REPLY_LENGTH - 600):
+        formatted = markdown_to_telegram_html(chunk)
+        if formatted and len(formatted) <= MAX_TELEGRAM_REPLY_LENGTH:
+            try:
+                telegram_api_call(
+                    token,
+                    "sendMessage",
+                    {
+                        "chat_id": chat_id,
+                        "text": formatted,
+                        "parse_mode": "HTML",
+                    },
+                )
+                continue
+            except RuntimeError:
+                pass
+        for start in range(0, len(chunk), MAX_TELEGRAM_REPLY_LENGTH):
+            telegram_api_call(
+                token,
+                "sendMessage",
+                {
+                    "chat_id": chat_id,
+                    "text": chunk[start:start + MAX_TELEGRAM_REPLY_LENGTH],
+                },
+            )
 
 
 def _handle_telegram_update(update):
