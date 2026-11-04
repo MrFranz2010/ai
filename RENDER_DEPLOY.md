@@ -31,6 +31,12 @@ and redeployments. If `SUPABASE_URL` or `SUPABASE_SERVICE_ROLE_KEY` is missing,
 `render_start.py` falls back to local JSON files and prints a warning; those
 files are not durable on Render's free plan.
 
+## Google search
+
+Set `SERPER_API_KEY` as a secret environment variable to enable the
+`google_search` tool. Without it the assistant still works and the tool reports
+that search is not configured. Search queries are sent to Serper.
+
 ## Run locally
 
 `python app.py` still runs the app on `127.0.0.1:8000` with local JSON files and

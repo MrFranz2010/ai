@@ -13,6 +13,15 @@ variabili segrete del servizio, esegui [`supabase/schema.sql`](supabase/schema.s
 e segui [`RENDER_DEPLOY.md`](RENDER_DEPLOY.md). Non esporre la service role key
 nel browser o nel repository.
 
+## Ricerca Google
+
+Questo branch espone lo strumento `google_search`, che restituisce titolo, URL
+ed estratto dei risultati Google tramite [Serper](https://serper.dev/). Imposta
+`SERPER_API_KEY` come variabile d'ambiente (su Render: variabile segreta del
+servizio). La chiave resta solo lato server e non viene salvata in Supabase, nel
+repository o nella cronologia. Le query vengono inviate al servizio esterno: non
+inserire dati riservati.
+
 ## Avvio
 
 1. Installa Python 3.10 o successivo.
