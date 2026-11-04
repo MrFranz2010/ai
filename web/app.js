@@ -1,4 +1,9 @@
 const conversation = document.querySelector("#conversation");
+const sidebar = document.querySelector("#sidebar");
+const sidebarToggle = document.querySelector("#sidebar-toggle");
+const sidebarClose = document.querySelector("#sidebar-close");
+const sidebarBackdrop = document.querySelector("#sidebar-backdrop");
+const mobileSidebarQuery = window.matchMedia("(max-width: 820px)");
 const welcome = document.querySelector("#welcome");
 const chatForm = document.querySelector("#chat-form");
 const input = document.querySelector("#message-input");
@@ -79,6 +84,13 @@ let windowZIndex = 5;
 let calendarMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 let selectedCalendarDate = dateKey(new Date());
 const openWindows = new Map();
+
+function setSidebarOpen(open) {
+  const isOpen = Boolean(open) && mobileSidebarQuery.matches;
+  document.body.classList.toggle("sidebar-open", isOpen);
+  sidebarToggle.setAttribute("aria-expanded", String(isOpen));
+  sidebarBackdrop.hidden = !isOpen;
+}
 
 const textFileExtensions = new Set([
   ".txt", ".md", ".csv", ".json", ".log", ".py", ".js", ".ts",
@@ -1918,6 +1930,35 @@ async function loadConfig() {
 
 document.querySelectorAll("[data-open-app]").forEach((button) => {
   button.addEventListener("click", () => openApplicationWindow(button.dataset.openApp));
+});
+
+sidebarToggle.addEventListener("click", () => {
+  setSidebarOpen(!document.body.classList.contains("sidebar-open"));
+});
+sidebarClose.addEventListener("click", () => setSidebarOpen(false));
+sidebarBackdrop.addEventListener("click", () => setSidebarOpen(false));
+sidebar.addEventListener("click", (event) => {
+  if (
+    mobileSidebarQuery.matches
+    && event.target.closest("button, a")
+    && !event.target.closest("#sidebar-close")
+  ) {
+    window.setTimeout(() => setSidebarOpen(false), 0);
+  }
+});
+const closeSidebarOnResize = () => {
+  if (!mobileSidebarQuery.matches) setSidebarOpen(false);
+};
+if (mobileSidebarQuery.addEventListener) {
+  mobileSidebarQuery.addEventListener("change", closeSidebarOnResize);
+} else {
+  mobileSidebarQuery.addListener(closeSidebarOnResize);
+}
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && document.body.classList.contains("sidebar-open")) {
+    setSidebarOpen(false);
+    sidebarToggle.focus();
+  }
 });
 document.querySelector("#welcome-setup").addEventListener("click", () => openSettings());
 document.querySelector("#settings-close").addEventListener("click", closeSettings);

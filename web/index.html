@@ -10,7 +10,8 @@
 </head>
 <body>
   <div class="layout">
-    <aside class="sidebar">
+    <aside class="sidebar" id="sidebar">
+      <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Chiudi il menu">×</button>
       <a class="brand" href="/" aria-label="NOKK, home">
         <span class="brand-icon">N</span>
         <span class="brand-copy"><strong>NOKK</strong><small>PERSONAL AI</small></span>
@@ -40,9 +41,13 @@
 
     <main class="main">
       <header class="topbar">
-        <div>
-          <div class="eyebrow">NOKK <span>·</span> IL TUO ASSISTENTE</div>
-          <h1 id="page-title">Una nuova conversazione</h1>
+        <div class="topbar-heading">
+          <button class="mobile-menu-button" id="sidebar-toggle" type="button"
+            aria-controls="sidebar" aria-expanded="false" aria-label="Apri il menu">☰</button>
+          <div>
+            <div class="eyebrow">NOKK <span>·</span> IL TUO ASSISTENTE</div>
+            <h1 id="page-title">Una nuova conversazione</h1>
+          </div>
         </div>
         <div class="topbar-actions">
           <button class="launcher-trigger" id="launcher-open" type="button" aria-label="Cerca applicazioni e impostazioni">
@@ -276,6 +281,8 @@
         </div>
       </section>
     </main>
+    <button class="sidebar-backdrop" id="sidebar-backdrop" type="button"
+      tabindex="-1" aria-label="Chiudi il menu" hidden></button>
   </div>
 </body>
 </html>

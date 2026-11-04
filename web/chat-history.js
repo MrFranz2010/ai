@@ -38,10 +38,8 @@
     .chat-history-export { padding: 2px 6px; color: var(--muted); background: transparent; border: 1px solid var(--border); border-radius: 4px; font-size: 9px; cursor: pointer; }
     .chat-history-search { width: 100%; min-height: 30px; margin: 0 0 7px; padding: 0 8px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 5px; font-size: 10px; }
     .chat-history-snippet { margin: -1px 8px 5px; color: var(--muted); font-size: 9px; line-height: 1.4; }
-    @media (max-width: 680px) {
+    @media (max-width: 820px) {
       .chat-history-panel { width: 100%; max-height: 30vh; }
-      .chat-history-heading, .chat-history-open, .chat-history-delete { display: none; }
-      .chat-history-panel.has-chats { display: none; }
     }
   `;
   document.head.append(styles);
