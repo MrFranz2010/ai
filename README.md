@@ -28,7 +28,8 @@ Sono supportati anche provider opzionali con piano gratuito senza carta:
 
 L'ordine è Exa, Tavily, DuckDuckGo, Bing e infine Serper se la vecchia
 `SERPER_API_KEY` è ancora presente. Serper non è più obbligatorio e non viene
-usato se non configurato.
+usato se non configurato. Se nessun motore risponde, NOKK ripiega sulle voci di
+Wikipedia, segnalando che non si tratta di notizie aggiornate.
 
 Le chiavi restano solo lato server e non vengono salvate nel repository, nella
 configurazione dell'app o nella cronologia chat. Le query vengono inviate al

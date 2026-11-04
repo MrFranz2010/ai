@@ -266,6 +266,18 @@ DUCKDUCKGO_SEARCH_URL = os.environ.get(
 BING_SEARCH_URL = os.environ.get(
     "BING_SEARCH_URL", "https://www.bing.com/search"
 )
+# Bing variable results across requests: retry with other parameters.
+BING_SEARCH_VARIANTS = (
+    {"mkt": "it-IT", "setlang": "it"},
+    {"cc": "IT", "count": "20"},
+)
+BING_RETRY_DELAY = 0.5
+WIKIPEDIA_SEARCH_URL = os.environ.get(
+    "WIKIPEDIA_SEARCH_URL", "https://it.wikipedia.org/w/api.php"
+)
+WIKIPEDIA_BASE_URL = os.environ.get(
+    "WIKIPEDIA_BASE_URL", "https://it.wikipedia.org/wiki/"
+)
 MAX_SEARCH_QUERY_LENGTH = 400
 MAX_SEARCH_RESULTS = 8
 DEFAULT_SEARCH_RESULTS = 5
@@ -1081,13 +1093,11 @@ def _bing_target(url):
     return target
 
 
-def _bing_search(query, num_results):
+def _bing_fetch_page(params, accept):
     request = Request(
-        BING_SEARCH_URL
-        + "?"
-        + urlencode({"q": query, "mkt": "it-IT", "setlang": "it"}),
+        BING_SEARCH_URL + "?" + urlencode(params),
         headers={
-            "Accept": "text/html",
+            "Accept": accept,
             "Accept-Language": "it-IT,it;q=0.9,en;q=0.6",
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -1098,7 +1108,7 @@ def _bing_search(query, num_results):
     )
     try:
         with urlopen(request, timeout=20) as response:
-            page = response.read(2_000_000).decode("utf-8", "replace")
+            return response.read(2_000_000).decode("utf-8", "replace")
     except HTTPError as error:
         code = error.code
         error.close()
@@ -1111,24 +1121,129 @@ def _bing_search(query, num_results):
         ) from None
     except (OSError, TimeoutError):
         raise RuntimeError("Timeout durante la ricerca con Bing.") from None
+
+
+def _bing_html_results(page, num_results):
     parser = _BingParser()
     parser.feed(page)
     results = []
     seen = set()
     for item in parser.results:
-        target = _bing_target(item.get("url"))
         result = _normalize_search_result(
-            item.get("title"), target, item.get("snippet"),
+            item.get("title"), _bing_target(item.get("url")), item.get("snippet"),
         )
         if result and result["url"] not in seen:
             seen.add(result["url"])
             results.append(result)
         if len(results) >= num_results:
             break
-    if not results:
-        raise RuntimeError(
-            "Bing non ha restituito risultati (possibile blocco temporaneo)."
+    return results
+
+
+def _bing_rss_results(page, num_results):
+    try:
+        root = ET.fromstring(page)
+    except ET.ParseError:
+        raise RuntimeError("Bing ha restituito una risposta non valida.") from None
+    results = []
+    seen = set()
+    for item in root.iter("item"):
+        description = item.findtext("description") or ""
+        snippet = html.unescape(re.sub(r"<[^>]+>", " ", description))
+        result = _normalize_search_result(
+            item.findtext("title") or "",
+            (item.findtext("link") or "").strip(),
+            snippet,
         )
+        if result and result["url"] not in seen:
+            seen.add(result["url"])
+            results.append(result)
+        if len(results) >= num_results:
+            break
+    return results
+
+
+def _bing_search(query, num_results):
+    """Query Bing, retrying with other parameters when it answers empty.
+
+    From datacenter IPs Bing answers "Non sono disponibili risultati" to some
+    requests and the same query on the next one, so a single attempt is not
+    reliable. The same query is retried with the ``cc``/``count`` variant and
+    finally with the RSS endpoint, which uses a different code path.
+    """
+    attempts = [
+        ("html", dict({"q": query}, **variant))
+        for variant in BING_SEARCH_VARIANTS
+    ]
+    attempts.append((
+        "rss",
+        {"q": query, "format": "rss", "mkt": "it-IT", "setlang": "it"},
+    ))
+    problems = []
+    for index, (kind, params) in enumerate(attempts):
+        if index:
+            time.sleep(BING_RETRY_DELAY)
+        try:
+            if kind == "rss":
+                page = _bing_fetch_page(
+                    params, "application/rss+xml, application/xml;q=0.9"
+                )
+                results = _bing_rss_results(page, num_results)
+            else:
+                results = _bing_html_results(
+                    _bing_fetch_page(params, "text/html"), num_results
+                )
+        except RuntimeError as error:
+            problems.append(str(error))
+            continue
+        if results:
+            return results
+    if problems:
+        raise RuntimeError(problems[-1])
+    raise RuntimeError(
+        "Bing non ha restituito risultati (possibile blocco temporaneo)."
+    )
+
+
+def _wikipedia_search(query, num_results):
+    """Last resort: encyclopedic entries, used when every search engine fails."""
+    request = Request(
+        WIKIPEDIA_SEARCH_URL
+        + "?"
+        + urlencode({
+            "action": "query",
+            "list": "search",
+            "srsearch": query,
+            "srlimit": num_results,
+            "format": "json",
+            "utf8": 1,
+        }),
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "NOKK-web-search",
+        },
+    )
+    payload = _search_http_json(request, "Wikipedia")
+    items = (payload.get("query") or {}).get("search")
+    if not isinstance(items, list):
+        raise RuntimeError("Wikipedia ha restituito risultati non validi.")
+    results = []
+    for item in items[:num_results]:
+        if not isinstance(item, dict):
+            continue
+        title = item.get("title")
+        if not isinstance(title, str) or not title.strip():
+            continue
+        snippet = html.unescape(re.sub(r"<[^>]+>", "", item.get("snippet") or ""))
+        result = _normalize_search_result(
+            title,
+            WIKIPEDIA_BASE_URL + quote(title.strip().replace(" ", "_")),
+            snippet,
+        )
+        if result:
+            results.append(result)
+    if not results:
+        raise RuntimeError("Wikipedia non ha restituito risultati.")
     return results
 
 
@@ -1142,6 +1257,7 @@ def search_providers():
     providers.append("bing")
     if SERPER_API_KEY:
         providers.append("serper")
+    providers.append("wikipedia")
     return providers
 
 
@@ -1172,6 +1288,7 @@ def web_search(query, num_results=DEFAULT_SEARCH_RESULTS):
         "duckduckgo": "DuckDuckGo",
         "bing": "Bing",
         "serper": "Google/Serper",
+        "wikipedia": "Wikipedia",
     }
     errors = []
     for provider in search_providers():
@@ -1184,17 +1301,31 @@ def web_search(query, num_results=DEFAULT_SEARCH_RESULTS):
                 results = _serper_search(clean_query, num_results)
             elif provider == "bing":
                 results = _bing_search(clean_query, num_results)
+            elif provider == "wikipedia":
+                results = _wikipedia_search(clean_query, num_results)
             else:
                 results = _duckduckgo_search(clean_query, num_results)
         except RuntimeError as error:
             errors.append(f"{labels[provider]}: {error}")
             continue
+        except Exception as error:  # one broken provider must not stop the chain
+            errors.append(
+                f"{labels[provider]}: errore imprevisto "
+                f"({type(error).__name__})."
+            )
+            continue
         if results:
+            note = f"Risultati web forniti da {labels[provider]}."
+            if provider == "wikipedia":
+                note = (
+                    "Wikipedia è l'ultimo ripiego: sono voci enciclopediche, "
+                    "non notizie aggiornate. Verifica i dati sensibili."
+                )
             return {
                 "query": clean_query,
                 "results": results[:num_results],
                 "provider": provider,
-                "note": f"Risultati web forniti da {labels[provider]}.",
+                "note": note,
             }
         errors.append(f"{labels[provider]}: nessun risultato.")
     raise RuntimeError(
