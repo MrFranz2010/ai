@@ -2,7 +2,9 @@ import base64
 import binascii
 import ctypes
 import datetime
+import html
 import io
+import ipaddress
 import json
 import os
 import platform
@@ -10,6 +12,7 @@ import re
 import secrets
 import shlex
 import shutil
+import socket
 import subprocess
 import tempfile
 import threading
@@ -17,11 +20,12 @@ import time
 import uuid
 import xml.etree.ElementTree as ET
 import zipfile
+from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
-from urllib.request import Request, urlopen
+from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
@@ -55,6 +59,23 @@ MAX_COMMAND_OUTPUT = 20000
 MAX_TELEGRAM_MESSAGE_LENGTH = 12000
 MAX_TELEGRAM_REPLY_LENGTH = 4000
 TELEGRAM_PAIRING_TTL_SECONDS = 600
+FETCH_URL_TOOL = {
+    "name": "fetch_url",
+    "description": (
+        "Legge una pagina web pubblica e restituisce titolo e testo, così puoi "
+        "verificare i risultati di google_search e citare la fonte. Non usare "
+        "per URL privati, locali o che richiedono login."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string"},
+            "max_chars": {"type": "integer"},
+        },
+        "required": ["url"],
+        "additionalProperties": False,
+    },
+}
 TERMINAL_TOOL = {
     "name": "run_terminal_command",
     "description": (
@@ -101,9 +122,21 @@ APP_TOOLS = [
                 "action": {"type": "string", "enum": ["create", "update", "delete"]},
                 "id": {"type": "string"},
                 "title": {"type": "string"},
-                "starts_at": {"type": "string"},
+                "starts_at": {
+                    "type": "string",
+                    "description": (
+                        "Data e ora dell'evento nel formato YYYY-MM-DDTHH:MM, "
+                        "con ore 00-23 e minuti 00-59. Non usare formati locali."
+                    ),
+                },
                 "description": {"type": "string"},
-                "due_date": {"type": ["string", "null"]},
+                "due_date": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "Scadenza nel formato YYYY-MM-DD, oppure null se non "
+                        "esiste una scadenza."
+                    ),
+                },
                 "completed": {"type": "boolean"},
             },
             "required": ["section", "action"],
@@ -145,6 +178,7 @@ APP_TOOLS = [
             "additionalProperties": False,
         },
     },
+    FETCH_URL_TOOL,
 ]
 SELF_UPDATE_TOOLS = [
     {
@@ -220,6 +254,9 @@ SERPER_SEARCH_URL = os.environ.get(
 MAX_SEARCH_QUERY_LENGTH = 400
 MAX_SEARCH_RESULTS = 8
 DEFAULT_SEARCH_RESULTS = 5
+MAX_FETCH_BYTES = 2_000_000
+MAX_FETCH_CHARS = 20_000
+DEFAULT_FETCH_CHARS = 12_000
 
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 GITHUB_REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "MrFranz2010/ai").strip()
@@ -441,6 +478,69 @@ def default_planner():
     return {"events": [], "tasks": []}
 
 
+def _local_naive_datetime(value):
+    if value.tzinfo is not None:
+        return value.astimezone().replace(tzinfo=None)
+    return value
+
+
+def normalize_event_starts_at(value):
+    """Accept the date formats models commonly produce and return the UI format."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("Data e ora dell'evento non valide.")
+    text = value.strip()
+    iso_text = text[:-1] + "+00:00" if text.endswith("Z") else text
+    parsed = None
+    try:
+        parsed = _local_naive_datetime(datetime.datetime.fromisoformat(iso_text))
+    except ValueError:
+        pass
+    if parsed is None:
+        for date_format in (
+            "%d/%m/%Y %H:%M",
+            "%d/%m/%Y %H.%M",
+            "%d-%m-%Y %H:%M",
+            "%d.%m.%Y %H:%M",
+            "%d/%m/%Y",
+            "%d-%m-%Y",
+            "%d.%m.%Y",
+        ):
+            try:
+                parsed = datetime.datetime.strptime(text, date_format)
+                break
+            except ValueError:
+                continue
+    if parsed is None:
+        raise ValueError(
+            "Data e ora dell'evento non valide. Usa il formato YYYY-MM-DDTHH:MM."
+        )
+    if len(text) in {10, 8} or (len(text) == 9 and text[2] in "/-."):
+        parsed = parsed.replace(hour=9, minute=0)
+    return parsed.replace(second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
+
+
+def normalize_due_date(value):
+    """Normalize a due date, accepting ISO or common day-first formats."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if not isinstance(value, str):
+        raise ValueError("Scadenza attività non valida.")
+    text = value.strip()
+    iso_text = text[:-1] + "+00:00" if text.endswith("Z") else text
+    try:
+        return _local_naive_datetime(
+            datetime.datetime.fromisoformat(iso_text)
+        ).date().isoformat()
+    except ValueError:
+        pass
+    for date_format in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y"):
+        try:
+            return datetime.datetime.strptime(text, date_format).date().isoformat()
+        except ValueError:
+            continue
+    raise ValueError("Scadenza attività non valida. Usa il formato YYYY-MM-DD.")
+
+
 def validate_planner(planner):
     if not isinstance(planner, dict) or set(planner) != {"events", "tasks"}:
         raise ValueError("Formato calendario e attività non valido.")
@@ -472,16 +572,8 @@ def validate_planner(planner):
                 )
             clean_item = {"id": item_id, "title": title.strip()}
             if kind == "events":
-                starts_at = item.get("starts_at")
+                starts_at = normalize_event_starts_at(item.get("starts_at"))
                 description = item.get("description", "")
-                try:
-                    parsed_start = datetime.datetime.strptime(
-                        starts_at, "%Y-%m-%dT%H:%M"
-                    )
-                except (TypeError, ValueError):
-                    raise ValueError("Data e ora dell'evento non valide.") from None
-                if parsed_start.strftime("%Y-%m-%dT%H:%M") != starts_at:
-                    raise ValueError("Data e ora dell'evento non valide.")
                 if (
                     not isinstance(description, str)
                     or len(description) > MAX_PLANNER_DESCRIPTION_LENGTH
@@ -492,15 +584,8 @@ def validate_planner(planner):
                     "description": description.strip(),
                 })
             else:
-                due_date = item.get("due_date")
+                due_date = normalize_due_date(item.get("due_date"))
                 completed = item.get("completed")
-                if due_date is not None:
-                    try:
-                        parsed_date = datetime.date.fromisoformat(due_date)
-                    except (TypeError, ValueError):
-                        raise ValueError("Scadenza attività non valida.") from None
-                    if parsed_date.isoformat() != due_date:
-                        raise ValueError("Scadenza attività non valida.")
                 if not isinstance(completed, bool):
                     raise ValueError("Stato attività non valido.")
                 clean_item.update({"due_date": due_date, "completed": completed})
@@ -718,6 +803,164 @@ def google_search(query, num_results=DEFAULT_SEARCH_RESULTS):
             "Risultati Google forniti da Serper."
             if results else "Nessun risultato trovato."
         ),
+    }
+
+
+class _PageTextParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.title = ""
+        self.parts = []
+        self._skip_depth = 0
+        self._in_title = False
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag in {"script", "style", "noscript", "template", "svg"}:
+            self._skip_depth += 1
+        elif tag == "title":
+            self._in_title = True
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag in {"script", "style", "noscript", "template", "svg"}:
+            self._skip_depth = max(0, self._skip_depth - 1)
+        elif tag == "title":
+            self._in_title = False
+
+    def handle_data(self, data):
+        if self._skip_depth:
+            return
+        if self._in_title:
+            self.title += data
+        else:
+            self.parts.append(data)
+
+
+def _validate_public_url(value):
+    if not isinstance(value, str) or not value.strip() or len(value) > 2048:
+        raise ValueError("URL non valido o troppo lungo.")
+    parts = urlsplit(value.strip())
+    if parts.scheme not in {"http", "https"}:
+        raise ValueError("Sono ammessi solo URL http e https.")
+    if parts.username or parts.password:
+        raise ValueError("Gli URL con credenziali non sono ammessi.")
+    host = parts.hostname
+    if not host:
+        raise ValueError("L'URL non contiene un host valido.")
+    try:
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+    except ValueError:
+        raise ValueError("La porta dell'URL non è valida.") from None
+    if port not in {80, 443}:
+        raise ValueError("Sono ammesse solo le porte 80 e 443.")
+    lowered = host.lower()
+    if (
+        lowered == "localhost"
+        or lowered.endswith(".local")
+        or lowered.endswith(".internal")
+        or lowered.endswith(".localhost")
+        or lowered.endswith(".home.arpa")
+    ):
+        raise ValueError("Gli indirizzi locali non sono ammessi.")
+    try:
+        addresses = {
+            info[4][0].split("%", 1)[0]
+            for info in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        }
+    except (socket.gaierror, OSError):
+        raise ValueError("Impossibile risolvere l'host dell'URL.") from None
+    if not addresses:
+        raise ValueError("Impossibile risolvere l'host dell'URL.")
+    for address in addresses:
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            raise ValueError("L'host dell'URL non è valido.") from None
+        if (
+            not ip.is_global
+            or ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            raise ValueError("Gli indirizzi di rete privati non sono ammessi.")
+    path = parts.path or "/"
+    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, ""))
+
+
+class _SafeRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _validate_public_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def fetch_url(url, max_chars=DEFAULT_FETCH_CHARS):
+    clean_url = _validate_public_url(url)
+    if isinstance(max_chars, bool) or not isinstance(max_chars, int):
+        raise ValueError("Numero di caratteri non valido.")
+    max_chars = max(1000, min(max_chars, MAX_FETCH_CHARS))
+    request = Request(
+        clean_url,
+        headers={
+            "User-Agent": "NOKK/1.0 (personal assistant; +https://github.com/MrFranz2010/ai)",
+            "Accept": "text/html,application/xhtml+xml,text/plain,application/json;",
+        },
+    )
+    opener = build_opener(_SafeRedirectHandler())
+    try:
+        with opener.open(request, timeout=10) as response:
+            final_url = _validate_public_url(response.geturl())
+            content_type = response.headers.get_content_type()
+            if content_type not in {
+                "text/html", "application/xhtml+xml", "text/plain",
+                "application/json", "text/xml", "application/xml",
+                "text/markdown",
+            }:
+                raise ValueError(
+                    "Il contenuto della pagina non è testo leggibile "
+                    f"({content_type})."
+                )
+            charset = response.headers.get_content_charset() or "utf-8"
+            raw = response.read(MAX_FETCH_BYTES + 1)
+            if len(raw) > MAX_FETCH_BYTES:
+                raise ValueError("La pagina è troppo grande da leggere.")
+    except HTTPError as error:
+        error.close()
+        raise ValueError(
+            f"La pagina ha restituito un errore HTTP {error.code}."
+        ) from None
+    except URLError as error:
+        raise ValueError("Impossibile raggiungere la pagina richiesta.") from error
+    except (OSError, TimeoutError):
+        raise ValueError("Timeout durante la lettura della pagina.") from None
+    try:
+        decoded = raw.decode(charset, errors="replace")
+    except LookupError:
+        decoded = raw.decode("utf-8", errors="replace")
+    title = ""
+    if content_type in {"text/html", "application/xhtml+xml"}:
+        parser = _PageTextParser()
+        try:
+            parser.feed(decoded)
+            parser.close()
+        except Exception:
+            pass
+        title = re.sub(r"\s+", " ", parser.title).strip()[:300]
+        text = " ".join(parser.parts)
+    else:
+        text = decoded
+    text = re.sub(r"\s+", " ", html.unescape(text)).strip()
+    if not text:
+        raise ValueError("La pagina non contiene testo leggibile.")
+    truncated = len(text) > max_chars
+    return {
+        "url": final_url,
+        "title": title,
+        "text": text[:max_chars],
+        "truncated": truncated,
     }
 
 
@@ -1033,6 +1276,7 @@ def validate_config(
     wake_phrase="Nok",
     tts_auto_play=False,
     api_keys=None,
+    notifications_enabled=False,
 ):
     if not isinstance(provider, str) or provider not in PROVIDERS:
         raise ValueError("Provider non supportato nel file di configurazione.")
@@ -1070,6 +1314,8 @@ def validate_config(
         )
     if not isinstance(tts_auto_play, bool):
         raise ValueError("Impostazione di lettura vocale non valida.")
+    if not isinstance(notifications_enabled, bool):
+        raise ValueError("Impostazione notifiche non valida.")
     workspace_path = Path(workspace).expanduser()
     if not workspace_path.is_absolute() or not workspace_path.is_dir():
         raise ValueError("La cartella di lavoro deve esistere ed essere assoluta.")
@@ -1084,6 +1330,7 @@ def validate_config(
         "system_prompt": system_prompt.strip(),
         "wake_phrase": wake_phrase.strip(),
         "tts_auto_play": tts_auto_play,
+        "notifications_enabled": notifications_enabled,
     }
 
 
@@ -1099,6 +1346,7 @@ def default_config():
         "system_prompt": "",
         "wake_phrase": "Nok",
         "tts_auto_play": False,
+        "notifications_enabled": False,
     }
 
 
@@ -1128,6 +1376,7 @@ def load_config_file():
             saved.get("wake_phrase", "Nok"),
             saved.get("tts_auto_play", False),
             saved.get("api_keys", {}),
+            saved.get("notifications_enabled", False),
         )
     except ValueError as error:
         raise RuntimeError(f"File di configurazione non valido: {error}") from error
@@ -1819,6 +2068,16 @@ def run_chat_job(job_id, messages, active_config):
             "Telegram bot tokens, and custom system instructions are not exposed. "
             "Data read from these sections is sent to the configured AI provider."
         )
+        app_prompt += (
+            " When you use manage_planner_item, always write starts_at as "
+            "YYYY-MM-DDTHH:MM in 24-hour local time and due_date as YYYY-MM-DD "
+            "or null. Never use DD/MM/YYYY, seconds or timezone suffixes."
+        )
+        app_prompt += (
+            " You can use fetch_url to read a public web page and verify search "
+            "results. Never fetch localhost, private addresses or pages that "
+            "require login. Cite the page URL when you use its content."
+        )
         if SERPER_API_KEY:
             app_prompt += (
                 " You can use google_search to look up current or external "
@@ -2356,6 +2615,7 @@ def execute_app_tool(name, arguments):
                     for key in (
                         "provider", "model", "terminal_enabled",
                         "approval_mode", "wake_phrase", "tts_auto_play",
+                        "notifications_enabled",
                     )
                 }
                 safe_config["configured"] = bool(config["api_key"])
@@ -2448,6 +2708,12 @@ def execute_app_tool(name, arguments):
             arguments.get("num_results", DEFAULT_SEARCH_RESULTS),
         )
 
+    if name == "fetch_url":
+        return fetch_url(
+            arguments.get("url"),
+            arguments.get("max_chars", DEFAULT_FETCH_CHARS),
+        )
+
     if name == "manage_workflow":
         action = arguments.get("action")
         if action not in {"create", "update", "delete"}:
@@ -2486,6 +2752,84 @@ def execute_app_tool(name, arguments):
     raise ValueError("Strumento NOKK non supportato.")
 
 
+def _ics_escape(value):
+    return (
+        str(value or "")
+        .replace("\\", "\\\\")
+        .replace(";", "\\;")
+        .replace(",", "\\,")
+        .replace("\r\n", "\\n")
+        .replace("\n", "\\n")
+    )
+
+
+def build_calendar_ics():
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//NOKK//Assistente AI//IT",
+        "CALSCALE:GREGORIAN",
+        "X-WR-CALNAME:NOKK",
+    ]
+    with config_lock:
+        events = [item.copy() for item in planner["events"]]
+        tasks = [item.copy() for item in planner["tasks"]]
+    for event in events:
+        start = datetime.datetime.strptime(event["starts_at"], "%Y-%m-%dT%H:%M")
+        end = start + datetime.timedelta(hours=1)
+        lines.extend([
+            "BEGIN:VEVENT",
+            f"UID:{event['id']}@nokk",
+            f"DTSTAMP:{stamp}",
+            f"DTSTART:{start.strftime('%Y%m%dT%H%M%S')}",
+            f"DTEND:{end.strftime('%Y%m%dT%H%M%S')}",
+            f"SUMMARY:{_ics_escape(event['title'])}",
+        ])
+        if event.get("description"):
+            lines.append(f"DESCRIPTION:{_ics_escape(event['description'])}")
+        lines.append("END:VEVENT")
+    for task in tasks:
+        lines.extend([
+            "BEGIN:VTODO",
+            f"UID:{task['id']}@nokk",
+            f"DTSTAMP:{stamp}",
+            f"SUMMARY:{_ics_escape(task['title'])}",
+        ])
+        if task.get("due_date"):
+            lines.append(f"DUE;VALUE=DATE:{task['due_date'].replace('-', '')}")
+        if task.get("completed"):
+            lines.extend(["STATUS:COMPLETED", f"COMPLETED:{stamp}"])
+        lines.append("END:VTODO")
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(lines) + "\r\n"
+
+
+def export_snapshot():
+    with config_lock:
+        safe_config = {
+            "provider": config["provider"],
+            "model": config["model"],
+            "terminal_enabled": config["terminal_enabled"],
+            "approval_mode": config["approval_mode"],
+            "workspace": config["workspace"],
+            "system_prompt": config["system_prompt"],
+            "wake_phrase": config["wake_phrase"],
+            "tts_auto_play": config["tts_auto_play"],
+            "notifications_enabled": config["notifications_enabled"],
+            "workflows": [item.copy() for item in workflows],
+            "planner": {
+                kind: [item.copy() for item in planner[kind]]
+                for kind in ("events", "tasks")
+            },
+        }
+    return {
+        "app": "NOKK",
+        "exported_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "config": safe_config,
+    }
+
+
 class AppHandler(BaseHTTPRequestHandler):
     server_version = "AIStarter/1.0"
 
@@ -2495,6 +2839,18 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_download(self, body, content_type, filename):
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header(
+            "Content-Disposition", f'attachment; filename="{filename}"'
+        )
         self.end_headers()
         self.wfile.write(body)
 
@@ -2534,6 +2890,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     "system_prompt": config["system_prompt"],
                     "wake_phrase": config["wake_phrase"],
                     "tts_auto_play": config["tts_auto_play"],
+                    "notifications_enabled": config["notifications_enabled"],
                     "workflows": list(workflows),
                 }
             self._send_json(200, public_config)
@@ -2548,6 +2905,20 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/system":
             self._send_json(200, machine_status())
+            return
+        if self.path == "/api/export":
+            body = json.dumps(export_snapshot(), ensure_ascii=False, indent=2)
+            self._send_download(
+                body.encode("utf-8"), "application/json; charset=utf-8",
+                "nokk-backup.json",
+            )
+            return
+        if self.path == "/api/calendar.ics":
+            self._send_download(
+                build_calendar_ics().encode("utf-8"),
+                "text/calendar; charset=utf-8",
+                "nokk-calendario.ics",
+            )
             return
         job_match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})", self.path)
         if job_match:
@@ -2689,6 +3060,10 @@ class AppHandler(BaseHTTPRequestHandler):
             data.get("wake_phrase", current_config["wake_phrase"]),
             data.get("tts_auto_play", current_config["tts_auto_play"]),
             api_keys,
+            data.get(
+                "notifications_enabled",
+                current_config.get("notifications_enabled", False),
+            ),
         )
         with config_lock:
             try:

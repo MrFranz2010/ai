@@ -400,6 +400,25 @@ class AppRouteTests(unittest.TestCase):
                 "tasks": [],
             })
 
+    def test_calendar_normalizes_ai_date_formats(self):
+        event = self.request_json("/api/planner", {
+            "action": "save", "kind": "event", "title": "Riunione",
+            "starts_at": "04/11/2026 14:30", "description": "",
+        })["events"][0]
+        self.assertEqual(event["starts_at"], "2026-11-04T14:30")
+
+        event_with_seconds = self.request_json("/api/planner", {
+            "action": "save", "kind": "event", "title": "Call",
+            "starts_at": "2026-11-05T09:15:00", "description": "",
+        })["events"][1]
+        self.assertEqual(event_with_seconds["starts_at"], "2026-11-05T09:15")
+
+        task = self.request_json("/api/planner", {
+            "action": "save", "kind": "task", "title": "Scadenza",
+            "due_date": "05/11/2026", "completed": False,
+        })["tasks"][0]
+        self.assertEqual(task["due_date"], "2026-11-05")
+
     def test_calendar_rejects_invalid_date_and_task_state(self):
         for payload in (
             {
@@ -425,6 +444,34 @@ class AppRouteTests(unittest.TestCase):
                 urlopen(request)
             self.assertEqual(error.exception.code, 400)
             error.exception.close()
+
+    def test_calendar_and_data_can_be_exported(self):
+        self.request_json("/api/planner", {
+            "action": "save", "kind": "event", "title": "Riunione",
+            "starts_at": "2026-11-04T14:30", "description": "Note",
+        })
+        self.request_json("/api/planner", {
+            "action": "save", "kind": "task", "title": "Scadenza",
+            "due_date": "2026-11-05", "completed": False,
+        })
+        with urlopen(f"{self.base_url}/api/calendar.ics") as response:
+            body = response.read().decode("utf-8")
+        self.assertIn("BEGIN:VCALENDAR", body)
+        self.assertIn("SUMMARY:Riunione", body)
+        self.assertIn("DUE;VALUE=DATE:20261105", body)
+        with urlopen(f"{self.base_url}/api/export") as response:
+            exported = json.loads(response.read())
+        self.assertEqual(exported["app"], "NOKK")
+        self.assertNotIn("api_key", exported["config"])
+        self.assertEqual(exported["config"]["planner"]["events"][0]["title"], "Riunione")
+
+    def test_fetch_url_rejects_private_and_local_addresses(self):
+        for value in (
+            "http://localhost/", "http://127.0.0.1/", "file:///etc/passwd",
+            "http://10.0.0.1/", "http://[::1]/",
+        ):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                app._validate_public_url(value)
 
     def test_machine_status_does_not_expose_host_or_user_details(self):
         with urlopen(f"{self.base_url}/api/system") as response:
@@ -570,6 +617,7 @@ class AppRouteTests(unittest.TestCase):
             "system_prompt": "Rispondi in italiano e sii conciso.",
             "wake_phrase": "Nok",
             "tts_auto_play": True,
+            "notifications_enabled": False,
         })
         if os.name != "nt":
             self.assertEqual(app.CONFIG_FILE.stat().st_mode & 0o777, 0o600)

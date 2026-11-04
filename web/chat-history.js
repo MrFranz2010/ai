@@ -6,15 +6,27 @@
   const historyHeading = document.createElement("div");
   historyHeading.className = "chat-history-heading";
   historyHeading.textContent = "CONVERSAZIONI";
+  const historyExport = document.createElement("button");
+  historyExport.type = "button";
+  historyExport.className = "chat-history-export";
+  historyExport.textContent = "Esporta";
+  historyExport.title = "Esporta tutte le chat in Markdown";
+  historyHeading.append(historyExport);
+  const historySearch = document.createElement("input");
+  historySearch.type = "search";
+  historySearch.className = "chat-history-search";
+  historySearch.placeholder = "Cerca nelle chat…";
+  historySearch.setAttribute("aria-label", "Cerca nelle conversazioni");
   const historyList = document.createElement("div");
   historyList.className = "chat-history-list";
-  historyPanel.append(historyHeading, historyList);
+  historyPanel.append(historyHeading, historySearch, historyList);
   newChatButton.after(historyPanel);
 
   let chats = [];
   let activeChatId = null;
   let isLoadingChat = false;
   let saveTimer = null;
+  let chatQuery = "";
 
   function state() {
     return { conversation, welcome, input, pageTitle, messages, sending, addMessage, resizeComposer };
@@ -27,14 +39,23 @@
   function renderChats() {
     historyList.replaceChildren();
     historyPanel.classList.toggle("has-chats", chats.length > 0);
-    if (!chats.length) {
+    const query = chatQuery.trim().toLocaleLowerCase("it");
+    const visible = query
+      ? chats.filter((chat) => {
+          if ((chat.title || "").toLocaleLowerCase("it").includes(query)) return true;
+          return (chat.messages || []).some((message) =>
+            (message.content || "").toLocaleLowerCase("it").includes(query)
+          );
+        })
+      : chats;
+    if (!visible.length) {
       const empty = document.createElement("p");
       empty.className = "chat-history-empty";
-      empty.textContent = "Nessuna chat salvata";
+      empty.textContent = query ? "Nessuna chat corrisponde alla ricerca" : "Nessuna chat salvata";
       historyList.append(empty);
       return;
     }
-    for (const chat of chats) {
+    for (const chat of visible) {
       const row = document.createElement("div");
       row.className = "chat-history-row";
       const open = document.createElement("button");
@@ -55,8 +76,49 @@
       remove.addEventListener("click", () => deleteChat(chat.id));
       row.append(open, remove);
       historyList.append(row);
+      if (query) {
+        const message = (chat.messages || []).find((item) =>
+          (item.content || "").toLocaleLowerCase("it").includes(query)
+        );
+        if (message) {
+          const at = (message.content || "").toLocaleLowerCase("it").indexOf(query);
+          const start = Math.max(0, at - 35);
+          const snippet = document.createElement("p");
+          snippet.className = "chat-history-snippet";
+          snippet.textContent = `${start > 0 ? "…" : ""}${message.content.slice(start, start + 90)}${message.content.length > start + 90 ? "…" : ""}`;
+          historyList.append(snippet);
+        }
+      }
     }
   }
+
+  function downloadText(filename, content, mimeType) {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function exportChats() {
+    const lines = [];
+    for (const chat of chats) {
+      lines.push(`# ${chat.title || "Nuova chat"}`, "");
+      for (const message of chat.messages || []) {
+        lines.push(`**${message.role === "user" ? "Utente" : "NOKK"}:** ${message.content}`, "");
+      }
+      lines.push("---", "");
+    }
+    downloadText("nokk-chat.md", lines.join("\n"), "text/markdown;charset=utf-8");
+  }
+
+  historySearch.addEventListener("input", () => {
+    chatQuery = historySearch.value;
+    renderChats();
+  });
+  historyExport.addEventListener("click", exportChats);
 
   function syncActive() {
     const chat = chats.find((item) => item.id === activeChatId);

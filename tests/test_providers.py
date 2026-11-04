@@ -86,7 +86,7 @@ class ProviderTests(unittest.TestCase):
                     ]
                 self.assertEqual(names, [
                     "get_app_data", "manage_planner_item", "manage_workflow",
-                    "google_search", "list_repository_files",
+                    "google_search", "fetch_url", "list_repository_files",
                     "read_repository_file", "create_pull_request",
                 ])
                 if provider == "google":

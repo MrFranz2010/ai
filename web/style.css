@@ -1389,3 +1389,16 @@ body { background: var(--page); }
   .planner-form h4, .planner-error { grid-column: 1; }
   .launcher-card { top: 18%; }
 }
+
+
+/* Chat search/export and data actions */
+.chat-history-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.chat-history-export { padding: 2px 6px; color: var(--muted); background: transparent; border: 1px solid var(--border); border-radius: 4px; font-size: 9px; cursor: pointer; }
+.chat-history-export:hover { color: var(--text); background: var(--panel-hover); }
+.chat-history-search { width: 100%; min-height: 30px; margin: 0 0 7px; padding: 0 8px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 5px; font-size: 10px; }
+.chat-history-search:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+.chat-history-snippet { margin: -1px 8px 5px; color: var(--muted); font-size: 9px; line-height: 1.4; }
+.data-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.data-actions a.telegram-action { display: inline-flex; align-items: center; text-decoration: none; }
+.calendar-export { display: inline-flex; align-items: center; padding: 0 9px; min-height: 30px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 5px; font-size: 10px; text-decoration: none; }
+.calendar-export:hover { background: var(--panel-hover); }
