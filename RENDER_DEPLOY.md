@@ -31,25 +31,33 @@ and redeployments. If `SUPABASE_URL` or `SUPABASE_SERVICE_ROLE_KEY` is missing,
 `render_start.py` falls back to local JSON files and prints a warning; those
 files are not durable on Render's free plan.
 
-## Google search
+## Chat history save error
 
-Set `SERPER_API_KEY` as a secret environment variable to enable the
-`google_search` tool. Without it the assistant still works and the tool reports
-that search is not configured. Search queries are sent to Serper.
+If the logs show `new row for relation "app_state" violates check constraint
+"app_state_key_check"` and the row contains `chats.json`, the Supabase table was
+created with an older constraint. Run
+[`supabase/migrations/2026-11-04_chats_key.sql`](supabase/migrations/2026-11-04_chats_key.sql)
+in the Supabase SQL Editor for the project used by Render. You can also re-run
+[`supabase/schema.sql`](supabase/schema.sql), which is idempotent. No Render
+redeploy is needed: the change is in the database.
 
-## Troubleshooting Google search
+## Web search
+
+No paid key is required. `web_search` uses DuckDuckGo's public HTML endpoint by
+default. Optionally set `EXA_API_KEY` or `TAVILY_API_KEY` for their free tiers;
+the old `SERPER_API_KEY` is used only as a last fallback when present.
+
+## Troubleshooting web search
 
 - The Render service must deploy the `copilot/supabase-config-storage` branch.
   `main` no longer contains `render_start.py` or `render.yaml`.
-- `sync: false` in `render.yaml` only asks for a value when the Blueprint is
-  applied. For an existing service add `SERPER_API_KEY` under **Environment**
-  and redeploy.
-- Startup logs show `Google search: configured` or
-  `not configured (set SERPER_API_KEY)`.
+- Without any search key the app still searches through DuckDuckGo.
+- DuckDuckGo can temporarily block automated requests; configure Exa or Tavily
+  if that happens.
 - `GET /api/config` with Basic Authentication includes
-  `search_configured`; `false` means the running instance does not see the
-  variable.
-- HTTP 401 or 402 from the search service means an invalid key or no credits.
+  `search_configured` and `search_providers`.
+- HTTP 401 or 402 from an optional search provider means an invalid key or no
+  credits; the app then tries the next provider.
 
 ## Run locally
 
