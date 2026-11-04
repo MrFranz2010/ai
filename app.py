@@ -167,7 +167,8 @@ APP_TOOLS = [
             "Cerca sul web e restituisce i risultati principali con titolo, URL "
             "ed estratto. Usa DuckDuckGo o Bing senza chiave oppure Exa/Tavily "
             "se configurati. Usalo per informazioni aggiornate o verificabili e "
-            "cita gli URL restituiti."
+            "cita gli URL restituiti. Non ripetere la stessa query: i risultati "
+            "restano validi per qualche minuto."
         ),
         "parameters": {
             "type": "object",
@@ -214,6 +215,10 @@ WIKIPEDIA_BASE_URL = os.environ.get(
 MAX_SEARCH_QUERY_LENGTH = 400
 MAX_SEARCH_RESULTS = 8
 DEFAULT_SEARCH_RESULTS = 5
+SEARCH_CACHE_TTL_SECONDS = 600
+MAX_SEARCH_CACHE_ENTRIES = 128
+SEARCH_CACHE = {}
+SEARCH_CACHE_LOCK = threading.Lock()
 MAX_FETCH_BYTES = 2_000_000
 MAX_FETCH_CHARS = 20_000
 DEFAULT_FETCH_CHARS = 12_000
@@ -1178,6 +1183,51 @@ def search_configured():
     return True
 
 
+def _search_cache_key(query, num_results):
+    return (re.sub(r"\s+", " ", query.strip().lower()), num_results)
+
+
+def _search_cache_get(key):
+    now = time.time()
+    with SEARCH_CACHE_LOCK:
+        entry = SEARCH_CACHE.get(key)
+        if not entry:
+            return None
+        expires, payload = entry
+        if expires <= now:
+            SEARCH_CACHE.pop(key, None)
+            return None
+        return {
+            "query": payload["query"],
+            "results": [dict(item) for item in payload["results"]],
+            "provider": payload["provider"],
+            "note": (
+                payload["note"]
+                + " Ricerca non ripetuta: risultato già ottenuto poco fa."
+            ),
+        }
+
+
+def _search_cache_put(key, payload):
+    now = time.time()
+    with SEARCH_CACHE_LOCK:
+        for stale in [
+            name for name, (expires, _) in SEARCH_CACHE.items() if expires <= now
+        ]:
+            SEARCH_CACHE.pop(stale, None)
+        while len(SEARCH_CACHE) >= MAX_SEARCH_CACHE_ENTRIES:
+            SEARCH_CACHE.pop(next(iter(SEARCH_CACHE)))
+        SEARCH_CACHE[key] = (
+            now + SEARCH_CACHE_TTL_SECONDS,
+            {
+                "query": payload["query"],
+                "results": [dict(item) for item in payload["results"]],
+                "provider": payload["provider"],
+                "note": payload["note"],
+            },
+        )
+
+
 def web_search(query, num_results=DEFAULT_SEARCH_RESULTS):
     if (
         not isinstance(query, str)
@@ -1194,6 +1244,10 @@ def web_search(query, num_results=DEFAULT_SEARCH_RESULTS):
     ):
         raise ValueError(f"Chiedi da 1 a {MAX_SEARCH_RESULTS} risultati.")
     clean_query = query.strip()
+    cache_key = _search_cache_key(clean_query, num_results)
+    cached = _search_cache_get(cache_key)
+    if cached is not None:
+        return cached
     labels = {
         "exa": "Exa",
         "tavily": "Tavily",
@@ -1233,12 +1287,14 @@ def web_search(query, num_results=DEFAULT_SEARCH_RESULTS):
                     "Wikipedia è l'ultimo ripiego: sono voci enciclopediche, "
                     "non notizie aggiornate. Verifica i dati sensibili."
                 )
-            return {
+            payload = {
                 "query": clean_query,
                 "results": results[:num_results],
                 "provider": provider,
                 "note": note,
             }
+            _search_cache_put(cache_key, payload)
+            return payload
         errors.append(f"{labels[provider]}: nessun risultato.")
     raise RuntimeError(
         "Ricerca web non disponibile. " + " | ".join(errors)
@@ -1698,6 +1754,53 @@ def google_schema_value(schema):
         else:
             converted[key] = value
     return converted
+
+
+TOOL_LIMIT_REPLY = (
+    "Ho raggiunto il limite di passaggi per gli strumenti. "
+    "Puoi chiedermi di continuare."
+)
+
+
+def _final_answer_without_tools(active_config, messages, system_prompt):
+    """Ask for a final answer once the tool rounds are exhausted."""
+    messages = list(messages)
+    messages.append({
+        "role": "user",
+        "content": (
+            "Hai esaurito i passaggi disponibili per gli strumenti. Rispondi "
+            "ora usando solo le informazioni già raccolte, senza chiamare "
+            "altri strumenti, e indica brevemente cosa non hai potuto "
+            "verificare."
+        ),
+    })
+    try:
+        request = build_provider_request(
+            active_config["provider"],
+            active_config["model"],
+            active_config["api_key"],
+            messages,
+            system_prompt=system_prompt,
+            enable_tools=False,
+            enable_app_tools=False,
+        )
+        with urlopen(request, timeout=60) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        assistant_message, _ = parse_tool_response(
+            active_config["provider"], result
+        )
+    except (
+        HTTPError, URLError, OSError, ValueError, KeyError, IndexError,
+        TypeError, json.JSONDecodeError,
+    ):
+        return TOOL_LIMIT_REPLY
+    reply = (
+        assistant_message.get("content")
+        if isinstance(assistant_message, dict) else None
+    )
+    if isinstance(reply, str) and reply.strip():
+        return reply
+    return TOOL_LIMIT_REPLY
 
 
 def build_provider_request(
@@ -2274,7 +2377,9 @@ def run_chat_job(job_id, messages, active_config):
             "on the web. It uses DuckDuckGo and falls back to Bing without an "
             "API key, plus optionally Exa or Tavily when configured. Cite the "
             "returned URLs and never invent results. Search queries are sent "
-            "to the search provider."
+            "to the search provider. Do not repeat the same query: its results "
+            "stay cached for a few minutes, so prefer one or two searches with "
+            "different wording."
         )
         system_prompt = "\n\n".join(
             part for part in (system_prompt, app_prompt) if part
@@ -2417,9 +2522,8 @@ def run_chat_job(job_id, messages, active_config):
         _finish_job(
             job_id,
             "complete",
-            reply=(
-                "Ho raggiunto il limite di passaggi per gli strumenti. "
-                "Puoi chiedermi di continuare."
+            reply=_final_answer_without_tools(
+                active_config, messages, system_prompt
             ),
             tool_events=tool_events,
         )
