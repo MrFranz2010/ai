@@ -41,7 +41,6 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 MAX_SYSTEM_PROMPT_LENGTH = 10000
 MAX_WAKE_PHRASE_LENGTH = 40
-MAX_WAKE_PHRASE_LENGTH = 40
 MAX_WORKFLOWS = 30
 MAX_WORKFLOW_NAME_LENGTH = 80
 MAX_WORKFLOW_PROMPT_LENGTH = 4000
@@ -763,6 +762,30 @@ chat_jobs = {}
 chat_jobs_lock = threading.Lock()
 
 
+def google_schema_value(schema):
+    """Convert a tool parameter schema to the Gemini declaration format."""
+    converted = {}
+    for key, value in schema.items():
+        if key == "type":
+            if isinstance(value, list):
+                types = [item for item in value if item != "null"]
+                if "null" in value:
+                    converted["nullable"] = True
+                converted["type"] = types[0].upper() if types else "STRING"
+            else:
+                converted["type"] = value.upper()
+        elif key == "properties":
+            converted[key] = {
+                name: google_schema_value(property_schema)
+                for name, property_schema in value.items()
+            }
+        elif key == "items":
+            converted[key] = google_schema_value(value)
+        else:
+            converted[key] = value
+    return converted
+
+
 def build_provider_request(
     provider, model, api_key, messages, system_prompt=None, enable_tools=False,
     enable_app_tools=False,
@@ -911,22 +934,17 @@ def build_provider_request(
         if tool_definitions:
             declarations = []
             for tool in tool_definitions:
-                properties = {}
-                for name, schema in tool["parameters"]["properties"].items():
-                    prop_schema = schema.copy()
-                    if isinstance(prop_schema.get("type"), list):
-                        prop_schema["nullable"] = "null" in prop_schema["type"]
-                        prop_schema["type"] = next(
-                            item for item in prop_schema["type"] if item != "null"
-                        )
-                    prop_schema["type"] = prop_schema["type"].upper()
-                    properties[name] = prop_schema
                 declarations.append({
                     "name": tool["name"],
                     "description": tool["description"],
                     "parameters": {
                         "type": "OBJECT",
-                        "properties": properties,
+                        "properties": {
+                            name: google_schema_value(property_schema)
+                            for name, property_schema in tool["parameters"][
+                                "properties"
+                            ].items()
+                        },
                         "required": tool["parameters"].get("required", []),
                     },
                 })
@@ -1421,7 +1439,7 @@ def run_chat_job(job_id, messages, active_config):
                         tool_result = {"exit_code": 0, "output": json.dumps(
                             app_result, ensure_ascii=False,
                         ), "executed": True}
-                    except (OSError, ValueError) as error:
+                    except (OSError, ValueError, RuntimeError) as error:
                         tool_result = {
                             "exit_code": 1,
                             "output": str(error),

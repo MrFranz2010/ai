@@ -5,18 +5,14 @@ import json
 import os
 import re
 import threading
-from datetime import datetime, timezone
 from http.server import ThreadingHTTPServer
 
 import app
+from supabase_store import MISSING, SupabaseJSONStore
 
 
 USERNAME = os.environ.get("APP_USERNAME", "")
 PASSWORD = os.environ.get("APP_PASSWORD", "")
-STATE_FILES = frozenset({
-    "config.json", "workflows.json", "planner.json", "telegram.json", "chats.json",
-})
-MISSING = object()
 CHAT_FILE = app.CONFIG_FILE.with_name("chats.json")
 CHAT_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 CHAT_LOCK = threading.Lock()
@@ -25,58 +21,6 @@ if not USERNAME or ":" in USERNAME:
     raise SystemExit("Set APP_USERNAME to a non-empty name without ':'.")
 if len(PASSWORD) < 16:
     raise SystemExit("Set APP_PASSWORD to a password of at least 16 characters.")
-
-
-class SupabaseJSONStore:
-    """Store the app's JSON state files in a private Supabase table."""
-
-    def __init__(self, client):
-        self.client = client
-
-    @classmethod
-    def from_environment(cls):
-        url = os.environ.get("SUPABASE_URL", "").strip()
-        key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-        if bool(url) != bool(key):
-            raise RuntimeError(
-                "Set both SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY, or neither."
-            )
-        if not url:
-            return None
-        try:
-            from supabase import create_client
-        except ImportError as error:
-            raise RuntimeError(
-                "Supabase storage is enabled but the supabase package is unavailable."
-            ) from error
-        return cls(create_client(url, key))
-
-    @staticmethod
-    def _validate_name(name):
-        if name not in STATE_FILES:
-            raise ValueError(f"Unsupported persistent state file: {name}")
-
-    def load(self, name):
-        self._validate_name(name)
-        response = (
-            self.client.table("app_state")
-            .select("value")
-            .eq("key", name)
-            .limit(1)
-            .execute()
-        )
-        rows = response.data or []
-        if not rows:
-            return MISSING
-        return rows[0]["value"]
-
-    def save(self, name, value):
-        self._validate_name(name)
-        self.client.table("app_state").upsert({
-            "key": name,
-            "value": value,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }, on_conflict="key").execute()
 
 
 def _configure_supabase_storage():

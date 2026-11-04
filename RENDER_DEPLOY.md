@@ -1,31 +1,37 @@
-# Deploy NOKK on Render (free)
+# Deploy NOKK on Render with Supabase storage
 
-The repository includes a Render Blueprint in `render.yaml`. It deploys the
-Python app as a web service and starts it through `render_start.py`. The normal
-desktop command remains `python app.py`; it still listens on `127.0.0.1` by
-default and does not require Render or Docker.
+This branch (`copilot/supabase-config-storage`) is the online-hosting variant.
+It starts through `render_start.py`, keeps HTTP Basic Authentication, and stores
+configuration, planner, workflows, Telegram settings and chat history in a
+private Supabase table instead of relying on the Render filesystem.
 
 ## Deploy
 
-1. In Render, choose **New → Blueprint** and connect this GitHub repository.
-2. Select the `main` branch and apply the Blueprint from `render.yaml`.
-3. When prompted for `APP_PASSWORD`, enter a unique password of at least 16
-   characters. Keep it private. The configured username is `nokk`.
-4. Wait for the service to finish deploying, then open its `onrender.com` URL.
-   The browser will ask for the username and password. Render provides HTTPS.
+1. Create a Supabase project, open the SQL Editor and run
+   [`supabase/schema.sql`](supabase/schema.sql). The table has RLS enabled and no
+   public policies: only the server-side service role key can read or write it.
+2. In Render, choose **New → Blueprint**, connect this GitHub repository and
+   select the `copilot/supabase-config-storage` branch, not `main`.
+3. When prompted, set `APP_PASSWORD` (at least 16 characters),
+   `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. Keep the password and the
+   service role key private; never commit them or expose them to the browser.
+4. Wait for the deployment to finish, then open the `onrender.com` URL. The
+   browser asks for the username (`nokk`) and the password you configured.
+   Render provides HTTPS.
 
-The startup wrapper binds to `0.0.0.0` and the `PORT` supplied by Render. It
+The startup wrapper binds to `0.0.0.0` and to the `PORT` supplied by Render. It
 requires HTTP Basic Authentication for both the website and its API; do not
 remove the password or expose the service without another authentication layer.
 
-## Important: free plan storage
+## Persistence
 
-Render's free web service does not provide a persistent disk. NOKK saves its
-provider configuration (including the API key), planner, workflows, and Telegram
-settings as local JSON files. Those files may be erased when the free service
-restarts, sleeps, or is redeployed, so you may need to configure the app again.
+Configuration, workflows, planner data, Telegram settings and chat history are
+saved in the `app_state` table, so they survive Render restarts, sleep cycles
+and redeployments. If `SUPABASE_URL` or `SUPABASE_SERVICE_ROLE_KEY` is missing,
+`render_start.py` falls back to local JSON files and prints a warning; those
+files are not durable on Render's free plan.
 
-Do not treat this free deployment as durable storage. If you need to keep data,
-export/back it up before deployments, or use an external database/storage service
-and adapt the app to use it. A Render environment variable cannot make the
-instance filesystem persistent.
+## Run locally
+
+`python app.py` still runs the app on `127.0.0.1:8000` with local JSON files and
+does not use Supabase. Use `render_start.py` only for the hosted deployment.

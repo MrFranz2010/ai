@@ -3,6 +3,16 @@
 Una piccola applicazione web locale per chattare con API cloud di OpenAI,
 Anthropic, Google Gemini o OpenRouter. Non richiede Ollama o Node.js.
 
+## Hosting online (Render + Supabase)
+
+Questo branch può essere distribuito su Render. In quel caso configurazione,
+procedure, calendario, Telegram e cronologia chat sono salvati nella tabella
+privata `app_state` di Supabase e sopravvivono ai riavvii, invece di usare i
+file JSON locali. Imposta `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY` come
+variabili segrete del servizio, esegui [`supabase/schema.sql`](supabase/schema.sql)
+e segui [`RENDER_DEPLOY.md`](RENDER_DEPLOY.md). Non esporre la service role key
+nel browser o nel repository.
+
 ## Avvio
 
 1. Installa Python 3.10 o successivo.
@@ -126,8 +136,9 @@ configurazione, con le stesse protezioni locali.
   Messaggi e contesto della chat autorizzata vengono inoltrati al provider AI
   configurato; disconnettere il bot rimuove token e chat autorizzate.
 - Non esegue ancora codice generato come skill né si auto-modifica.
-- La conversazione si azzera quando si ricarica la pagina; la configurazione
-  rimane salvata tra i riavvii.
+- La cronologia delle conversazioni è disponibile nel deploy online e viene
+  salvata in Supabase; con `python app.py` in locale la pagina non mostra il
+  pannello delle chat salvate. La configurazione resta salvata tra i riavvii.
 
 La creazione e l'attivazione di skill generate sono una fase successiva.
 
