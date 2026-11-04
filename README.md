@@ -14,25 +14,25 @@ Il launcher `linux_start.py` mantiene la compatibilità con il server locale e a
 la cronologia delle chat. Su Linux le conversazioni sono salvate in `chats.json`
 accanto alla configurazione dell’app; puoi crearne molte, riaprirle ed eliminarle.
 
-## Ricerca Google
+## Ricerca web gratuita
 
-Nel branch `main` l'assistente può cercare risultati Google con lo strumento
-`google_search`, che restituisce titolo, URL ed estratto dei risultati
-principali. La ricerca usa [Serper](https://serper.dev/), che espone i risultati
-Google tramite una API con chiave e offre un piano gratuito iniziale.
+L'assistente usa lo strumento `web_search`, che restituisce titolo, URL ed
+estratto dei risultati. **Non serve alcuna chiave a pagamento**: senza
+configurazione usa DuckDuckGo tramite la sua pagina HTML pubblica.
 
-Imposta `SERPER_API_KEY` come variabile d'ambiente del server prima di avviare
-`python linux_start.py`:
+Sono supportati anche provider opzionali con piano gratuito senza carta:
 
-```bash
-export SERPER_API_KEY="la-tua-chiave"
-```
+- **Exa**: imposta `EXA_API_KEY` (crediti gratuiti iniziali e mensili).
+- **Tavily**: imposta `TAVILY_API_KEY` (circa 1.000 ricerche al mese).
 
-La chiave resta solo lato server, non viene salvata nel repository, nella
+L'ordine è Exa, Tavily, DuckDuckGo e infine Serper se la vecchia
+`SERPER_API_KEY` è ancora presente. Serper non è più obbligatorio e non viene
+usato se non configurato.
+
+Le chiavi restano solo lato server e non vengono salvate nel repository, nella
 configurazione dell'app o nella cronologia chat. Le query vengono inviate al
-servizio di ricerca esterno: non inserire dati riservati. Senza
-`SERPER_API_KEY` lo strumento risponde con un errore di configurazione e
-l'assistente continua a funzionare normalmente.
+provider scelto: non inserire dati riservati. DuckDuckGo può temporaneamente
+bloccare le richieste automatizzate; in quel caso configura Exa o Tavily.
 
 ## Auto-modifica del codice (branch `main`)
 

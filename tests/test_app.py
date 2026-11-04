@@ -35,6 +35,20 @@ class FakeResponse:
         return json.dumps(self.payload).encode("utf-8")
 
 
+class FakeHtmlResponse:
+    def __init__(self, html):
+        self.html = html
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self, _size=None):
+        return self.html.encode("utf-8")
+
+
 class AppRouteTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -712,10 +726,13 @@ class AppRouteTests(unittest.TestCase):
         self.assertEqual(loaded["api_keys"], {"google": "legacy-secret"})
 
     def test_public_config_reports_search_configuration(self):
-        with patch.object(app, "SERPER_API_KEY", "test-serper-key"):
+        with patch.multiple(
+            app, EXA_API_KEY="", TAVILY_API_KEY="", SERPER_API_KEY="",
+        ):
             with urlopen(f"{self.base_url}/api/config") as response:
                 public_config = json.loads(response.read())
         self.assertTrue(public_config["search_configured"])
+        self.assertIn("duckduckgo", public_config["search_providers"])
 
     def test_config_rejects_system_prompt_over_limit(self):
         request = Request(
@@ -1079,58 +1096,73 @@ class SelfUpdatePullRequestTests(unittest.TestCase):
 
 
 
-class GoogleSearchToolTests(unittest.TestCase):
-    def test_search_requires_api_key(self):
-        with patch.object(app, "SERPER_API_KEY", ""):
-            with self.assertRaises(RuntimeError) as raised:
-                app.execute_app_tool(
-                    "google_search", {"query": "meteo Roma"},
-                )
-        self.assertIn("SERPER_API_KEY", str(raised.exception))
-
-    def test_search_returns_google_results(self):
-        payload = {
-            "organic": [
-                {
-                    "title": "Meteo Roma",
-                    "link": "https://example.com/roma",
-                    "snippet": "Sole e 24 gradi.",
-                },
-                {"title": "Senza link", "snippet": "Da ignorare."},
-            ],
-        }
+class WebSearchToolTests(unittest.TestCase):
+    def test_search_works_without_any_api_key(self):
+        page = """
+        <div class="result">
+          <a class="result__a"
+             href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Froma">
+            Meteo Roma
+          </a>
+          <a class="result__snippet">Sole e 24 gradi.</a>
+        </div>
+        """
         with (
-            patch.object(app, "SERPER_API_KEY", "test-serper-key"),
-            patch("app.urlopen", return_value=FakeResponse(payload)) as search_call,
+            patch.multiple(
+                app, EXA_API_KEY="", TAVILY_API_KEY="", SERPER_API_KEY="",
+            ),
+            patch("app.urlopen", return_value=FakeHtmlResponse(page)) as search_call,
         ):
-            result = app.execute_app_tool("google_search", {
+            result = app.execute_app_tool("web_search", {
                 "query": " meteo Roma ",
                 "num_results": 3,
             })
+        self.assertEqual(result["provider"], "duckduckgo")
         self.assertEqual(result["results"], [{
             "title": "Meteo Roma",
             "url": "https://example.com/roma",
             "snippet": "Sole e 24 gradi.",
         }])
         request = search_call.call_args.args[0]
-        self.assertEqual(request.full_url, app.SERPER_SEARCH_URL)
+        self.assertEqual(request.full_url, app.DUCKDUCKGO_SEARCH_URL)
+        self.assertIn(b"q=meteo+Roma", request.data)
+
+    def test_search_uses_exa_when_key_is_configured(self):
+        payload = {
+            "results": [{
+                "title": "Meteo Roma",
+                "url": "https://example.com/roma",
+                "text": "Sole e 24 gradi.",
+            }],
+        }
+        with (
+            patch.multiple(
+                app, EXA_API_KEY="test-exa", TAVILY_API_KEY="", SERPER_API_KEY="",
+            ),
+            patch("app.urlopen", return_value=FakeResponse(payload)) as search_call,
+        ):
+            result = app.execute_app_tool("web_search", {
+                "query": " meteo Roma ",
+                "num_results": 3,
+            })
+        self.assertEqual(result["provider"], "exa")
+        self.assertEqual(result["results"][0]["url"], "https://example.com/roma")
+        request = search_call.call_args.args[0]
+        self.assertEqual(request.full_url, app.EXA_SEARCH_URL)
         headers = {key.lower(): value for key, value in request.header_items()}
-        self.assertEqual(headers["x-api-key"], "test-serper-key")
-        self.assertEqual(
-            json.loads(request.data), {"q": "meteo Roma", "num": 3},
-        )
+        self.assertEqual(headers["x-api-key"], "test-exa")
+        self.assertEqual(json.loads(request.data)["query"], "meteo Roma")
 
     def test_search_validates_query_and_result_count(self):
-        with patch.object(app, "SERPER_API_KEY", "test-serper-key"):
-            for arguments in (
-                {"query": ""},
-                {"query": "x" * (app.MAX_SEARCH_QUERY_LENGTH + 1)},
-                {"query": "ok", "num_results": 0},
-                {"query": "ok", "num_results": app.MAX_SEARCH_RESULTS + 1},
-            ):
-                with self.subTest(arguments=arguments):
-                    with self.assertRaises(ValueError):
-                        app.execute_app_tool("google_search", arguments)
+        for arguments in (
+            {"query": ""},
+            {"query": "x" * (app.MAX_SEARCH_QUERY_LENGTH + 1)},
+            {"query": "ok", "num_results": 0},
+            {"query": "ok", "num_results": app.MAX_SEARCH_RESULTS + 1},
+        ):
+            with self.subTest(arguments=arguments):
+                with self.assertRaises(ValueError):
+                    app.execute_app_tool("web_search", arguments)
 
 
 if __name__ == "__main__":
