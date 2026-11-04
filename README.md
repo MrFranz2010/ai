@@ -15,12 +15,23 @@ nel browser o nel repository.
 
 ## Ricerca Google
 
-Questo branch espone lo strumento `google_search`, che restituisce titolo, URL
-ed estratto dei risultati Google tramite [Serper](https://serper.dev/). Imposta
-`SERPER_API_KEY` come variabile d'ambiente (su Render: variabile segreta del
-servizio). La chiave resta solo lato server e non viene salvata in Supabase, nel
-repository o nella cronologia. Le query vengono inviate al servizio esterno: non
-inserire dati riservati.
+L'assistente usa lo strumento `web_search`, che restituisce titolo, URL ed
+estratto dei risultati. **Non serve alcuna chiave a pagamento**: senza
+configurazione usa DuckDuckGo tramite la sua pagina HTML pubblica.
+
+Sono supportati anche provider opzionali con piano gratuito senza carta:
+
+- **Exa**: imposta `EXA_API_KEY` (crediti gratuiti iniziali e mensili).
+- **Tavily**: imposta `TAVILY_API_KEY` (circa 1.000 ricerche al mese).
+
+L'ordine è Exa, Tavily, DuckDuckGo e infine Serper se la vecchia
+`SERPER_API_KEY` è ancora presente. Serper non è più obbligatorio e non viene
+usato se non configurato.
+
+Le chiavi restano solo lato server e non vengono salvate in Supabase, nel
+repository o nella cronologia chat. Le query vengono inviate al provider scelto:
+non inserire dati riservati. DuckDuckGo può temporaneamente bloccare le
+richieste automatizzate; in quel caso configura Exa o Tavily.
 
 ## Avvio
 

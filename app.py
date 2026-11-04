@@ -24,7 +24,7 @@ from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from pypdf import PdfReader
@@ -63,7 +63,7 @@ FETCH_URL_TOOL = {
     "name": "fetch_url",
     "description": (
         "Legge una pagina web pubblica e restituisce titolo e testo, così puoi "
-        "verificare i risultati di google_search e citare la fonte. Non usare "
+        "verificare i risultati di web_search e citare la fonte. Non usare "
         "per URL privati, locali o che richiedono login."
     ),
     "parameters": {
@@ -162,11 +162,12 @@ APP_TOOLS = [
         },
     },
     {
-        "name": "google_search",
+        "name": "web_search",
         "description": (
-            "Cerca sul web con Google e restituisce i risultati principali con "
-            "titolo, URL ed estratto. Usalo per informazioni aggiornate o "
-            "verificabili e cita gli URL restituiti."
+            "Cerca sul web e restituisce i risultati principali con titolo, URL "
+            "ed estratto. Usa DuckDuckGo senza chiave oppure Exa/Tavily se "
+            "configurati. Usalo per informazioni aggiornate o verificabili e "
+            "cita gli URL restituiti."
         ),
         "parameters": {
             "type": "object",
@@ -184,6 +185,17 @@ SERPER_API_KEY = os.environ.get("SERPER_API_KEY", "").strip()
 SERPER_SEARCH_URL = os.environ.get(
     "SERPER_SEARCH_URL", "https://google.serper.dev/search"
 ).rstrip("/")
+EXA_API_KEY = os.environ.get("EXA_API_KEY", "").strip()
+EXA_SEARCH_URL = os.environ.get(
+    "EXA_SEARCH_URL", "https://api.exa.ai/search"
+).rstrip("/")
+TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "").strip()
+TAVILY_SEARCH_URL = os.environ.get(
+    "TAVILY_SEARCH_URL", "https://api.tavily.com/search"
+).rstrip("/")
+DUCKDUCKGO_SEARCH_URL = os.environ.get(
+    "DUCKDUCKGO_SEARCH_URL", "https://html.duckduckgo.com/html/"
+)
 MAX_SEARCH_QUERY_LENGTH = 400
 MAX_SEARCH_RESULTS = 8
 DEFAULT_SEARCH_RESULTS = 5
@@ -633,12 +645,271 @@ def configured_providers(saved):
     return sorted(names)
 
 
-def google_search(query, num_results=DEFAULT_SEARCH_RESULTS):
-    if not SERPER_API_KEY:
+class _DuckDuckGoParser(HTMLParser):
+    """Extract organic links and snippets from DuckDuckGo's HTML page."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.results = []
+        self._current = None
+        self._in_title = False
+        self._in_snippet = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag != "a":
+            return
+        attributes = dict(attrs)
+        classes = attributes.get("class", "").split()
+        if "result__a" in classes:
+            self._current = {
+                "title": "",
+                "url": attributes.get("href", ""),
+                "snippet": "",
+            }
+            self._in_title = True
+        elif "result__snippet" in classes and self.results:
+            self._in_snippet = True
+
+    def handle_endtag(self, tag):
+        if tag != "a":
+            return
+        if self._in_title and self._current is not None:
+            self.results.append(self._current)
+            self._current = None
+            self._in_title = False
+        elif self._in_snippet:
+            self._in_snippet = False
+
+    def handle_data(self, data):
+        if self._in_title and self._current is not None:
+            self._current["title"] += data
+        elif self._in_snippet and self.results:
+            self.results[-1]["snippet"] += data
+
+
+def _normalize_search_result(title, url, snippet):
+    if not isinstance(url, str):
+        return None
+    clean_url = url.strip()
+    if not clean_url.startswith(("http://", "https://")):
+        return None
+    clean_title = re.sub(r"\s+", " ", title).strip() if isinstance(title, str) else ""
+    clean_snippet = (
+        re.sub(r"\s+", " ", snippet).strip() if isinstance(snippet, str) else ""
+    )
+    return {
+        "title": (clean_title or clean_url)[:200],
+        "url": clean_url[:500],
+        "snippet": clean_snippet[:500],
+    }
+
+
+def _search_http_json(request, provider):
+    try:
+        with urlopen(request, timeout=20) as response:
+            body = response.read()
+    except HTTPError as error:
+        code = error.code
+        error.close()
         raise RuntimeError(
-            "Ricerca Google non configurata: imposta SERPER_API_KEY come "
-            "variabile d'ambiente del server."
+            f"{provider} ha rifiutato la richiesta (HTTP {code})."
+        ) from None
+    except URLError:
+        raise RuntimeError(
+            f"Impossibile raggiungere {provider}. Controlla la connessione."
+        ) from None
+    except (OSError, TimeoutError):
+        raise RuntimeError(f"Timeout durante la ricerca con {provider}.") from None
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise RuntimeError(f"{provider} ha restituito una risposta non valida.") from None
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"{provider} ha restituito una risposta non valida.")
+    return payload
+
+
+def _exa_search(query, num_results):
+    request = Request(
+        EXA_SEARCH_URL,
+        data=json.dumps({
+            "query": query,
+            "numResults": num_results,
+            "type": "auto",
+            "contents": {"text": {"maxCharacters": 500}},
+        }).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "x-api-key": EXA_API_KEY,
+            "User-Agent": "NOKK-web-search",
+        },
+        method="POST",
+    )
+    payload = _search_http_json(request, "Exa")
+    items = payload.get("results")
+    if not isinstance(items, list):
+        raise RuntimeError("Exa ha restituito risultati non validi.")
+    results = []
+    for item in items[:num_results]:
+        if not isinstance(item, dict):
+            continue
+        result = _normalize_search_result(
+            item.get("title"), item.get("url"), item.get("text") or item.get("summary"),
         )
+        if result:
+            results.append(result)
+    return results
+
+
+def _tavily_search(query, num_results):
+    request = Request(
+        TAVILY_SEARCH_URL,
+        data=json.dumps({
+            "api_key": TAVILY_API_KEY,
+            "query": query,
+            "max_results": num_results,
+            "search_depth": "basic",
+            "include_answer": False,
+        }).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "NOKK-web-search",
+        },
+        method="POST",
+    )
+    payload = _search_http_json(request, "Tavily")
+    items = payload.get("results")
+    if not isinstance(items, list):
+        raise RuntimeError("Tavily ha restituito risultati non validi.")
+    results = []
+    for item in items[:num_results]:
+        if not isinstance(item, dict):
+            continue
+        result = _normalize_search_result(
+            item.get("title"), item.get("url"), item.get("content"),
+        )
+        if result:
+            results.append(result)
+    return results
+
+
+def _serper_search(query, num_results):
+    request = Request(
+        SERPER_SEARCH_URL,
+        data=json.dumps({"q": query, "num": num_results}).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-API-KEY": SERPER_API_KEY,
+            "User-Agent": "NOKK-web-search",
+        },
+        method="POST",
+    )
+    payload = _search_http_json(request, "Serper")
+    items = payload.get("organic")
+    if not isinstance(items, list):
+        raise RuntimeError("Serper ha restituito risultati non validi.")
+    results = []
+    for item in items[:num_results]:
+        if not isinstance(item, dict):
+            continue
+        result = _normalize_search_result(
+            item.get("title"), item.get("link"), item.get("snippet"),
+        )
+        if result:
+            results.append(result)
+    return results
+
+
+def _duckduckgo_target(url):
+    if not isinstance(url, str):
+        return None
+    target = url.strip()
+    if target.startswith("//"):
+        target = "https:" + target
+    elif target.startswith("/l/"):
+        target = "https://duckduckgo.com" + target
+    parsed = urlsplit(target)
+    if parsed.hostname in {"duckduckgo.com", "www.duckduckgo.com"} and parsed.path.startswith("/l/"):
+        redirect = parse_qs(parsed.query).get("uddg")
+        if redirect:
+            target = unquote(redirect[0])
+    if not target.startswith(("http://", "https://")):
+        return None
+    return target
+
+
+def _duckduckgo_search(query, num_results):
+    request = Request(
+        DUCKDUCKGO_SEARCH_URL,
+        data=urlencode({"q": query, "kl": "it-it"}).encode("utf-8"),
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "text/html",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0 Safari/537.36"
+            ),
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            page = response.read(2_000_000).decode("utf-8", "replace")
+    except HTTPError as error:
+        code = error.code
+        error.close()
+        raise RuntimeError(
+            f"DuckDuckGo ha rifiutato la richiesta (HTTP {code})."
+        ) from None
+    except URLError:
+        raise RuntimeError(
+            "Impossibile raggiungere DuckDuckGo. Controlla la connessione."
+        ) from None
+    except (OSError, TimeoutError):
+        raise RuntimeError("Timeout durante la ricerca con DuckDuckGo.") from None
+    parser = _DuckDuckGoParser()
+    parser.feed(page)
+    results = []
+    seen = set()
+    for item in parser.results:
+        target = _duckduckgo_target(item.get("url"))
+        result = _normalize_search_result(
+            item.get("title"), target, item.get("snippet"),
+        )
+        if result and result["url"] not in seen:
+            seen.add(result["url"])
+            results.append(result)
+        if len(results) >= num_results:
+            break
+    if not results:
+        raise RuntimeError(
+            "DuckDuckGo non ha restituito risultati (possibile blocco temporaneo)."
+        )
+    return results
+
+
+def search_providers():
+    providers = []
+    if EXA_API_KEY:
+        providers.append("exa")
+    if TAVILY_API_KEY:
+        providers.append("tavily")
+    providers.append("duckduckgo")
+    if SERPER_API_KEY:
+        providers.append("serper")
+    return providers
+
+
+def search_configured():
+    """Web search always has the keyless DuckDuckGo fallback."""
+    return True
+
+
+def web_search(query, num_results=DEFAULT_SEARCH_RESULTS):
     if (
         not isinstance(query, str)
         or not query.strip()
@@ -653,69 +924,43 @@ def google_search(query, num_results=DEFAULT_SEARCH_RESULTS):
         or not 1 <= num_results <= MAX_SEARCH_RESULTS
     ):
         raise ValueError(f"Chiedi da 1 a {MAX_SEARCH_RESULTS} risultati.")
-    request = Request(
-        SERPER_SEARCH_URL,
-        data=json.dumps({
-            "q": query.strip(),
-            "num": num_results,
-        }).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "X-API-KEY": SERPER_API_KEY,
-            "User-Agent": "NOKK-google-search",
-        },
-        method="POST",
-    )
-    try:
-        with urlopen(request, timeout=20) as response:
-            body = response.read()
-    except HTTPError as error:
-        error.close()
-        raise RuntimeError(
-            f"La ricerca Google ha rifiutato la richiesta (HTTP {error.code}). "
-            "Controlla che SERPER_API_KEY sia valida e abbia credito."
-        ) from None
-    except URLError:
-        raise RuntimeError(
-            "Impossibile raggiungere il servizio di ricerca. "
-            "Controlla la connessione."
-        ) from None
-    except (OSError, TimeoutError):
-        raise RuntimeError("Timeout durante la ricerca Google.") from None
-    try:
-        payload = json.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        raise RuntimeError(
-            "Il servizio di ricerca ha restituito una risposta non valida."
-        ) from None
-    organic = payload.get("organic") if isinstance(payload, dict) else None
-    if not isinstance(organic, list):
-        raise RuntimeError(
-            "Il servizio di ricerca ha restituito risultati non validi."
-        )
-    results = []
-    for item in organic[:num_results]:
-        if not isinstance(item, dict):
-            continue
-        link = item.get("link")
-        if not isinstance(link, str) or not link.startswith(("http://", "https://")):
-            continue
-        title = item.get("title")
-        snippet = item.get("snippet")
-        results.append({
-            "title": title[:200] if isinstance(title, str) else link,
-            "url": link[:500],
-            "snippet": snippet[:500] if isinstance(snippet, str) else "",
-        })
-    return {
-        "query": query.strip(),
-        "results": results,
-        "note": (
-            "Risultati Google forniti da Serper."
-            if results else "Nessun risultato trovato."
-        ),
+    clean_query = query.strip()
+    labels = {
+        "exa": "Exa",
+        "tavily": "Tavily",
+        "duckduckgo": "DuckDuckGo",
+        "serper": "Google/Serper",
     }
+    errors = []
+    for provider in search_providers():
+        try:
+            if provider == "exa":
+                results = _exa_search(clean_query, num_results)
+            elif provider == "tavily":
+                results = _tavily_search(clean_query, num_results)
+            elif provider == "serper":
+                results = _serper_search(clean_query, num_results)
+            else:
+                results = _duckduckgo_search(clean_query, num_results)
+        except RuntimeError as error:
+            errors.append(f"{labels[provider]}: {error}")
+            continue
+        if results:
+            return {
+                "query": clean_query,
+                "results": results[:num_results],
+                "provider": provider,
+                "note": f"Risultati web forniti da {labels[provider]}.",
+            }
+        errors.append(f"{labels[provider]}: nessun risultato.")
+    raise RuntimeError(
+        "Ricerca web non disponibile. " + " | ".join(errors[-4:])
+    )
+
+
+def google_search(query, num_results=DEFAULT_SEARCH_RESULTS):
+    """Backward-compatible alias for older chats and tool calls."""
+    return web_search(query, num_results)
 
 
 class _PageTextParser(HTMLParser):
@@ -1737,17 +1982,12 @@ def run_chat_job(job_id, messages, active_config):
             "results. Never fetch localhost, private addresses or pages that "
             "require login. Cite the page URL when you use its content."
         )
-        if SERPER_API_KEY:
-            app_prompt += (
-                " You can use google_search to look up current or external "
-                "information with Google. Cite the returned URLs and never invent "
-                "results. Search queries are sent to the configured search service."
-            )
-        else:
-            app_prompt += (
-                " Web search is unavailable until the server owner configures "
-                "SERPER_API_KEY."
-            )
+        app_prompt += (
+            " You can use web_search to look up current or external information "
+            "on the web. It uses DuckDuckGo without an API key and optionally "
+            "Exa or Tavily when configured. Cite the returned URLs and never "
+            "invent results. Search queries are sent to the search provider."
+        )
         system_prompt = "\n\n".join(
             part for part in (system_prompt, app_prompt) if part
         )
@@ -2263,7 +2503,8 @@ def execute_app_tool(name, arguments):
                 }
                 safe_config["configured"] = bool(config["api_key"])
                 safe_config["configured_providers"] = configured_providers(config)
-                safe_config["search_configured"] = bool(SERPER_API_KEY)
+                safe_config["search_configured"] = search_configured()
+                safe_config["search_providers"] = search_providers()
             return safe_config
         if section == "workflows":
             with config_lock:
@@ -2332,10 +2573,9 @@ def execute_app_tool(name, arguments):
             "item": saved_item,
         }
 
-    if name == "google_search":
-        return google_search(
-            arguments.get("query"),
-            arguments.get("num_results", DEFAULT_SEARCH_RESULTS),
+    if name in {"web_search", "google_search"}:
+        return web_search(
+            arguments.get("query"), arguments.get("num_results", DEFAULT_SEARCH_RESULTS),
         )
 
     if name == "fetch_url":
@@ -2513,7 +2753,8 @@ class AppHandler(BaseHTTPRequestHandler):
                     "model": config["model"],
                     "configured": bool(config["api_key"]),
                     "configured_providers": configured_providers(config),
-                    "search_configured": bool(SERPER_API_KEY),
+                    "search_configured": search_configured(),
+                    "search_providers": search_providers(),
                     "terminal_enabled": config["terminal_enabled"],
                     "approval_mode": config["approval_mode"],
                     "workspace": config["workspace"],
