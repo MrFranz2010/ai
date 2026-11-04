@@ -25,9 +25,9 @@ remove the password or expose the service without another authentication layer.
 
 ## Persistence
 
-Configuration, workflows, planner data, Telegram settings and chat history are
-saved in the `app_state` table, so they survive Render restarts, sleep cycles
-and redeployments. If `SUPABASE_URL` or `SUPABASE_SERVICE_ROLE_KEY` is missing,
+Configuration, workflows, planner data, Telegram settings, chat history and
+personal memory are saved in the `app_state` table, so they survive Render
+restarts, sleep cycles and redeployments. If `SUPABASE_URL` or `SUPABASE_SERVICE_ROLE_KEY` is missing,
 `render_start.py` falls back to local JSON files and prints a warning; those
 files are not durable on Render's free plan.
 
@@ -40,6 +40,10 @@ created with an older constraint. Run
 in the Supabase SQL Editor for the project used by Render. You can also re-run
 [`supabase/schema.sql`](supabase/schema.sql), which is idempotent. No Render
 redeploy is needed: the change is in the database.
+
+The same migration now also allows `memories.json` for the personal memory
+panel. If you applied the earlier version, run the updated file again; it is
+idempotent.
 
 ## Web search
 

@@ -8,6 +8,7 @@ STATE_FILES = frozenset({
     "planner.json",
     "telegram.json",
     "chats.json",
+    "memories.json",
 })
 MISSING = object()
 

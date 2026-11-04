@@ -8,12 +8,14 @@ import threading
 from http.server import ThreadingHTTPServer
 
 import app
+import user_memory
 from supabase_store import MISSING, SupabaseJSONStore
 
 
 USERNAME = os.environ.get("APP_USERNAME", "")
 PASSWORD = os.environ.get("APP_PASSWORD", "")
 CHAT_FILE = app.CONFIG_FILE.with_name("chats.json")
+MEMORY_FILE = app.CONFIG_FILE.with_name("memories.json")
 CHAT_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 CHAT_LOCK = threading.Lock()
 
@@ -62,6 +64,7 @@ def _configure_supabase_storage():
                 saved.get("system_prompt", ""), saved.get("wake_phrase", "Nok"),
                 saved.get("tts_auto_play", False),
                 saved.get("api_keys", {}),
+                saved.get("notifications_enabled", False),
             )
         except ValueError as error:
             raise RuntimeError(f"Supabase configuration is invalid: {error}") from error
@@ -139,6 +142,29 @@ def _configure_supabase_storage():
 
 
 CHAT_STORAGE = _configure_supabase_storage()
+
+
+def load_memories():
+    if CHAT_STORAGE is not None:
+        saved = CHAT_STORAGE.load("memories.json")
+        if saved is MISSING:
+            return []
+        return user_memory.validate_memories(saved)
+    try:
+        with MEMORY_FILE.open("r", encoding="utf-8") as memory_file:
+            saved = json.load(memory_file)
+    except FileNotFoundError:
+        return []
+    return user_memory.validate_memories(saved)
+
+
+def save_memories(memories):
+    validated = user_memory.validate_memories(memories)
+    if CHAT_STORAGE is not None:
+        CHAT_STORAGE.save("memories.json", validated)
+    else:
+        app.save_json_file(MEMORY_FILE, validated)
+    return validated
 
 
 def validate_chats(chats):
@@ -256,11 +282,27 @@ class AuthenticatedAppHandler(app.AppHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_user_memory_script(self):
+        try:
+            body = (app.APP_DIR / "web" / "user-memory.js").read_bytes()
+        except OSError:
+            self._send_json(404, {"error": "Script memoria non disponibile."})
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/javascript; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _send_home(self):
         try:
             body = (app.APP_DIR / "web" / "index.html").read_bytes()
             body = body.replace(
-                b"</head>", b'<script src="/chat-history.js" defer></script></head>',
+                b"</head>",
+                b'<script src="/chat-history.js" defer></script>'
+                b'<script src="/user-memory.js" defer></script></head>',
             )
         except OSError:
             self._send_json(500, {"error": "Interfaccia web non disponibile."})
@@ -286,6 +328,9 @@ class AuthenticatedAppHandler(app.AppHandler):
             return
         if self.path == "/chat-history.js":
             self._send_chat_script()
+            return
+        if self.path == "/user-memory.js":
+            self._send_user_memory_script()
             return
         if self.path == "/api/chats":
             try:
@@ -345,14 +390,13 @@ class AuthenticatedAppHandler(app.AppHandler):
             self._send_json(502, {"error": "Impossibile salvare le conversazioni."})
 
 
+user_memory.install(app, AuthenticatedAppHandler, load_memories, save_memories)
+
+
 if __name__ == "__main__":
     app.HOST = "0.0.0.0"
     app.PORT = int(os.environ.get("PORT", "10000"))
     app.start_telegram_polling()
-    print(
-        "Google search: "
-        + ("configured" if app.SERPER_API_KEY else "not configured (set SERPER_API_KEY)"),
-        flush=True,
-    )
+    print("Web search: " + ", ".join(app.search_providers()), flush=True)
     print(f"NOKK listening on {app.HOST}:{app.PORT}", flush=True)
     ThreadingHTTPServer((app.HOST, app.PORT), AuthenticatedAppHandler).serve_forever()
