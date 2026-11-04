@@ -1090,13 +1090,127 @@ class WebSearchToolTests(unittest.TestCase):
             ),
             patch(
                 "app.urlopen",
-                side_effect=[challenge, FakeHtmlResponse("<html></html>")],
+                side_effect=[challenge] + [FakeHtmlResponse("<html></html>")] * 3,
             ),
+            patch("app.time.sleep"),
         ):
             with self.assertRaises(RuntimeError) as raised:
                 app.execute_app_tool("web_search", {"query": "meteo Roma"})
         self.assertIn("anti-bot", str(raised.exception))
         self.assertIn("Bing", str(raised.exception))
+
+    def test_bing_retries_another_variant_when_first_answer_is_empty(self):
+        challenge = FakeStatusHtmlResponse("<html>challenge</html>", status=202)
+        empty_page = FakeHtmlResponse("<html>Non sono disponibili risultati</html>")
+        result_page = FakeHtmlResponse("""
+        <ol id="b_results">
+          <li class="b_algo">
+            <h2><a href="https://example.com/roma">Meteo Roma</a></h2>
+            <p>Sole e 24 gradi.</p>
+          </li>
+        </ol>
+        """)
+        with (
+            patch.multiple(
+                app, EXA_API_KEY="", TAVILY_API_KEY="", SERPER_API_KEY="",
+            ),
+            patch(
+                "app.urlopen",
+                side_effect=[challenge, empty_page, result_page],
+            ) as search_call,
+            patch("app.time.sleep") as sleep,
+        ):
+            result = app.execute_app_tool("web_search", {"query": "meteo Roma"})
+        self.assertEqual(result["provider"], "bing")
+        self.assertEqual(result["results"][0]["url"], "https://example.com/roma")
+        self.assertEqual(search_call.call_count, 3)
+        second_bing = search_call.call_args_list[2].args[0].full_url
+        self.assertIn("cc=IT", second_bing)
+        sleep.assert_called_once()
+
+    def test_bing_uses_rss_endpoint_when_html_stays_empty(self):
+        challenge = FakeStatusHtmlResponse("<html>challenge</html>", status=202)
+        empty_page = FakeHtmlResponse("<html>Non sono disponibili risultati</html>")
+        rss = FakeHtmlResponse(
+            '<?xml version="1.0" encoding="utf-8" ?>'
+            '<rss version="2.0"><channel><title>Bing: meteo Roma</title>'
+            '<item><title>Meteo Roma</title><link>https://example.com/roma</link>'
+            '<description>Sole &amp; 24 gradi.</description></item>'
+            '</channel></rss>'
+        )
+        with (
+            patch.multiple(
+                app, EXA_API_KEY="", TAVILY_API_KEY="", SERPER_API_KEY="",
+            ),
+            patch(
+                "app.urlopen",
+                side_effect=[challenge, empty_page, empty_page, rss],
+            ) as search_call,
+            patch("app.time.sleep"),
+        ):
+            result = app.execute_app_tool("web_search", {"query": "meteo Roma"})
+        self.assertEqual(result["provider"], "bing")
+        self.assertEqual(result["results"], [{
+            "title": "Meteo Roma",
+            "url": "https://example.com/roma",
+            "snippet": "Sole & 24 gradi.",
+        }])
+        self.assertIn("format=rss", search_call.call_args_list[3].args[0].full_url)
+
+    def test_search_falls_back_to_wikipedia_when_every_engine_is_blocked(self):
+        challenge = FakeStatusHtmlResponse("<html>challenge</html>", status=202)
+        empty_page = FakeHtmlResponse("<html>Non sono disponibili risultati</html>")
+        payload = {
+            "query": {"search": [{
+                "title": "Roma",
+                "snippet": '<span class="searchmatch">Roma</span> è la capitale.',
+            }]},
+        }
+        with (
+            patch.multiple(
+                app, EXA_API_KEY="", TAVILY_API_KEY="", SERPER_API_KEY="",
+            ),
+            patch(
+                "app.urlopen",
+                side_effect=[
+                    challenge, empty_page, empty_page, empty_page,
+                    FakeResponse(payload),
+                ],
+            ) as search_call,
+            patch("app.time.sleep"),
+        ):
+            result = app.execute_app_tool("web_search", {"query": "meteo Roma"})
+        self.assertEqual(result["provider"], "wikipedia")
+        self.assertEqual(result["results"], [{
+            "title": "Roma",
+            "url": "https://it.wikipedia.org/wiki/Roma",
+            "snippet": "Roma è la capitale.",
+        }])
+        self.assertIn("notizie aggiornate", result["note"])
+        self.assertIn(
+            "it.wikipedia.org", search_call.call_args_list[4].args[0].full_url,
+        )
+
+    def test_unexpected_provider_error_does_not_stop_the_chain(self):
+        page = FakeHtmlResponse("""
+        <ol id="b_results">
+          <li class="b_algo">
+            <h2><a href="https://example.com/roma">Meteo Roma</a></h2>
+            <p>Sole e 24 gradi.</p>
+          </li>
+        </ol>
+        """)
+        with (
+            patch.multiple(
+                app, EXA_API_KEY="test-exa", TAVILY_API_KEY="", SERPER_API_KEY="",
+            ),
+            patch("app._exa_search", side_effect=KeyError("results")),
+            patch("app.urlopen", side_effect=[FakeHtmlResponse("<html></html>"), page]),
+            patch("app.time.sleep"),
+        ):
+            result = app.execute_app_tool("web_search", {"query": "meteo Roma"})
+        self.assertEqual(result["provider"], "bing")
+        self.assertEqual(result["results"][0]["url"], "https://example.com/roma")
 
     def test_search_works_without_any_api_key(self):
         page = """
