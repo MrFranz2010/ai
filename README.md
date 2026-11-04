@@ -18,21 +18,23 @@ accanto alla configurazione dell’app; puoi crearne molte, riaprirle ed elimina
 
 L'assistente usa lo strumento `web_search`, che restituisce titolo, URL ed
 estratto dei risultati. **Non serve alcuna chiave a pagamento**: senza
-configurazione usa DuckDuckGo tramite la sua pagina HTML pubblica.
+configurazione usa DuckDuckGo tramite la sua pagina HTML pubblica e, se
+DuckDuckGo non risponde o chiede una verifica anti-bot, ripiega su Bing.
 
 Sono supportati anche provider opzionali con piano gratuito senza carta:
 
 - **Exa**: imposta `EXA_API_KEY` (crediti gratuiti iniziali e mensili).
 - **Tavily**: imposta `TAVILY_API_KEY` (circa 1.000 ricerche al mese).
 
-L'ordine è Exa, Tavily, DuckDuckGo e infine Serper se la vecchia
+L'ordine è Exa, Tavily, DuckDuckGo, Bing e infine Serper se la vecchia
 `SERPER_API_KEY` è ancora presente. Serper non è più obbligatorio e non viene
 usato se non configurato.
 
 Le chiavi restano solo lato server e non vengono salvate nel repository, nella
 configurazione dell'app o nella cronologia chat. Le query vengono inviate al
 provider scelto: non inserire dati riservati. DuckDuckGo può temporaneamente
-bloccare le richieste automatizzate; in quel caso configura Exa o Tavily.
+bloccare le richieste automatizzate: in quel caso NOKK prova automaticamente
+con Bing, mentre Exa o Tavily restano i provider più affidabili.
 
 ## Auto-modifica del codice (branch `main`)
 
