@@ -14,18 +14,6 @@ Il launcher `linux_start.py` mantiene la compatibilità con il server locale e a
 la cronologia delle chat. Su Linux le conversazioni sono salvate in `chats.json`
 accanto alla configurazione dell’app; puoi crearne molte, riaprirle ed eliminarle.
 
-## Render
-
-Render usa il branch di deploy e `render_start.py`. Configura `APP_USERNAME`,
-`APP_PASSWORD` (almeno 16 caratteri), `SUPABASE_URL` e
-`SUPABASE_SERVICE_ROLE_KEY` come variabili segrete del servizio. Esegui lo schema
-[`supabase/schema.sql`](supabase/schema.sql) in Supabase SQL Editor. Su Render,
-configurazione, procedure, calendario, Telegram e cronologia chat sono salvati
-nella tabella privata `app_state`, così sopravvivono ai riavvii del servizio.
-
-Non esporre la service role key nel browser o nel codice del repository. La tabella
-ha RLS attivo e non deve avere policy pubbliche.
-
 ## Auto-modifica del codice (branch `main`)
 
 Nel branch `main` l'assistente può leggere i file del proprio repository e proporre
@@ -44,16 +32,15 @@ né nella chat:
 - `GITHUB_BASE_BRANCH`: branch di destinazione delle pull request (predefinito
   `main`).
 
-In locale esporta le variabili prima di avviare `python linux_start.py`; su Render
-aggiungile come variabili d'ambiente del servizio. Senza `GITHUB_TOKEN` restano
-disponibili solo la lettura del codice e l'elenco dei file.
+In locale esporta le variabili prima di avviare `python linux_start.py`. Senza
+`GITHUB_TOKEN` restano disponibili solo la lettura del codice e l'elenco dei file.
 
 ## Note sulla cronologia chat
 
 Sono supportate fino a 100 chat, con fino a 500 messaggi testuali per chat. Gli
 allegati non vengono conservati nella cronologia. Quando invia una nuova richiesta
 al provider, l'app limita il contesto trasmesso agli ultimi 40 messaggi. Le chat
-sono persistenti sul dispositivo Linux locale (file JSON) o su Supabase in Render.
+sono persistenti sul dispositivo locale (file JSON).
 
 ## Test
 

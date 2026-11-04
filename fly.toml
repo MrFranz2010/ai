@@ -1,3 +1,0 @@
-# Fly.io deployment config retired; use Render's render.yaml instead.
-# See RENDER_DEPLOY.md for setup. This file is intentionally left as a notice
-# because repository file deletion is not available in this update operation.
