@@ -41,7 +41,6 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 MAX_SYSTEM_PROMPT_LENGTH = 10000
 MAX_WAKE_PHRASE_LENGTH = 40
-MAX_WAKE_PHRASE_LENGTH = 40
 MAX_WORKFLOWS = 30
 MAX_WORKFLOW_NAME_LENGTH = 80
 MAX_WORKFLOW_PROMPT_LENGTH = 4000
@@ -130,6 +129,93 @@ APP_TOOLS = [
         },
     },
 ]
+SELF_UPDATE_TOOLS = [
+    {
+        "name": "list_repository_files",
+        "description": (
+            "Elenca file e cartelle del repository sorgente di NOKK. Usalo per "
+            "capire dove si trova il codice prima di modificarlo."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "directory": {
+                    "type": "string",
+                    "description": (
+                        "Cartella relativa alla radice del repository; "
+                        "vuoto per la radice."
+                    ),
+                },
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "read_repository_file",
+        "description": (
+            "Legge un file di testo del repository sorgente di NOKK. Non può "
+            "accedere a chiavi, token o file di stato privati."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "create_pull_request",
+        "description": (
+            "Crea un branch e una pull request su GitHub con le modifiche al "
+            "codice di NOKK. Non pubblica direttamente sul branch base: le "
+            "modifiche diventano attive solo dopo revisione, merge e redeploy."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "body": {"type": "string"},
+                "changes": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"},
+                            "content": {"type": "string"},
+                        },
+                        "required": ["path", "content"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["title", "changes"],
+            "additionalProperties": False,
+        },
+    },
+]
+ALL_APP_TOOLS = APP_TOOLS + SELF_UPDATE_TOOLS
+
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
+GITHUB_REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "MrFranz2010/ai").strip()
+GITHUB_BASE_BRANCH = os.environ.get("GITHUB_BASE_BRANCH", "main").strip()
+GITHUB_API_URL = os.environ.get(
+    "GITHUB_API_URL", "https://api.github.com"
+).rstrip("/")
+GITHUB_REPOSITORY_PATTERN = re.compile(
+    r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$"
+)
+GIT_BRANCH_PATTERN = re.compile(r"^[A-Za-z0-9._/-]{1,120}$")
+MAX_REPOSITORY_READ_BYTES = 120_000
+MAX_PULL_REQUEST_FILES = 20
+MAX_PULL_REQUEST_FILE_BYTES = 200_000
+PROTECTED_REPOSITORY_NAMES = frozenset({
+    "config.json", "workflows.json", "planner.json", "telegram.json",
+    "chats.json", "memories.json",
+})
+EXCLUDED_REPOSITORY_PARTS = frozenset({
+    ".git", ".venv", "__pycache__", "node_modules",
+})
 if os.environ.get("AI_CONFIG_FILE"):
     CONFIG_FILE = Path(os.environ["AI_CONFIG_FILE"]).expanduser()
 elif os.name == "nt":
@@ -525,6 +611,307 @@ def configured_providers(saved):
     return sorted(names)
 
 
+def _repository_target(relative, want_directory=False, must_exist=True):
+    """Validate a repository-relative path and resolve it inside APP_DIR."""
+    if not isinstance(relative, str):
+        raise ValueError("Percorso del repository non valido.")
+    relative = relative.strip().replace("\\", "/")
+    if len(relative) > 300 or relative.startswith("/") or "\x00" in relative:
+        raise ValueError("Percorso del repository non valido.")
+    parts = [part for part in relative.split("/") if part not in {"", "."}]
+    if any(part == ".." for part in parts):
+        raise ValueError("Il percorso deve restare dentro il repository.")
+    if any(part in EXCLUDED_REPOSITORY_PARTS for part in parts):
+        raise ValueError("Questa cartella del repository non è accessibile.")
+    if parts and (
+        parts[-1] in PROTECTED_REPOSITORY_NAMES
+        or parts[-1].startswith(".env")
+        or parts[-1].endswith((".pyc", ".pem", ".key"))
+    ):
+        raise ValueError("Questo file contiene dati riservati e non è accessibile.")
+    if not parts and not want_directory:
+        raise ValueError("Indica un file del repository.")
+    root = APP_DIR.resolve()
+    target = (root / Path(*parts)).resolve() if parts else root
+    if target != root and root not in target.parents:
+        raise ValueError("Il percorso deve restare dentro il repository.")
+    if target in {
+        path.resolve()
+        for path in (CONFIG_FILE, WORKFLOWS_FILE, PLANNER_FILE, TELEGRAM_FILE)
+    }:
+        raise ValueError("Questo file contiene dati riservati e non è accessibile.")
+    if want_directory:
+        if must_exist and not target.is_dir():
+            raise ValueError("Cartella del repository non trovata.")
+    elif must_exist and not target.is_file():
+        raise ValueError("File del repository non trovato.")
+    return target, "/".join(parts)
+
+
+def list_repository_files(directory=""):
+    target, normalized = _repository_target(
+        directory or "", want_directory=True,
+    )
+    files = []
+    directories = []
+    truncated = False
+    for entry in sorted(target.iterdir(), key=lambda item: item.name.lower()):
+        name = entry.name
+        if (
+            name in EXCLUDED_REPOSITORY_PARTS
+            or name in PROTECTED_REPOSITORY_NAMES
+            or name.startswith(".env")
+            or name.endswith((".pyc", ".pem", ".key"))
+            or entry.is_symlink()
+        ):
+            continue
+        relative = f"{normalized}/{name}" if normalized else name
+        if entry.is_dir():
+            directories.append(relative)
+        elif entry.is_file():
+            files.append(relative)
+        else:
+            continue
+        if len(files) + len(directories) >= 500:
+            truncated = True
+            break
+    return {
+        "directory": normalized or ".",
+        "directories": directories,
+        "files": files,
+        "truncated": truncated,
+    }
+
+
+def read_repository_file(path):
+    target, normalized = _repository_target(path)
+    size = target.stat().st_size
+    if size > MAX_REPOSITORY_READ_BYTES:
+        raise ValueError(
+            f"Il file supera il limite di {MAX_REPOSITORY_READ_BYTES} byte."
+        )
+    try:
+        content = target.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        raise ValueError(
+            "Il file non è testo UTF-8 e non può essere letto."
+        ) from None
+    return {"path": normalized, "bytes": size, "content": content}
+
+
+def _github_configuration():
+    if not GITHUB_TOKEN:
+        raise RuntimeError(
+            "Auto-modifica non configurata: imposta GITHUB_TOKEN come variabile "
+            "d'ambiente del server per creare pull request."
+        )
+    if not GITHUB_REPOSITORY_PATTERN.fullmatch(GITHUB_REPOSITORY):
+        raise RuntimeError(
+            "GITHUB_REPOSITORY deve avere il formato owner/repository."
+        )
+    if (
+        not GIT_BRANCH_PATTERN.fullmatch(GITHUB_BASE_BRANCH)
+        or ".." in GITHUB_BASE_BRANCH
+        or GITHUB_BASE_BRANCH.startswith("/")
+        or GITHUB_BASE_BRANCH.endswith("/")
+    ):
+        raise RuntimeError("GITHUB_BASE_BRANCH non è un branch valido.")
+
+
+def github_api_request(method, path, payload=None):
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "NOKK-self-update",
+        "Content-Type": "application/json",
+    }
+    request = Request(
+        f"{GITHUB_API_URL}{path}",
+        data=(
+            json.dumps(payload).encode("utf-8")
+            if payload is not None else None
+        ),
+        headers=headers,
+        method=method,
+    )
+    try:
+        with urlopen(request, timeout=30) as response:
+            body = response.read()
+    except HTTPError as error:
+        details = error.read(2048).decode("utf-8", errors="replace")
+        error.close()
+        raise RuntimeError(
+            f"GitHub ha rifiutato la richiesta (HTTP {error.code}): "
+            f"{details[:500]}"
+        ) from None
+    except URLError:
+        raise RuntimeError(
+            "Impossibile raggiungere GitHub. Controlla la connessione."
+        ) from None
+    except (OSError, TimeoutError):
+        raise RuntimeError(
+            "Timeout durante la comunicazione con GitHub."
+        ) from None
+    if not body:
+        return {}
+    try:
+        return json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise RuntimeError("GitHub ha restituito una risposta non valida.") from None
+
+
+def _github_sha(payload, key, label):
+    value = payload.get(key) if isinstance(payload, dict) else None
+    if not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{40,64}", value):
+        raise RuntimeError(f"GitHub non ha restituito {label}.")
+    return value
+
+
+def _pull_request_branch_name(title):
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40] or "update"
+    return f"nokk/auto-{slug}-{secrets.token_hex(4)}"
+
+
+def create_self_update_pull_request(title, body="", changes=None):
+    """Open a pull request with the requested code changes; never push to base."""
+    _github_configuration()
+    if not isinstance(title, str) or not title.strip() or len(title) > 200:
+        raise ValueError(
+            "Il titolo della pull request deve avere da 1 a 200 caratteri."
+        )
+    title = title.strip()
+    if body is None:
+        body = ""
+    if not isinstance(body, str) or len(body) > 8000:
+        raise ValueError(
+            "La descrizione della pull request deve avere massimo 8000 caratteri."
+        )
+    if not isinstance(changes, list) or not 1 <= len(changes) <= MAX_PULL_REQUEST_FILES:
+        raise ValueError(
+            f"Indica da 1 a {MAX_PULL_REQUEST_FILES} file da modificare."
+        )
+    file_changes = []
+    seen_paths = set()
+    for change in changes:
+        if not isinstance(change, dict):
+            raise ValueError("Ogni modifica deve avere path e content.")
+        _, path = _repository_target(change.get("path"), must_exist=False)
+        content = change.get("content")
+        if not isinstance(content, str):
+            raise ValueError(f"Il contenuto di {path} deve essere testo.")
+        if len(content.encode("utf-8")) > MAX_PULL_REQUEST_FILE_BYTES:
+            raise ValueError(
+                f"Il file {path} supera il limite di "
+                f"{MAX_PULL_REQUEST_FILE_BYTES} byte."
+            )
+        if path in seen_paths:
+            raise ValueError(f"Il file {path} è indicato più di una volta.")
+        seen_paths.add(path)
+        file_changes.append((path, content))
+
+    repository_path = f"/repos/{GITHUB_REPOSITORY}"
+    base_ref = github_api_request(
+        "GET",
+        f"{repository_path}/git/ref/heads/"
+        f"{quote(GITHUB_BASE_BRANCH, safe='/')}",
+    )
+    base_sha = _github_sha(
+        base_ref.get("object") if isinstance(base_ref, dict) else None,
+        "sha",
+        "il commit del branch base",
+    )
+    base_commit = github_api_request(
+        "GET", f"{repository_path}/git/commits/{base_sha}"
+    )
+    base_tree = _github_sha(
+        base_commit.get("tree") if isinstance(base_commit, dict) else None,
+        "sha",
+        "l'albero del branch base",
+    )
+    tree_entries = []
+    for path, content in file_changes:
+        blob = github_api_request(
+            "POST",
+            f"{repository_path}/git/blobs",
+            {"content": content, "encoding": "utf-8"},
+        )
+        tree_entries.append({
+            "path": path,
+            "mode": "100644",
+            "type": "blob",
+            "sha": _github_sha(blob, "sha", f"il blob di {path}"),
+        })
+    tree = github_api_request(
+        "POST",
+        f"{repository_path}/git/trees",
+        {"base_tree": base_tree, "tree": tree_entries},
+    )
+    new_tree = _github_sha(tree, "sha", "il nuovo albero")
+    commit = github_api_request(
+        "POST",
+        f"{repository_path}/git/commits",
+        {"message": title, "tree": new_tree, "parents": [base_sha]},
+    )
+    commit_sha = _github_sha(commit, "sha", "il nuovo commit")
+    branch = _pull_request_branch_name(title)
+    github_api_request(
+        "POST",
+        f"{repository_path}/git/refs",
+        {"ref": f"refs/heads/{branch}", "sha": commit_sha},
+    )
+    pull = github_api_request(
+        "POST",
+        f"{repository_path}/pulls",
+        {
+            "title": title,
+            "head": branch,
+            "base": GITHUB_BASE_BRANCH,
+            "body": body.strip(),
+        },
+    )
+    if not isinstance(pull, dict) or not isinstance(pull.get("html_url"), str):
+        raise RuntimeError("GitHub non ha restituito il link della pull request.")
+    return {
+        "ok": True,
+        "repository": GITHUB_REPOSITORY,
+        "branch": branch,
+        "base_branch": GITHUB_BASE_BRANCH,
+        "commit": commit_sha,
+        "number": pull.get("number"),
+        "url": pull["html_url"],
+        "files": [path for path, _ in file_changes],
+        "note": (
+            "La modifica non è attiva finché la pull request non viene unita "
+            "e distribuita."
+        ),
+    }
+
+
+def google_schema_value(schema):
+    """Convert a tool parameter schema to the Gemini declaration format."""
+    converted = {}
+    for key, value in schema.items():
+        if key == "type":
+            if isinstance(value, list):
+                types = [item for item in value if item != "null"]
+                if "null" in value:
+                    converted["nullable"] = True
+                converted["type"] = types[0].upper() if types else "STRING"
+            else:
+                converted["type"] = value.upper()
+        elif key == "properties":
+            converted[key] = {
+                name: google_schema_value(property_schema)
+                for name, property_schema in value.items()
+            }
+        elif key == "items":
+            converted[key] = google_schema_value(value)
+        else:
+            converted[key] = value
+    return converted
+
+
 def validate_config(
     provider,
     model,
@@ -771,7 +1158,7 @@ def build_provider_request(
     if enable_tools:
         tool_definitions.append(TERMINAL_TOOL)
     if enable_app_tools:
-        tool_definitions.extend(APP_TOOLS)
+        tool_definitions.extend(ALL_APP_TOOLS)
     headers = {"Content-Type": "application/json"}
     tool_messages = []
     for message in messages:
@@ -911,22 +1298,17 @@ def build_provider_request(
         if tool_definitions:
             declarations = []
             for tool in tool_definitions:
-                properties = {}
-                for name, schema in tool["parameters"]["properties"].items():
-                    prop_schema = schema.copy()
-                    if isinstance(prop_schema.get("type"), list):
-                        prop_schema["nullable"] = "null" in prop_schema["type"]
-                        prop_schema["type"] = next(
-                            item for item in prop_schema["type"] if item != "null"
-                        )
-                    prop_schema["type"] = prop_schema["type"].upper()
-                    properties[name] = prop_schema
                 declarations.append({
                     "name": tool["name"],
                     "description": tool["description"],
                     "parameters": {
                         "type": "OBJECT",
-                        "properties": properties,
+                        "properties": {
+                            name: google_schema_value(property_schema)
+                            for name, property_schema in tool["parameters"][
+                                "properties"
+                            ].items()
+                        },
                         "required": tool["parameters"].get("required", []),
                     },
                 })
@@ -1327,6 +1709,22 @@ def run_chat_job(job_id, messages, active_config):
             "Telegram bot tokens, and custom system instructions are not exposed. "
             "Data read from these sections is sent to the configured AI provider."
         )
+        if GITHUB_TOKEN:
+            app_prompt += (
+                " You can inspect NOKK's own source code with "
+                "list_repository_files and read_repository_file, and open a pull "
+                "request with create_pull_request when the user asks you to change "
+                "NOKK's code. Never push directly to the base branch. A pull "
+                "request does not deploy the change: say that it takes effect "
+                "only after review, merge and redeployment."
+            )
+        else:
+            app_prompt += (
+                " You can inspect NOKK's own source code with "
+                "list_repository_files and read_repository_file. Opening pull "
+                "requests is unavailable until the server owner configures "
+                "GITHUB_TOKEN."
+            )
         system_prompt = "\n\n".join(
             part for part in (system_prompt, app_prompt) if part
         )
@@ -1414,14 +1812,14 @@ def run_chat_job(job_id, messages, active_config):
                     )
                 elif (
                     active_config.get("app_tools_enabled", True)
-                    and call["name"] in {tool["name"] for tool in APP_TOOLS}
+                    and call["name"] in {tool["name"] for tool in ALL_APP_TOOLS}
                 ):
                     try:
                         app_result = execute_app_tool(call["name"], arguments)
                         tool_result = {"exit_code": 0, "output": json.dumps(
                             app_result, ensure_ascii=False,
                         ), "executed": True}
-                    except (OSError, ValueError) as error:
+                    except (OSError, ValueError, RuntimeError) as error:
                         tool_result = {
                             "exit_code": 1,
                             "output": str(error),
@@ -1908,6 +2306,19 @@ def execute_app_tool(name, arguments):
             "ok": True,
             "item": saved_item,
         }
+
+    if name == "list_repository_files":
+        return list_repository_files(arguments.get("directory", ""))
+
+    if name == "read_repository_file":
+        return read_repository_file(arguments.get("path"))
+
+    if name == "create_pull_request":
+        return create_self_update_pull_request(
+            arguments.get("title"),
+            arguments.get("body", ""),
+            arguments.get("changes"),
+        )
 
     if name == "manage_workflow":
         action = arguments.get("action")

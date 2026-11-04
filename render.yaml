@@ -16,3 +16,9 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITHUB_REPOSITORY
+        value: MrFranz2010/ai
+      - key: GITHUB_BASE_BRANCH
+        value: main

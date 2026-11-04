@@ -84,7 +84,11 @@ class ProviderTests(unittest.TestCase):
                         tool["name"]
                         for tool in payload["tools"][0]["functionDeclarations"]
                     ]
-                self.assertEqual(names, ["get_app_data", "manage_planner_item", "manage_workflow"])
+                self.assertEqual(names, [
+                    "get_app_data", "manage_planner_item", "manage_workflow",
+                    "list_repository_files", "read_repository_file",
+                    "create_pull_request",
+                ])
                 if provider == "google":
                     task_tool = payload["tools"][0]["functionDeclarations"][1]
                     self.assertEqual(

@@ -18,6 +18,15 @@ The startup wrapper binds to `0.0.0.0` and the `PORT` supplied by Render. It
 requires HTTP Basic Authentication for both the website and its API; do not
 remove the password or expose the service without another authentication layer.
 
+## Optional: self-update pull requests
+
+The `main` branch lets NOKK read its own source files and open pull requests.
+Add `GITHUB_TOKEN` as a secret environment variable with write access to
+repository contents and pull requests. `GITHUB_REPOSITORY` and
+`GITHUB_BASE_BRANCH` default to `MrFranz2010/ai` and `main`. Never commit the
+token. A pull request opened by NOKK does not change the running service until
+it is reviewed, merged and redeployed.
+
 ## Important: free plan storage
 
 Render's free web service does not provide a persistent disk. NOKK saves its

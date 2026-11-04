@@ -897,5 +897,131 @@ class AppRouteTests(unittest.TestCase):
         self.assertIn("non è stato eseguito", job["tool_events"][0]["output"])
 
 
+class RepositoryToolTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_directory.cleanup)
+        self.root = Path(self.temp_directory.name)
+        (self.root / "web").mkdir()
+        (self.root / "app.py").write_text("print('ok')\n", encoding="utf-8")
+        (self.root / "web" / "app.js").write_text(
+            "const x = 1;\n", encoding="utf-8",
+        )
+        (self.root / "config.json").write_text(
+            '{"api_key": "secret"}', encoding="utf-8",
+        )
+        (self.root / ".env").write_text("API_KEY=secret\n", encoding="utf-8")
+        (self.root / ".git").mkdir()
+        (self.root / ".git" / "config").write_text("[core]\n", encoding="utf-8")
+        for name, value in (
+            ("APP_DIR", self.root),
+            ("CONFIG_FILE", self.root / "config.json"),
+            ("WORKFLOWS_FILE", self.root / "workflows.json"),
+            ("PLANNER_FILE", self.root / "planner.json"),
+            ("TELEGRAM_FILE", self.root / "telegram.json"),
+        ):
+            patcher = patch.object(app, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_lists_repository_files_without_private_state(self):
+        listing = app.execute_app_tool("list_repository_files", {})
+        self.assertIn("app.py", listing["files"])
+        self.assertIn("web", listing["directories"])
+        self.assertNotIn("config.json", listing["files"])
+        self.assertNotIn(".env", listing["files"])
+        self.assertNotIn(".git", listing["directories"])
+
+    def test_reads_repository_file(self):
+        result = app.execute_app_tool(
+            "read_repository_file", {"path": "web/app.js"},
+        )
+        self.assertEqual(result["path"], "web/app.js")
+        self.assertEqual(result["content"], "const x = 1;\n")
+
+    def test_rejects_private_or_outside_paths(self):
+        for path in (
+            "../outside.txt", "/etc/passwd", ".env", ".git/config",
+            "config.json",
+        ):
+            with self.subTest(path=path):
+                with self.assertRaises(ValueError):
+                    app.execute_app_tool(
+                        "read_repository_file", {"path": path},
+                    )
+
+
+class SelfUpdatePullRequestTests(unittest.TestCase):
+    @staticmethod
+    def github_responses():
+        return [
+            FakeResponse({"object": {"sha": "a" * 40}}),
+            FakeResponse({"tree": {"sha": "b" * 40}}),
+            FakeResponse({"sha": "c" * 40}),
+            FakeResponse({"sha": "d" * 40}),
+            FakeResponse({"sha": "e" * 40}),
+            FakeResponse({"ref": "refs/heads/nokk/auto-test"}),
+            FakeResponse({
+                "number": 7,
+                "html_url": "https://github.com/acme/repo/pull/7",
+            }),
+        ]
+
+    def test_opens_pull_request_with_one_commit(self):
+        with (
+            patch.object(app, "GITHUB_TOKEN", "test-token"),
+            patch.object(app, "GITHUB_REPOSITORY", "acme/repo"),
+            patch.object(app, "GITHUB_BASE_BRANCH", "main"),
+            patch("app.urlopen", side_effect=self.github_responses()) as github,
+        ):
+            result = app.execute_app_tool("create_pull_request", {
+                "title": "Migliora il messaggio di benvenuto",
+                "body": "Aggiorna il testo.",
+                "changes": [{
+                    "path": "web/app.js",
+                    "content": "const greeting = 'ciao';\n",
+                }],
+            })
+        self.assertEqual(result["url"], "https://github.com/acme/repo/pull/7")
+        self.assertEqual(result["number"], 7)
+        self.assertTrue(result["branch"].startswith("nokk/auto-"))
+        self.assertEqual(result["files"], ["web/app.js"])
+        requests = [call.args[0] for call in github.call_args_list]
+        self.assertEqual(requests[0].get_method(), "GET")
+        self.assertIn("/repos/acme/repo/git/ref/heads/main", requests[0].full_url)
+        self.assertEqual(
+            requests[0].get_header("Authorization"), "Bearer test-token",
+        )
+        blob = requests[2]
+        self.assertEqual(blob.get_method(), "POST")
+        self.assertTrue(blob.full_url.endswith("/git/blobs"))
+        self.assertEqual(json.loads(blob.data), {
+            "content": "const greeting = 'ciao';\n",
+            "encoding": "utf-8",
+        })
+
+    def test_requires_github_token(self):
+        with patch.object(app, "GITHUB_TOKEN", ""):
+            with self.assertRaises(RuntimeError) as raised:
+                app.execute_app_tool("create_pull_request", {
+                    "title": "Aggiorna il codice",
+                    "changes": [{"path": "app.py", "content": "# x\n"}],
+                })
+        self.assertIn("GITHUB_TOKEN", str(raised.exception))
+
+    def test_rejects_private_paths_in_pull_requests(self):
+        with (
+            patch.object(app, "GITHUB_TOKEN", "test-token"),
+            patch.object(app, "GITHUB_REPOSITORY", "acme/repo"),
+        ):
+            for path in ("config.json", "../outside.py", ".env", ""):
+                with self.subTest(path=path):
+                    with self.assertRaises(ValueError):
+                        app.execute_app_tool("create_pull_request", {
+                            "title": "Aggiorna il codice",
+                            "changes": [{"path": path, "content": "x"}],
+                        })
+
+
 if __name__ == "__main__":
     unittest.main()

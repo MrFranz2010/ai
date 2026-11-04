@@ -26,6 +26,28 @@ nella tabella privata `app_state`, così sopravvivono ai riavvii del servizio.
 Non esporre la service role key nel browser o nel codice del repository. La tabella
 ha RLS attivo e non deve avere policy pubbliche.
 
+## Auto-modifica del codice (branch `main`)
+
+Nel branch `main` l'assistente può leggere i file del proprio repository e proporre
+modifiche tramite pull request con gli strumenti `list_repository_files`,
+`read_repository_file` e `create_pull_request`. Non può leggere chiavi, token o
+file di stato privati e non pubblica direttamente sul branch base: le modifiche
+diventano attive solo dopo revisione, merge e redeploy.
+
+Per abilitare le pull request configura sul server, senza scriverlo nel repository
+né nella chat:
+
+- `GITHUB_TOKEN`: token GitHub con permesso di scrittura su contenuto e pull
+  request del repository.
+- `GITHUB_REPOSITORY`: repository nel formato `owner/repository` (predefinito
+  `MrFranz2010/ai`).
+- `GITHUB_BASE_BRANCH`: branch di destinazione delle pull request (predefinito
+  `main`).
+
+In locale esporta le variabili prima di avviare `python linux_start.py`; su Render
+aggiungile come variabili d'ambiente del servizio. Senza `GITHUB_TOKEN` restano
+disponibili solo la lettura del codice e l'elenco dei file.
+
 ## Note sulla cronologia chat
 
 Sono supportate fino a 100 chat, con fino a 500 messaggi testuali per chat. Gli
