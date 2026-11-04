@@ -24,6 +24,9 @@ const modelHelp = document.querySelector("#model-help");
 const systemPromptInput = document.querySelector("#system-prompt");
 const apiKeyHelp = document.querySelector("#api-key-help");
 const apiKeyInput = document.querySelector("#api-key");
+const baseUrlInput = document.querySelector("#base-url");
+const baseUrlLabel = document.querySelector("#base-url-label");
+const baseUrlHelp = document.querySelector("#base-url-help");
 const terminalEnabledInput = document.querySelector("#terminal-enabled");
 const approvalModeSelect = document.querySelector("#approval-mode");
 const workspaceInput = document.querySelector("#workspace");
@@ -111,14 +114,24 @@ const providerDefaults = {
   openai: "gpt-4o-mini",
   anthropic: "claude-3-5-haiku-latest",
   google: "gemini-2.0-flash",
+  mistral: "mistral-small-latest",
+  groq: "llama-3.3-70b-versatile",
+  deepseek: "deepseek-chat",
+  xai: "grok-2-latest",
   openrouter: "openrouter/free",
+  custom: "",
 };
 
 const providerLabels = {
   openai: "OpenAI",
   anthropic: "Anthropic",
   google: "Google Gemini",
+  mistral: "Mistral AI",
+  groq: "Groq",
+  deepseek: "DeepSeek",
+  xai: "xAI (Grok)",
   openrouter: "OpenRouter gratuito",
+  custom: "API compatibile OpenAI",
 };
 
 let configuredProviders = new Set();
@@ -130,16 +143,30 @@ function apiKeyPlaceholder(provider) {
 }
 
 function updateProviderFields() {
-  const isOpenRouter = providerSelect.value === "openrouter";
-  modelInput.value = providerDefaults[providerSelect.value];
+  const provider = providerSelect.value;
+  const isOpenRouter = provider === "openrouter";
+  const isCustom = provider === "custom";
+  modelInput.value = providerDefaults[provider] || "";
   modelInput.readOnly = isOpenRouter;
-  modelHelp.textContent = isOpenRouter
-    ? "OpenRouter sceglie automaticamente un modello gratuito disponibile. Non usa modelli a pagamento."
-    : "Il nome deve corrispondere a un modello disponibile nel tuo account.";
-  apiKeyHelp.textContent = isOpenRouter
-    ? "Crea una chiave su openrouter.ai/keys. Non inserirla in una chat. La chiave resta salvata per ogni provider."
-    : "Non inserire la chiave in una chat. Le chiamate al provider partono dal backend. La chiave resta salvata per ogni provider.";
-  apiKeyInput.placeholder = apiKeyPlaceholder(providerSelect.value);
+  baseUrlLabel.hidden = !isCustom;
+  baseUrlInput.hidden = !isCustom;
+  baseUrlHelp.hidden = !isCustom;
+  baseUrlInput.required = isCustom;
+  if (isOpenRouter) {
+    modelHelp.textContent = "OpenRouter sceglie automaticamente un modello gratuito disponibile. Non usa modelli a pagamento.";
+  } else if (isCustom) {
+    modelHelp.textContent = "Scrivi il nome del modello accettato dall'endpoint personalizzato.";
+  } else {
+    modelHelp.textContent = "Il nome deve corrispondere a un modello disponibile nel tuo account.";
+  }
+  if (isOpenRouter) {
+    apiKeyHelp.textContent = "Crea una chiave su openrouter.ai/keys. Non inserirla in una chat. La chiave resta salvata per ogni provider.";
+  } else if (isCustom) {
+    apiKeyHelp.textContent = "La chiave del servizio compatibile OpenAI. Resta salvata per ogni provider e non viene mai mostrata.";
+  } else {
+    apiKeyHelp.textContent = "Non inserire la chiave in una chat. Le chiamate al provider partono dal backend. La chiave resta salvata per ogni provider.";
+  }
+  apiKeyInput.placeholder = apiKeyPlaceholder(provider);
 }
 
 function openSettings(sectionName = "") {
@@ -1913,6 +1940,7 @@ async function loadConfig() {
     "speechSynthesis" in window
     && "SpeechSynthesisUtterance" in window
   );
+  baseUrlInput.value = saved.base_url || "";
   if (saved.provider) {
     providerSelect.value = saved.provider;
     updateProviderFields();
@@ -2169,6 +2197,7 @@ settingsForm.addEventListener("submit", async (event) => {
       body: JSON.stringify({
         provider: providerSelect.value,
         model: modelInput.value.trim(),
+        base_url: baseUrlInput.value.trim(),
         api_key: apiKeyInput.value,
         terminal_enabled: terminalEnabledInput.checked,
         approval_mode: approvalModeSelect.value,

@@ -1,6 +1,13 @@
 # NOKK — assistente AI locale
 
-NOKK è un'app web Python che può usare API cloud di OpenAI, Anthropic, Google Gemini o OpenRouter.
+NOKK è un'app web Python che può usare le API di OpenAI, Anthropic, Google Gemini,
+Mistral AI, Groq, DeepSeek, xAI (Grok) o OpenRouter. Con il provider **API
+compatibile OpenAI** puoi collegare anche altri servizi, come Together AI,
+Fireworks, OpenRouter alternativo, un server Ollama o LM Studio: basta indicare
+l'indirizzo di base dell'API (per esempio `https://api.together.xyz/v1`) e il nome
+del modello. Gli endpoint remoti richiedono `https://`; `http://` è accettato solo
+per `localhost`, così il backend non può essere usato per raggiungere altri host
+della rete.
 
 ## Linux e avvio locale
 

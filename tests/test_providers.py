@@ -11,6 +11,30 @@ from app import (
     parse_tool_response,
 )
 
+OPENAI_COMPATIBLE = {
+    "openai", "openrouter", "mistral", "groq", "deepseek", "xai", "custom",
+}
+IMAGE_PROVIDERS = {"openai", "openrouter", "mistral", "xai", "custom"}
+PROVIDER_CASES = [
+    ("openai", "gpt-4o-mini", {}),
+    ("anthropic", "claude-model", {}),
+    ("google", "gemini-model", {}),
+    ("openrouter", "openrouter/free", {}),
+    ("mistral", "mistral-small-latest", {}),
+    ("groq", "llama-3.3-70b-versatile", {}),
+    ("deepseek", "deepseek-chat", {}),
+    ("xai", "grok-2-latest", {}),
+    ("custom", "my-model", {"base_url": "https://llm.example.com/v1"}),
+]
+IMAGE_CASES = [
+    ("openai", "gpt-4o-mini", {}),
+    ("anthropic", "claude-model", {}),
+    ("google", "gemini-model", {}),
+    ("openrouter", "openrouter/free", {}),
+    ("mistral", "mistral-small-latest", {}),
+    ("custom", "my-model", {"base_url": "https://llm.example.com/v1"}),
+]
+
 
 class ProviderTests(unittest.TestCase):
     def setUp(self):
@@ -58,12 +82,7 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(json.loads(request.data)["messages"], self.messages)
 
     def test_application_tools_are_declared_for_every_provider(self):
-        for provider, model in (
-            ("openai", "gpt-4o-mini"),
-            ("anthropic", "claude-model"),
-            ("google", "gemini-model"),
-            ("openrouter", "openrouter/free"),
-        ):
+        for provider, model, extra in PROVIDER_CASES:
             with self.subTest(provider=provider):
                 request = build_provider_request(
                     provider,
@@ -71,9 +90,10 @@ class ProviderTests(unittest.TestCase):
                     "secret",
                     self.messages,
                     enable_app_tools=True,
+                    **extra,
                 )
                 payload = json.loads(request.data)
-                if provider in {"openai", "openrouter"}:
+                if provider in OPENAI_COMPATIBLE:
                     names = [
                         tool["function"]["name"] for tool in payload["tools"]
                     ]
@@ -97,12 +117,7 @@ class ProviderTests(unittest.TestCase):
                     )
 
     def test_custom_system_prompt_is_added_for_all_providers(self):
-        for provider, model in (
-            ("openai", "gpt-4o-mini"),
-            ("anthropic", "claude-model"),
-            ("google", "gemini-model"),
-            ("openrouter", "openrouter/free"),
-        ):
+        for provider, model, extra in PROVIDER_CASES:
             with self.subTest(provider=provider):
                 request = build_provider_request(
                     provider,
@@ -110,9 +125,10 @@ class ProviderTests(unittest.TestCase):
                     "secret",
                     self.messages,
                     system_prompt="Rispondi in italiano.",
+                    **extra,
                 )
                 payload = json.loads(request.data)
-                if provider in {"openai", "openrouter"}:
+                if provider in OPENAI_COMPATIBLE:
                     system = "\n".join(
                         message["content"]
                         for message in payload["messages"]
@@ -139,21 +155,17 @@ class ProviderTests(unittest.TestCase):
                 "data": "aW1hZ2U=",
             },
         ]
-        for provider, model in (
-            ("openai", "gpt-4o-mini"),
-            ("anthropic", "claude-model"),
-            ("google", "gemini-model"),
-            ("openrouter", "openrouter/free"),
-        ):
+        for provider, model, extra in IMAGE_CASES:
             with self.subTest(provider=provider):
                 request = build_provider_request(
                     provider,
                     model,
                     "secret",
                     [{"role": "user", "content": "Riassumi.", "attachments": attachments}],
+                    **extra,
                 )
                 payload = json.loads(request.data)
-                if provider in {"openai", "openrouter"}:
+                if provider in IMAGE_PROVIDERS:
                     content = payload["messages"][0]["content"]
                     self.assertIn("Decisione: consegna venerdì.", content[0]["text"])
                     self.assertTrue(content[1]["image_url"]["url"].startswith("data:image/png;base64,"))
@@ -190,6 +202,13 @@ class ProviderTests(unittest.TestCase):
                 {"choices": [{"message": {"content": "Ciao gratis!"}}]},
             ),
             "Ciao gratis!",
+        )
+        self.assertEqual(
+            extract_reply(
+                "mistral",
+                {"choices": [{"message": {"content": "Ciao Mistral!"}}]},
+            ),
+            "Ciao Mistral!",
         )
 
     def test_provider_tool_response_parsing(self):
@@ -235,12 +254,7 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(google_calls[0]["arguments"], {"command": "pwd"})
 
     def test_provider_requests_include_terminal_tool_schemas(self):
-        for provider, model in (
-            ("openai", "gpt-4o-mini"),
-            ("anthropic", "claude-model"),
-            ("google", "gemini-model"),
-            ("openrouter", "openrouter/free"),
-        ):
+        for provider, model, extra in PROVIDER_CASES:
             with self.subTest(provider=provider):
                 request = build_provider_request(
                     provider,
@@ -249,16 +263,60 @@ class ProviderTests(unittest.TestCase):
                     self.messages,
                     system_prompt="Use tools safely.",
                     enable_tools=True,
+                    **extra,
                 )
                 payload = json.loads(request.data)
                 self.assertIn("tools", payload)
-                if provider in {"openai", "openrouter"}:
+                if provider in OPENAI_COMPATIBLE:
                     tool_name = payload["tools"][0]["function"]["name"]
                 elif provider == "anthropic":
                     tool_name = payload["tools"][0]["name"]
                 else:
                     tool_name = payload["tools"][0]["functionDeclarations"][0]["name"]
                 self.assertEqual(tool_name, "run_terminal_command")
+
+    def test_mistral_request_uses_its_own_endpoint(self):
+        request = build_provider_request(
+            "mistral", "mistral-small-latest", "secret", self.messages
+        )
+        self.assertEqual(
+            request.full_url, "https://api.mistral.ai/v1/chat/completions"
+        )
+        self.assertEqual(request.get_header("Authorization"), "Bearer secret")
+        payload = json.loads(request.data)
+        self.assertEqual(payload["model"], "mistral-small-latest")
+        self.assertEqual(payload["messages"], self.messages)
+
+    def test_custom_provider_appends_chat_completions_once(self):
+        for base_url, expected in (
+            (
+                "https://llm.example.com/v1",
+                "https://llm.example.com/v1/chat/completions",
+            ),
+            (
+                "http://localhost:11434/v1",
+                "http://localhost:11434/v1/chat/completions",
+            ),
+            (
+                "https://llm.example.com/v1/chat/completions",
+                "https://llm.example.com/v1/chat/completions",
+            ),
+        ):
+            with self.subTest(base_url=base_url):
+                request = build_provider_request(
+                    "custom", "my-model", "secret", self.messages,
+                    base_url=base_url,
+                )
+                self.assertEqual(request.full_url, expected)
+
+    def test_custom_provider_requires_a_secure_base_url(self):
+        for base_url in ("", None, "http://api.example.com/v1", "ftp://x.example"):
+            with self.subTest(base_url=base_url):
+                with self.assertRaises(ValueError):
+                    build_provider_request(
+                        "custom", "my-model", "secret", self.messages,
+                        base_url=base_url,
+                    )
 
     def test_auto_approval_only_accepts_restricted_read_commands(self):
         workspace = Path(__file__).resolve().parents[1]
