@@ -25,6 +25,29 @@ if len(PASSWORD) < 16:
     raise SystemExit("Set APP_PASSWORD to a password of at least 16 characters.")
 
 
+def config_from_state(saved):
+    """Validate the configuration document stored in Supabase."""
+    if not isinstance(saved, dict):
+        raise RuntimeError("Supabase config.json must contain a JSON object.")
+    workspace = saved.get("workspace", str(app.APP_DIR))
+    if not isinstance(workspace, str) or not os.path.isdir(os.path.expanduser(workspace)):
+        workspace = str(app.APP_DIR)
+    try:
+        return app.validate_config(
+            saved.get("provider"), saved.get("model"), saved.get("api_key"),
+            saved.get("terminal_enabled", False),
+            saved.get("approval_mode", "manual"), workspace,
+            saved.get("system_prompt", ""), saved.get("wake_phrase", "Nok"),
+            saved.get("tts_auto_play", False),
+            saved.get("api_keys", {}),
+            saved.get("notifications_enabled", False),
+            base_url=saved.get("base_url", ""),
+            models=saved.get("models", {}),
+        )
+    except ValueError as error:
+        raise RuntimeError(f"Supabase configuration is invalid: {error}") from error
+
+
 def _configure_supabase_storage():
     storage = SupabaseJSONStore.from_environment()
     if storage is None:
@@ -51,23 +74,7 @@ def _configure_supabase_storage():
         saved = load_json(app.CONFIG_FILE)
         if saved is MISSING:
             return app.default_config()
-        if not isinstance(saved, dict):
-            raise RuntimeError("Supabase config.json must contain a JSON object.")
-        workspace = saved.get("workspace", str(app.APP_DIR))
-        if not isinstance(workspace, str) or not os.path.isdir(os.path.expanduser(workspace)):
-            workspace = str(app.APP_DIR)
-        try:
-            return app.validate_config(
-                saved.get("provider"), saved.get("model"), saved.get("api_key"),
-                saved.get("terminal_enabled", False),
-                saved.get("approval_mode", "manual"), workspace,
-                saved.get("system_prompt", ""), saved.get("wake_phrase", "Nok"),
-                saved.get("tts_auto_play", False),
-                saved.get("api_keys", {}),
-                saved.get("notifications_enabled", False),
-            )
-        except ValueError as error:
-            raise RuntimeError(f"Supabase configuration is invalid: {error}") from error
+        return config_from_state(saved)
 
     def load_workflows():
         saved = load_json(app.WORKFLOWS_FILE)

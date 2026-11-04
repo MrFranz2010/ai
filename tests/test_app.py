@@ -1381,5 +1381,33 @@ class ToolLimitTests(unittest.TestCase):
         self.assertEqual(reply, app.TOOL_LIMIT_REPLY)
 
 
+class SupabaseConfigLoaderTests(unittest.TestCase):
+    def test_stored_config_keeps_models_and_base_url(self):
+        import importlib
+
+        with patch.dict(os.environ, {
+            "APP_USERNAME": "tester",
+            "APP_PASSWORD": "x" * 20,
+            "SUPABASE_URL": "",
+            "SUPABASE_SERVICE_ROLE_KEY": "",
+        }):
+            render_start = importlib.import_module("render_start")
+        loaded = render_start.config_from_state({
+            "provider": "custom",
+            "model": "my-model",
+            "api_key": "secret",
+            "api_keys": {"custom": "secret"},
+            "base_url": "https://llm.example.com/v1",
+            "models": {"custom": "my-model", "mistral": "mistral-large-latest"},
+            "workspace": str(Path(app.APP_DIR).resolve()),
+        })
+        self.assertEqual(loaded["base_url"], "https://llm.example.com/v1")
+        self.assertEqual(loaded["models"], {
+            "custom": "my-model",
+            "mistral": "mistral-large-latest",
+        })
+        self.assertEqual(loaded["model"], "my-model")
+
+
 if __name__ == "__main__":
     unittest.main()
