@@ -128,6 +128,23 @@ APP_TOOLS = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "google_search",
+        "description": (
+            "Cerca sul web con Google e restituisce i risultati principali con "
+            "titolo, URL ed estratto. Usalo per informazioni aggiornate o "
+            "verificabili e cita gli URL restituiti."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "num_results": {"type": "integer"},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    },
 ]
 SELF_UPDATE_TOOLS = [
     {
@@ -195,6 +212,14 @@ SELF_UPDATE_TOOLS = [
     },
 ]
 ALL_APP_TOOLS = APP_TOOLS + SELF_UPDATE_TOOLS
+
+SERPER_API_KEY = os.environ.get("SERPER_API_KEY", "").strip()
+SERPER_SEARCH_URL = os.environ.get(
+    "SERPER_SEARCH_URL", "https://google.serper.dev/search"
+).rstrip("/")
+MAX_SEARCH_QUERY_LENGTH = 400
+MAX_SEARCH_RESULTS = 8
+DEFAULT_SEARCH_RESULTS = 5
 
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 GITHUB_REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "MrFranz2010/ai").strip()
@@ -609,6 +634,91 @@ def configured_providers(saved):
     if saved.get("api_key") and saved.get("provider"):
         names.add(saved["provider"])
     return sorted(names)
+
+
+def google_search(query, num_results=DEFAULT_SEARCH_RESULTS):
+    if not SERPER_API_KEY:
+        raise RuntimeError(
+            "Ricerca Google non configurata: imposta SERPER_API_KEY come "
+            "variabile d'ambiente del server."
+        )
+    if (
+        not isinstance(query, str)
+        or not query.strip()
+        or len(query) > MAX_SEARCH_QUERY_LENGTH
+    ):
+        raise ValueError(
+            f"La ricerca deve avere da 1 a {MAX_SEARCH_QUERY_LENGTH} caratteri."
+        )
+    if (
+        not isinstance(num_results, int)
+        or isinstance(num_results, bool)
+        or not 1 <= num_results <= MAX_SEARCH_RESULTS
+    ):
+        raise ValueError(f"Chiedi da 1 a {MAX_SEARCH_RESULTS} risultati.")
+    request = Request(
+        SERPER_SEARCH_URL,
+        data=json.dumps({
+            "q": query.strip(),
+            "num": num_results,
+        }).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-API-KEY": SERPER_API_KEY,
+            "User-Agent": "NOKK-google-search",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            body = response.read()
+    except HTTPError as error:
+        error.close()
+        raise RuntimeError(
+            f"La ricerca Google ha rifiutato la richiesta (HTTP {error.code}). "
+            "Controlla che SERPER_API_KEY sia valida e abbia credito."
+        ) from None
+    except URLError:
+        raise RuntimeError(
+            "Impossibile raggiungere il servizio di ricerca. "
+            "Controlla la connessione."
+        ) from None
+    except (OSError, TimeoutError):
+        raise RuntimeError("Timeout durante la ricerca Google.") from None
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise RuntimeError(
+            "Il servizio di ricerca ha restituito una risposta non valida."
+        ) from None
+    organic = payload.get("organic") if isinstance(payload, dict) else None
+    if not isinstance(organic, list):
+        raise RuntimeError(
+            "Il servizio di ricerca ha restituito risultati non validi."
+        )
+    results = []
+    for item in organic[:num_results]:
+        if not isinstance(item, dict):
+            continue
+        link = item.get("link")
+        if not isinstance(link, str) or not link.startswith(("http://", "https://")):
+            continue
+        title = item.get("title")
+        snippet = item.get("snippet")
+        results.append({
+            "title": title[:200] if isinstance(title, str) else link,
+            "url": link[:500],
+            "snippet": snippet[:500] if isinstance(snippet, str) else "",
+        })
+    return {
+        "query": query.strip(),
+        "results": results,
+        "note": (
+            "Risultati Google forniti da Serper."
+            if results else "Nessun risultato trovato."
+        ),
+    }
 
 
 def _repository_target(relative, want_directory=False, must_exist=True):
@@ -1709,6 +1819,17 @@ def run_chat_job(job_id, messages, active_config):
             "Telegram bot tokens, and custom system instructions are not exposed. "
             "Data read from these sections is sent to the configured AI provider."
         )
+        if SERPER_API_KEY:
+            app_prompt += (
+                " You can use google_search to look up current or external "
+                "information with Google. Cite the returned URLs and never invent "
+                "results. Search queries are sent to the configured search service."
+            )
+        else:
+            app_prompt += (
+                " Web search is unavailable until the server owner configures "
+                "SERPER_API_KEY."
+            )
         if GITHUB_TOKEN:
             app_prompt += (
                 " You can inspect NOKK's own source code with "
@@ -2318,6 +2439,12 @@ def execute_app_tool(name, arguments):
             arguments.get("title"),
             arguments.get("body", ""),
             arguments.get("changes"),
+        )
+
+    if name == "google_search":
+        return google_search(
+            arguments.get("query"),
+            arguments.get("num_results", DEFAULT_SEARCH_RESULTS),
         )
 
     if name == "manage_workflow":

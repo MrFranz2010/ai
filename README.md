@@ -14,6 +14,26 @@ Il launcher `linux_start.py` mantiene la compatibilità con il server locale e a
 la cronologia delle chat. Su Linux le conversazioni sono salvate in `chats.json`
 accanto alla configurazione dell’app; puoi crearne molte, riaprirle ed eliminarle.
 
+## Ricerca Google
+
+Nel branch `main` l'assistente può cercare risultati Google con lo strumento
+`google_search`, che restituisce titolo, URL ed estratto dei risultati
+principali. La ricerca usa [Serper](https://serper.dev/), che espone i risultati
+Google tramite una API con chiave e offre un piano gratuito iniziale.
+
+Imposta `SERPER_API_KEY` come variabile d'ambiente del server prima di avviare
+`python linux_start.py`:
+
+```bash
+export SERPER_API_KEY="la-tua-chiave"
+```
+
+La chiave resta solo lato server, non viene salvata nel repository, nella
+configurazione dell'app o nella cronologia chat. Le query vengono inviate al
+servizio di ricerca esterno: non inserire dati riservati. Senza
+`SERPER_API_KEY` lo strumento risponde con un errore di configurazione e
+l'assistente continua a funzionare normalmente.
+
 ## Auto-modifica del codice (branch `main`)
 
 Nel branch `main` l'assistente può leggere i file del proprio repository e proporre

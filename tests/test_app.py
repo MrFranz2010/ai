@@ -1023,5 +1023,60 @@ class SelfUpdatePullRequestTests(unittest.TestCase):
                         })
 
 
+
+class GoogleSearchToolTests(unittest.TestCase):
+    def test_search_requires_api_key(self):
+        with patch.object(app, "SERPER_API_KEY", ""):
+            with self.assertRaises(RuntimeError) as raised:
+                app.execute_app_tool(
+                    "google_search", {"query": "meteo Roma"},
+                )
+        self.assertIn("SERPER_API_KEY", str(raised.exception))
+
+    def test_search_returns_google_results(self):
+        payload = {
+            "organic": [
+                {
+                    "title": "Meteo Roma",
+                    "link": "https://example.com/roma",
+                    "snippet": "Sole e 24 gradi.",
+                },
+                {"title": "Senza link", "snippet": "Da ignorare."},
+            ],
+        }
+        with (
+            patch.object(app, "SERPER_API_KEY", "test-serper-key"),
+            patch("app.urlopen", return_value=FakeResponse(payload)) as search_call,
+        ):
+            result = app.execute_app_tool("google_search", {
+                "query": " meteo Roma ",
+                "num_results": 3,
+            })
+        self.assertEqual(result["results"], [{
+            "title": "Meteo Roma",
+            "url": "https://example.com/roma",
+            "snippet": "Sole e 24 gradi.",
+        }])
+        request = search_call.call_args.args[0]
+        self.assertEqual(request.full_url, app.SERPER_SEARCH_URL)
+        headers = {key.lower(): value for key, value in request.header_items()}
+        self.assertEqual(headers["x-api-key"], "test-serper-key")
+        self.assertEqual(
+            json.loads(request.data), {"q": "meteo Roma", "num": 3},
+        )
+
+    def test_search_validates_query_and_result_count(self):
+        with patch.object(app, "SERPER_API_KEY", "test-serper-key"):
+            for arguments in (
+                {"query": ""},
+                {"query": "x" * (app.MAX_SEARCH_QUERY_LENGTH + 1)},
+                {"query": "ok", "num_results": 0},
+                {"query": "ok", "num_results": app.MAX_SEARCH_RESULTS + 1},
+            ):
+                with self.subTest(arguments=arguments):
+                    with self.assertRaises(ValueError):
+                        app.execute_app_tool("google_search", arguments)
+
+
 if __name__ == "__main__":
     unittest.main()
