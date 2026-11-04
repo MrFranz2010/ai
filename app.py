@@ -677,6 +677,25 @@ def collect_api_keys(provider, api_key, api_keys=None):
     return saved_keys
 
 
+def collect_models(provider, model, models=None):
+    """Return the saved model of every provider, updated for the active one."""
+    if models is None:
+        models = {}
+    if not isinstance(models, dict):
+        raise ValueError(
+            "Archivio dei modelli non valido nel file di configurazione."
+        )
+    saved = {}
+    for name, value in models.items():
+        if name not in PROVIDERS or not isinstance(value, str):
+            continue
+        if MODEL_PATTERN.fullmatch(value.strip()):
+            saved[name] = value.strip()
+    if isinstance(model, str) and model.strip():
+        saved[provider] = model.strip()
+    return saved
+
+
 def configured_providers(saved):
     """List providers with a stored key without exposing the keys themselves."""
     names = {
@@ -1559,6 +1578,7 @@ def validate_config(
     api_keys=None,
     notifications_enabled=False,
     base_url=None,
+    models=None,
 ):
     if not isinstance(provider, str) or provider not in PROVIDERS:
         raise ValueError("Provider non supportato nel file di configurazione.")
@@ -1573,6 +1593,7 @@ def validate_config(
         )
     saved_keys = collect_api_keys(provider, api_key, api_keys)
     api_key = saved_keys[provider]
+    saved_models = collect_models(provider, model, models)
     if not isinstance(terminal_enabled, bool):
         raise ValueError("Impostazione terminale non valida.")
     if not isinstance(approval_mode, str) or approval_mode not in {
@@ -1611,6 +1632,7 @@ def validate_config(
         "model": model,
         "api_key": api_key,
         "api_keys": saved_keys,
+        "models": saved_models,
         "base_url": base_url,
         "terminal_enabled": terminal_enabled,
         "approval_mode": approval_mode,
@@ -1628,6 +1650,7 @@ def default_config():
         "model": None,
         "api_key": None,
         "api_keys": {},
+        "models": {},
         "base_url": "",
         "terminal_enabled": False,
         "approval_mode": "manual",
@@ -1666,7 +1689,8 @@ def load_config_file():
             saved.get("tts_auto_play", False),
             saved.get("api_keys", {}),
             saved.get("notifications_enabled", False),
-            saved.get("base_url", ""),
+            base_url=saved.get("base_url", ""),
+            models=saved.get("models", {}),
         )
     except ValueError as error:
         raise RuntimeError(f"File di configurazione non valido: {error}") from error
@@ -3408,6 +3432,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 public_config = {
                     "provider": config["provider"],
                     "model": config["model"],
+                    "models": config["models"],
                     "base_url": config["base_url"],
                     "configured": bool(config["api_key"]),
                     "configured_providers": configured_providers(config),
@@ -3570,6 +3595,8 @@ class AppHandler(BaseHTTPRequestHandler):
         submitted_key = data.get("api_key")
         if submitted_key is not None and not isinstance(submitted_key, str):
             raise ValueError("Chiave API non valida.")
+        models = dict(current_config.get("models") or {})
+        models[provider] = model
         api_keys = dict(current_config.get("api_keys") or {})
         if submitted_key and submitted_key.strip():
             api_keys[provider] = submitted_key.strip()
@@ -3597,6 +3624,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 current_config.get("notifications_enabled", False),
             ),
             base_url=base_url,
+            models=models,
         )
         with config_lock:
             try:

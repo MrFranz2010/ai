@@ -135,6 +135,7 @@ const providerLabels = {
 };
 
 let configuredProviders = new Set();
+let savedModels = {};
 
 function apiKeyPlaceholder(provider) {
   return configuredProviders.has(provider)
@@ -142,11 +143,16 @@ function apiKeyPlaceholder(provider) {
     : "Incolla la chiave API";
 }
 
+function modelForProvider(provider) {
+  if (provider === "openrouter") return providerDefaults.openrouter;
+  return savedModels[provider] || providerDefaults[provider] || "";
+}
+
 function updateProviderFields() {
   const provider = providerSelect.value;
   const isOpenRouter = provider === "openrouter";
   const isCustom = provider === "custom";
-  modelInput.value = providerDefaults[provider] || "";
+  modelInput.value = modelForProvider(provider);
   modelInput.readOnly = isOpenRouter;
   baseUrlLabel.hidden = !isCustom;
   baseUrlInput.hidden = !isCustom;
@@ -1941,6 +1947,8 @@ async function loadConfig() {
     && "SpeechSynthesisUtterance" in window
   );
   baseUrlInput.value = saved.base_url || "";
+  savedModels = { ...(saved.models || {}) };
+  if (saved.provider && saved.model) savedModels[saved.provider] = saved.model;
   if (saved.provider) {
     providerSelect.value = saved.provider;
     updateProviderFields();
@@ -2212,6 +2220,7 @@ settingsForm.addEventListener("submit", async (event) => {
     if (!response.ok) throw new Error(result.error || "Configurazione non riuscita.");
     apiKeyInput.value = "";
     configuredProviders.add(providerSelect.value);
+    savedModels[providerSelect.value] = modelInput.value.trim();
     apiKeyInput.placeholder = apiKeyPlaceholder(providerSelect.value);
     setConfigured(
       true,
