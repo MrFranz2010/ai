@@ -45,7 +45,8 @@
     .user-memory-actions { display: flex; justify-content: space-between; gap: 8px; }
     .user-memory-actions button { min-height: 36px; padding: 0 12px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 5px; cursor: pointer; }
     .user-memory-actions .user-memory-save { color: white; background: #9e343b; }
-    @media (max-width: 680px) { .user-memory-trigger { width: 40px; padding: 0; overflow: hidden; font-size: 0; } .user-memory-trigger::after { content: "P"; font-size: 12px; } }
+    @media (max-width: 820px) { .user-memory-trigger { width: 100%; min-height: 38px; padding: 0 11px; overflow: visible; font-size: 11px; text-align: left; } .user-memory-trigger::after { content: none; } }
+    @media (max-width: 680px) { .user-memory-overlay { padding: 0; } .user-memory-card { width: 100%; height: 100dvh; max-height: 100dvh; border-radius: 0; padding: 20px 16px calc(20px + env(safe-area-inset-bottom)); } }
   `;
   document.head.append(css);
 

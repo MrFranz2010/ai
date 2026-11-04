@@ -7,4 +7,4 @@
 .chat-history-delete { flex: 0 0 27px; width: 27px; height: 27px; color: var(--muted); background: transparent; border: 0; border-radius: 5px; cursor: pointer; }
 .chat-history-delete:hover { color: var(--text); background: var(--panel-hover); }
 .chat-history-empty { margin: 5px 8px; color: var(--muted); font-size: 10px; }
-@media (max-width: 680px) { .chat-history-panel { width: 100%; max-height: 30vh; } .chat-history-heading, .chat-history-open, .chat-history-delete { display: none; } .chat-history-panel.has-chats { display: none; } }
+@media (max-width: 820px) { .chat-history-panel { width: 100%; max-height: 30vh; } }
