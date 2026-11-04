@@ -117,6 +117,7 @@ def _configure_supabase_storage():
                 saved.get("approval_mode", "manual"), workspace,
                 saved.get("system_prompt", ""), saved.get("wake_phrase", "Nok"),
                 saved.get("tts_auto_play", False),
+                saved.get("api_keys", {}),
             )
         except ValueError as error:
             raise RuntimeError(f"Supabase configuration is invalid: {error}") from error

@@ -562,6 +562,7 @@ class AppRouteTests(unittest.TestCase):
             "provider": "openai",
             "model": "gpt-4o-mini",
             "api_key": "test-secret",
+            "api_keys": {"openai": "test-secret"},
             "terminal_enabled": False,
             "approval_mode": "manual",
             "workspace": str(Path(app.APP_DIR).resolve()),
@@ -587,6 +588,79 @@ class AppRouteTests(unittest.TestCase):
             "NOKK section tools",
             provider_payload["messages"][0]["content"],
         )
+
+    def test_config_keeps_api_keys_when_switching_provider(self):
+        self.request_json("/api/config", {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "api_key": "openai-secret",
+        })
+        self.request_json("/api/config", {
+            "provider": "anthropic",
+            "model": "claude-3-5-haiku-latest",
+            "api_key": "anthropic-secret",
+        })
+        with urlopen(f"{self.base_url}/api/config") as response:
+            public_config = json.loads(response.read())
+        self.assertEqual(public_config["provider"], "anthropic")
+        self.assertEqual(
+            public_config["configured_providers"], ["anthropic", "openai"],
+        )
+        self.assertNotIn("api_keys", public_config)
+        self.assertNotIn("api_key", public_config)
+
+        self.request_json("/api/config", {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "api_key": "",
+        })
+        saved = json.loads(app.CONFIG_FILE.read_text(encoding="utf-8"))
+        self.assertEqual(saved["provider"], "openai")
+        self.assertEqual(saved["api_key"], "openai-secret")
+        self.assertEqual(saved["api_keys"], {
+            "openai": "openai-secret",
+            "anthropic": "anthropic-secret",
+        })
+
+    def test_config_requires_key_for_a_new_provider(self):
+        self.request_json("/api/config", {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "api_key": "openai-secret",
+        })
+        request = Request(
+            f"{self.base_url}/api/config",
+            data=json.dumps({
+                "provider": "google",
+                "model": "gemini-2.0-flash",
+                "api_key": "",
+            }).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(HTTPError) as response:
+            urlopen(request)
+        self.assertEqual(response.exception.code, 400)
+        response.exception.close()
+        saved = json.loads(app.CONFIG_FILE.read_text(encoding="utf-8"))
+        self.assertEqual(saved["provider"], "openai")
+        self.assertEqual(saved["api_keys"], {"openai": "openai-secret"})
+
+    def test_legacy_config_file_keeps_its_api_key(self):
+        app.CONFIG_FILE.write_text(json.dumps({
+            "provider": "google",
+            "model": "gemini-2.0-flash",
+            "api_key": "legacy-secret",
+            "terminal_enabled": False,
+            "approval_mode": "manual",
+            "workspace": str(Path(app.APP_DIR).resolve()),
+            "system_prompt": "",
+            "wake_phrase": "Nok",
+            "tts_auto_play": False,
+        }), encoding="utf-8")
+        loaded = app.load_config_file()
+        self.assertEqual(loaded["api_key"], "legacy-secret")
+        self.assertEqual(loaded["api_keys"], {"google": "legacy-secret"})
 
     def test_config_rejects_system_prompt_over_limit(self):
         request = Request(
