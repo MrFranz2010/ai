@@ -26,23 +26,53 @@ accanto alla configurazione dell’app; puoi crearne molte, riaprirle ed elimina
 L'assistente usa lo strumento `web_search`, che restituisce titolo, URL ed
 estratto dei risultati. **Non serve alcuna chiave a pagamento**: senza
 configurazione usa DuckDuckGo tramite la sua pagina HTML pubblica e, se
-DuckDuckGo non risponde o chiede una verifica anti-bot, ripiega su Bing.
+DuckDuckGo non risponde o chiede una verifica anti-bot, ripiega su Yahoo e
+poi su Bing, così la ricerca continua a funzionare anche quando un motore
+blocca le richieste automatiche.
 
 Sono supportati anche provider opzionali con piano gratuito senza carta:
 
 - **Exa**: imposta `EXA_API_KEY` (crediti gratuiti iniziali e mensili).
 - **Tavily**: imposta `TAVILY_API_KEY` (circa 1.000 ricerche al mese).
 
-L'ordine è Exa, Tavily, DuckDuckGo, Bing e infine Serper se la vecchia
+L'ordine è Exa, Tavily, DuckDuckGo, Yahoo, Bing e infine Serper se la vecchia
 `SERPER_API_KEY` è ancora presente. Serper non è più obbligatorio e non viene
 usato se non configurato. Se nessun motore risponde, NOKK ripiega sulle voci di
 Wikipedia, segnalando che non si tratta di notizie aggiornate.
+
+Prima di restituire i risultati, NOKK controlla che contengano almeno un
+termine significativo della query: Bing a volte risponde a una ricerca senza
+risultati con pagine di altre ricerche, e quei risultati vengono scartati
+invece di essere presentati come attendibili.
 
 Le chiavi restano solo lato server e non vengono salvate nel repository, nella
 configurazione dell'app o nella cronologia chat. Le query vengono inviate al
 provider scelto: non inserire dati riservati. DuckDuckGo può temporaneamente
 bloccare le richieste automatizzate: in quel caso NOKK prova automaticamente
-con Bing, mentre Exa o Tavily restano i provider più affidabili.
+con Yahoo e poi con Bing, mentre Exa o Tavily restano i provider più
+affidabili.
+
+## Google Calendar
+
+Puoi collegare il tuo Google Calendar e lasciare che l'assistente legga,
+crei o elimini eventi con lo strumento `google_calendar`.
+
+1. In Google Cloud Console crea un progetto e abilita la **Google Calendar API**.
+2. Crea un client OAuth di tipo **Applicazione web**.
+3. Apri **Impostazioni → Google Calendar** in NOKK, copia l'URI di
+   reindirizzamento mostrato (in locale è
+   `http://127.0.0.1:8000/oauth/google/callback`) e incollalo tra gli URI
+   autorizzati del client.
+4. Salva client ID, client secret e ID del calendario, premi **Collega Google
+   Calendar** e autorizza l'accesso: NOKK chiede solo `calendar.events`.
+
+Client ID, client secret e token di aggiornamento restano lato server: il
+secret non viene mai restituito all'interfaccia, il token è salvato in
+`google_calendar.json` con accesso limitato al tuo utente e non finisce nella
+cronologia chat né nel repository. Se preferisci, fornisci le credenziali con
+`GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` e imposta l'URI con
+`GOOGLE_OAUTH_REDIRECT_URI`. Per un calendario diverso da quello principale
+indica il suo ID nelle impostazioni; **Disconnetti** rimuove il token salvato.
 
 ## Auto-modifica del codice (branch `main`)
 

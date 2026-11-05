@@ -18,6 +18,14 @@ const telegramConnectButton = document.querySelector("#telegram-connect");
 const telegramPairButton = document.querySelector("#telegram-pair");
 const telegramDisconnectButton = document.querySelector("#telegram-disconnect");
 const telegramPairCode = document.querySelector("#telegram-pair-code");
+const googleCalendarStatus = document.querySelector("#google-calendar-status");
+const googleClientIdInput = document.querySelector("#google-client-id");
+const googleClientSecretInput = document.querySelector("#google-client-secret");
+const googleCalendarIdInput = document.querySelector("#google-calendar-id");
+const googleCalendarSaveButton = document.querySelector("#google-calendar-save");
+const googleCalendarConnectButton = document.querySelector("#google-calendar-connect");
+const googleCalendarDisconnectButton = document.querySelector("#google-calendar-disconnect");
+const googleCalendarRedirectHelp = document.querySelector("#google-redirect-help");
 const providerSelect = document.querySelector("#provider");
 const modelInput = document.querySelector("#model");
 const modelHelp = document.querySelector("#model-help");
@@ -1444,6 +1452,70 @@ async function sendTelegramAction(payload) {
   return result;
 }
 
+async function loadGoogleCalendarStatus() {
+  const response = await fetch("/api/google-calendar");
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.error || "Stato Google Calendar non disponibile.");
+  }
+  if (result.connected) {
+    googleCalendarStatus.textContent = result.account
+      ? `Google Calendar collegato · ${result.account}`
+      : `Google Calendar collegato · calendario ${result.calendar_id}`;
+  } else if (result.configured) {
+    googleCalendarStatus.textContent = "Credenziali salvate · calendario non collegato";
+  } else {
+    googleCalendarStatus.textContent = "Google Calendar non collegato";
+  }
+  if (result.client_id && !googleClientIdInput.value) {
+    googleClientIdInput.value = result.client_id;
+  }
+  if (result.calendar_id) googleCalendarIdInput.value = result.calendar_id;
+  if (result.redirect_uri) {
+    googleCalendarRedirectHelp.textContent =
+      `Registra questo URI di reindirizzamento nel client OAuth Google: ${result.redirect_uri}`;
+  }
+  googleCalendarConnectButton.disabled = !result.configured;
+  googleCalendarDisconnectButton.hidden = !result.connected;
+  return result;
+}
+
+async function sendGoogleCalendarAction(payload) {
+  const response = await fetch("/api/google-calendar", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.error || "Operazione Google Calendar non riuscita.");
+  }
+  return result;
+}
+
+async function handleGoogleCalendarReturn() {
+  const params = new URLSearchParams(window.location.search);
+  const outcome = params.get("google_calendar");
+  if (!outcome) return;
+  window.history.replaceState(null, "", window.location.pathname);
+  openSettings("Google Calendar");
+  try {
+    await loadGoogleCalendarStatus();
+  } catch (error) {
+    googleCalendarStatus.textContent = error.message;
+    return;
+  }
+  if (outcome === "connected") {
+    googleCalendarStatus.textContent = "Google Calendar collegato.";
+  } else if (outcome === "denied") {
+    googleCalendarStatus.textContent =
+      "Collegamento annullato: nessun permesso concesso.";
+  } else {
+    googleCalendarStatus.textContent =
+      "Collegamento non riuscito. Controlla client ID, client secret e URI di reindirizzamento.";
+  }
+}
+
 async function deleteWorkflow(workflow) {
   if (!window.confirm(`Eliminare la procedura "${workflow.name}"?`)) return;
   try {
@@ -2144,6 +2216,49 @@ telegramPairButton.addEventListener("click", async () => {
   }
 });
 
+googleCalendarSaveButton.addEventListener("click", async () => {
+  googleCalendarSaveButton.disabled = true;
+  googleCalendarStatus.textContent = "Salvataggio delle credenziali…";
+  try {
+    await sendGoogleCalendarAction({
+      action: "save",
+      client_id: googleClientIdInput.value.trim(),
+      client_secret: googleClientSecretInput.value,
+      calendar_id: googleCalendarIdInput.value.trim() || "primary",
+    });
+    googleClientSecretInput.value = "";
+    await loadGoogleCalendarStatus();
+  } catch (error) {
+    googleCalendarStatus.textContent = error.message;
+  } finally {
+    googleCalendarSaveButton.disabled = false;
+  }
+});
+
+googleCalendarConnectButton.addEventListener("click", async () => {
+  googleCalendarConnectButton.disabled = true;
+  try {
+    await loadGoogleCalendarStatus();
+    window.location.href = "/api/google-calendar/start";
+  } catch (error) {
+    googleCalendarStatus.textContent = error.message;
+    googleCalendarConnectButton.disabled = false;
+  }
+});
+
+googleCalendarDisconnectButton.addEventListener("click", async () => {
+  if (!window.confirm("Disconnettere Google Calendar da NOKK?")) return;
+  googleCalendarDisconnectButton.disabled = true;
+  try {
+    await sendGoogleCalendarAction({ action: "disconnect" });
+    await loadGoogleCalendarStatus();
+  } catch (error) {
+    googleCalendarStatus.textContent = error.message;
+  } finally {
+    googleCalendarDisconnectButton.disabled = false;
+  }
+});
+
 telegramDisconnectButton.addEventListener("click", async () => {
   if (!window.confirm("Disconnettere il bot Telegram e rimuovere le chat autorizzate?")) return;
   telegramDisconnectButton.disabled = true;
@@ -2304,3 +2419,7 @@ loadConfig().catch((error) => {
 loadTelegramStatus().catch((error) => {
   telegramStatus.textContent = `Errore: ${error.message}`;
 });
+loadGoogleCalendarStatus().catch((error) => {
+  googleCalendarStatus.textContent = `Errore: ${error.message}`;
+});
+handleGoogleCalendarReturn();

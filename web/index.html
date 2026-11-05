@@ -281,6 +281,30 @@
               </div>
             </details>
 
+            <details class="settings-section">
+              <summary><span class="section-index">07</span><span>Google Calendar<small>Agenda collegata</small></span></summary>
+              <div class="settings-section-body">
+                <div class="google-calendar-settings">
+                  <p class="telegram-status" id="google-calendar-status" role="status">Google Calendar non collegato</p>
+                  <label for="google-client-id">Client ID OAuth</label>
+                  <input id="google-client-id" type="text" autocomplete="off" maxlength="256"
+                    placeholder="...apps.googleusercontent.com">
+                  <label for="google-client-secret">Client secret OAuth</label>
+                  <input id="google-client-secret" type="password" autocomplete="off" maxlength="256"
+                    placeholder="Client secret del progetto Google Cloud">
+                  <label for="google-calendar-id">ID del calendario</label>
+                  <input id="google-calendar-id" type="text" autocomplete="off" maxlength="256" placeholder="primary">
+                  <p class="field-help" id="google-redirect-help">Salva le credenziali: qui compare l'URI di reindirizzamento da registrare nel client OAuth di Google Cloud.</p>
+                  <div class="telegram-actions">
+                    <button class="telegram-action" id="google-calendar-save" type="button">Salva credenziali</button>
+                    <button class="telegram-action" id="google-calendar-connect" type="button" disabled>Collega Google Calendar</button>
+                    <button class="telegram-action telegram-disconnect" id="google-calendar-disconnect" type="button" hidden>Disconnetti</button>
+                  </div>
+                  <p class="field-help">NOKK chiede il permesso <code>calendar.events</code>: può leggere, creare ed eliminare eventi del calendario scelto. Client secret e token di aggiornamento restano sul server e non vengono mai mostrati all'assistente.</p>
+                </div>
+              </div>
+            </details>
+
             <div class="settings-error" id="settings-error" role="alert" hidden></div>
             <div class="settings-actions">
               <button class="cancel-button" id="settings-cancel" type="button">Annulla</button>
