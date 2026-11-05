@@ -94,6 +94,17 @@ def _configure_supabase_storage():
         except ValueError as error:
             raise RuntimeError(f"Supabase planner data is invalid: {error}") from error
 
+    def load_google_calendar():
+        saved = load_json(app.GOOGLE_CALENDAR_FILE)
+        if saved is MISSING:
+            return app.default_google_calendar()
+        try:
+            return app.validate_google_calendar(saved)
+        except ValueError as error:
+            raise RuntimeError(
+                f"Supabase google_calendar.json is invalid: {error}"
+            ) from error
+
     def load_telegram():
         saved = load_json(app.TELEGRAM_FILE)
         if saved is MISSING:
@@ -142,9 +153,14 @@ def _configure_supabase_storage():
     app.planner.update(load_planner())
     app.telegram_config.clear()
     app.telegram_config.update(load_telegram())
+    app.google_calendar_config.clear()
+    app.google_calendar_config.update(load_google_calendar())
     app.save_json_file = save_json
     app.save_config_file = lambda data: save_json(app.CONFIG_FILE, data)
     app.save_telegram_file = lambda data: save_json(app.TELEGRAM_FILE, data)
+    app.save_google_calendar_file = lambda data: save_json(
+        app.GOOGLE_CALENDAR_FILE, data
+    )
     return storage
 
 
@@ -328,8 +344,11 @@ class AuthenticatedAppHandler(app.AppHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        if not self._require_authentication():
-            return
+        # Google redirects the browser here without Basic credentials; the
+        # single-use OAuth state ties the callback to an authenticated start.
+        if self.path.split("?", 1)[0] != "/oauth/google/callback":
+            if not self._require_authentication():
+                return
         if self.path == "/":
             self._send_home()
             return

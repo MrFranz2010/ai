@@ -187,7 +187,7 @@ APP_TOOLS = [
         "name": "web_search",
         "description": (
             "Cerca sul web e restituisce i risultati principali con titolo, URL "
-            "ed estratto. Usa DuckDuckGo o Bing senza chiave oppure Exa/Tavily "
+            "ed estratto. Usa DuckDuckGo, Bing o Yahoo senza chiave oppure "
             "se configurati. Usalo per informazioni aggiornate o verificabili e "
             "cita gli URL restituiti. Non ripetere la stessa query: i risultati "
             "restano validi per qualche minuto."
@@ -203,6 +203,44 @@ APP_TOOLS = [
         },
     },
     FETCH_URL_TOOL,
+    {
+        "name": "google_calendar",
+        "description": (
+            "Legge, crea o elimina eventi nel Google Calendar collegato. "
+            "Usalo per appuntamenti e impegni dell'utente; se il calendario "
+            "non è collegato, chiedi di collegarlo dalle impostazioni."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "create", "delete"],
+                },
+                "time_min": {
+                    "type": "string",
+                    "description": (
+                        "Inizio intervallo in formato YYYY-MM-DDTHH:MM "
+                        "oppure ISO 8601."
+                    ),
+                },
+                "time_max": {"type": "string"},
+                "query": {"type": "string"},
+                "max_results": {"type": "integer"},
+                "event_id": {"type": "string"},
+                "title": {"type": "string"},
+                "start": {
+                    "type": "string",
+                    "description": "Inizio evento in formato YYYY-MM-DDTHH:MM.",
+                },
+                "end": {"type": "string"},
+                "description": {"type": "string"},
+                "location": {"type": "string"},
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        },
+    },
 ]
 SERPER_API_KEY = os.environ.get("SERPER_API_KEY", "").strip()
 SERPER_SEARCH_URL = os.environ.get(
@@ -221,6 +259,9 @@ DUCKDUCKGO_SEARCH_URL = os.environ.get(
 )
 BING_SEARCH_URL = os.environ.get(
     "BING_SEARCH_URL", "https://www.bing.com/search"
+)
+YAHOO_SEARCH_URL = os.environ.get(
+    "YAHOO_SEARCH_URL", "https://search.yahoo.com/search"
 )
 # Bing variable results across requests: retry with other parameters.
 BING_SEARCH_VARIANTS = (
@@ -244,6 +285,31 @@ SEARCH_CACHE_LOCK = threading.Lock()
 MAX_FETCH_BYTES = 2_000_000
 MAX_FETCH_CHARS = 20_000
 DEFAULT_FETCH_CHARS = 12_000
+
+GOOGLE_OAUTH_AUTH_URL = os.environ.get(
+    "GOOGLE_OAUTH_AUTH_URL",
+    "https://accounts.google.com/o/oauth2/v2/auth",
+)
+GOOGLE_OAUTH_TOKEN_URL = os.environ.get(
+    "GOOGLE_OAUTH_TOKEN_URL", "https://oauth2.googleapis.com/token"
+)
+GOOGLE_CALENDAR_API_URL = os.environ.get(
+    "GOOGLE_CALENDAR_API_URL", "https://www.googleapis.com/calendar/v3"
+).rstrip("/")
+GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events"
+GOOGLE_OAUTH_REDIRECT_URI = os.environ.get(
+    "GOOGLE_OAUTH_REDIRECT_URI", ""
+).strip()
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
+GOOGLE_OAUTH_STATE_TTL_SECONDS = 600
+GOOGLE_ACCESS_TOKEN_MARGIN_SECONDS = 60
+MAX_GOOGLE_CALENDAR_RESULTS = 50
+MAX_GOOGLE_CALENDAR_DESCRIPTION = 2000
+GOOGLE_CALENDAR_ID_PATTERN = re.compile(r"^[A-Za-z0-9@._+#-]{1,256}$")
+GOOGLE_EVENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,1024}$")
+GOOGLE_DATETIME_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$")
+
 if os.environ.get("AI_CONFIG_FILE"):
     CONFIG_FILE = Path(os.environ["AI_CONFIG_FILE"]).expanduser()
 elif os.name == "nt":
@@ -261,6 +327,7 @@ else:
 WORKFLOWS_FILE = CONFIG_FILE.with_name("workflows.json")
 PLANNER_FILE = CONFIG_FILE.with_name("planner.json")
 TELEGRAM_FILE = CONFIG_FILE.with_name("telegram.json")
+GOOGLE_CALENDAR_FILE = CONFIG_FILE.with_name("google_calendar.json")
 config_lock = threading.Lock()
 telegram_lock = threading.Lock()
 telegram_stop_event = threading.Event()
@@ -832,6 +899,39 @@ def _normalize_search_result(title, url, snippet):
     }
 
 
+SEARCH_STOPWORDS = frozenset({
+    "che", "chi", "come", "con", "cosa", "del", "dei", "della", "delle",
+    "degli", "dove", "gli", "per", "perche", "perché", "quale", "quando",
+    "sono", "una", "uno", "the", "and", "for", "what", "when", "where",
+    "who", "with",
+})
+
+
+def _search_query_tokens(query):
+    """Significant words used to check that results answer the query."""
+    tokens = re.findall(r"[0-9a-zà-ÿ]+", query.lower())
+    return [
+        token for token in tokens
+        if len(token) > 2 and token not in SEARCH_STOPWORDS
+    ]
+
+
+def _results_match_query(results, query):
+    """Reject pages an engine serves for a different query.
+
+    Bing sometimes answers a query with no results using cached results for
+    unrelated searches, so an empty page is safer than wrong data.
+    """
+    tokens = _search_query_tokens(query)
+    if not tokens:
+        return True
+    haystack = " ".join(
+        f'{item["title"]} {item["snippet"]} {item["url"]}'
+        for item in results
+    ).lower()
+    return any(token in haystack for token in tokens)
+
+
 def _search_http_json(request, provider):
     try:
         with urlopen(request, timeout=20) as response:
@@ -1154,13 +1254,110 @@ def _bing_search(query, num_results):
         except RuntimeError as error:
             problems.append(str(error))
             continue
-        if results:
+        if results and _results_match_query(results, query):
             return results
     if problems:
         raise RuntimeError(problems[-1])
     raise RuntimeError(
-        "Bing non ha restituito risultati (possibile blocco temporaneo)."
+        "Bing non ha restituito risultati pertinenti (possibile blocco "
+        "temporaneo)."
     )
+
+
+def _yahoo_target(url):
+    """Resolve the real destination of a Yahoo result link."""
+    if not isinstance(url, str):
+        return None
+    target = url.strip()
+    if target.startswith("//"):
+        target = "https:" + target
+    if not target.startswith(("http://", "https://")):
+        return None
+    parsed = urlsplit(target)
+    if (parsed.hostname or "").endswith("search.yahoo.com"):
+        redirect = re.search(r"/RU=(.*?)/RK=", parsed.path)
+        if not redirect:
+            return None
+        target = unquote(redirect.group(1))
+    if not target.startswith(("http://", "https://")):
+        return None
+    return target
+
+
+def _yahoo_results(page, num_results):
+    """Extract organic results from Yahoo's server-rendered result page."""
+    starts = [
+        match.start()
+        for match in re.finditer(r'<div class="dd algo[^"]*"', page)
+    ]
+    results = []
+    seen = set()
+    for index, start in enumerate(starts):
+        end = starts[index + 1] if index + 1 < len(starts) else len(page)
+        block = page[start:end]
+        title_match = re.search(r"<h3[^>]*>(.*?)</h3>", block, re.S)
+        if not title_match:
+            continue
+        title = html.unescape(re.sub(r"<[^>]+>", " ", title_match.group(1)))
+        link_match = re.search(r'href="(https?://[^"]+)"', block)
+        target = _yahoo_target(link_match.group(1)) if link_match else None
+        snippet = ""
+        snippet_match = re.search(
+            r'<div class="compText[^"]*"[^>]*>(.*?)</div>', block, re.S
+        )
+        if snippet_match:
+            snippet = html.unescape(
+                re.sub(r"<[^>]+>", " ", snippet_match.group(1))
+            )
+        result = _normalize_search_result(title, target, snippet)
+        if result and result["url"] not in seen:
+            seen.add(result["url"])
+            results.append(result)
+        if len(results) >= num_results:
+            break
+    return results
+
+
+def _yahoo_search(query, num_results):
+    """Keyless fallback used when DuckDuckGo and Bing refuse the request.
+
+    Yahoo answers datacenter clients with server-rendered results, so it keeps
+    working when the other engines return an anti-bot page or no results.
+    """
+    request = Request(
+        YAHOO_SEARCH_URL + "?" + urlencode({"p": query, "ei": "UTF-8"}),
+        headers={
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "it-IT,it;q=0.9,en;q=0.6",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0 Safari/537.36"
+            ),
+        },
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            page = response.read(2_000_000).decode("utf-8", "replace")
+    except HTTPError as error:
+        code = error.code
+        error.close()
+        raise RuntimeError(
+            f"Yahoo ha rifiutato la richiesta (HTTP {code})."
+        ) from None
+    except URLError:
+        raise RuntimeError(
+            "Impossibile raggiungere Yahoo. Controlla la connessione."
+        ) from None
+    except (OSError, TimeoutError):
+        raise RuntimeError("Timeout durante la ricerca con Yahoo.") from None
+    results = _yahoo_results(page, num_results)
+    if not results or not _results_match_query(results, query):
+        raise RuntimeError(
+            "Yahoo non ha restituito risultati pertinenti "
+            "(possibile blocco temporaneo)."
+        )
+    return results
 
 
 def _wikipedia_search(query, num_results):
@@ -1212,6 +1409,7 @@ def search_providers():
     if TAVILY_API_KEY:
         providers.append("tavily")
     providers.append("duckduckgo")
+    providers.append("yahoo")
     providers.append("bing")
     if SERPER_API_KEY:
         providers.append("serper")
@@ -1294,6 +1492,7 @@ def web_search(query, num_results=DEFAULT_SEARCH_RESULTS):
         "tavily": "Tavily",
         "duckduckgo": "DuckDuckGo",
         "bing": "Bing",
+        "yahoo": "Yahoo",
         "serper": "Google/Serper",
         "wikipedia": "Wikipedia",
     }
@@ -1308,6 +1507,8 @@ def web_search(query, num_results=DEFAULT_SEARCH_RESULTS):
                 results = _serper_search(clean_query, num_results)
             elif provider == "bing":
                 results = _bing_search(clean_query, num_results)
+            elif provider == "yahoo":
+                results = _yahoo_search(clean_query, num_results)
             elif provider == "wikipedia":
                 results = _wikipedia_search(clean_query, num_results)
             else:
@@ -1339,6 +1540,8 @@ def web_search(query, num_results=DEFAULT_SEARCH_RESULTS):
         errors.append(f"{labels[provider]}: nessun risultato.")
     raise RuntimeError(
         "Ricerca web non disponibile. " + " | ".join(errors)
+        + ". Riprova tra poco oppure configura EXA_API_KEY o "
+        "TAVILY_API_KEY per una ricerca più affidabile."
     )
 
 
@@ -1811,6 +2014,489 @@ def telegram_api_call(token, method, parameters, timeout=15):
     return result.get("result")
 
 
+def default_google_calendar():
+    return {
+        "client_id": None,
+        "client_secret": None,
+        "refresh_token": None,
+        "calendar_id": "primary",
+        "account": None,
+    }
+
+
+def _google_calendar_text(saved, key, max_length):
+    value = saved.get(key)
+    if value is None:
+        return None
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > max_length
+        or not value.isprintable()
+        or any(character.isspace() for character in value.strip())
+    ):
+        raise ValueError(f"Configurazione Google Calendar non valida: {key}.")
+    return value.strip()
+
+
+def validate_google_calendar(saved):
+    if not isinstance(saved, dict):
+        raise ValueError("Il file di configurazione Google Calendar non è valido.")
+    calendar_id = saved.get("calendar_id", "primary")
+    if (
+        not isinstance(calendar_id, str)
+        or not GOOGLE_CALENDAR_ID_PATTERN.fullmatch(calendar_id)
+    ):
+        raise ValueError("Configurazione Google Calendar non valida: calendar_id.")
+    return {
+        "client_id": _google_calendar_text(saved, "client_id", 256),
+        "client_secret": _google_calendar_text(saved, "client_secret", 256),
+        "refresh_token": _google_calendar_text(saved, "refresh_token", 2048),
+        "calendar_id": calendar_id,
+        "account": _google_calendar_text(saved, "account", 320),
+    }
+
+
+def load_google_calendar_file():
+    try:
+        if os.name != "nt":
+            os.chmod(GOOGLE_CALENDAR_FILE, 0o600)
+        with GOOGLE_CALENDAR_FILE.open("r", encoding="utf-8") as state_file:
+            saved = json.load(state_file)
+    except FileNotFoundError:
+        return default_google_calendar()
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(
+            "Impossibile leggere la configurazione Google Calendar "
+            f"{GOOGLE_CALENDAR_FILE}: {error}"
+        ) from error
+    try:
+        return validate_google_calendar(saved)
+    except ValueError as error:
+        raise RuntimeError(
+            f"Configurazione Google Calendar non valida: {error}"
+        ) from error
+
+
+def save_google_calendar_file(new_config):
+    save_json_file(GOOGLE_CALENDAR_FILE, new_config)
+
+
+def google_calendar_credentials():
+    """Client credentials from the saved config, with env vars as fallback."""
+    with google_calendar_lock:
+        client_id = google_calendar_config["client_id"] or GOOGLE_CLIENT_ID
+        client_secret = (
+            google_calendar_config["client_secret"] or GOOGLE_CLIENT_SECRET
+        )
+    return client_id, client_secret
+
+
+def _google_http_json(
+    url, data=None, headers=None, method=None, provider="Google", timeout=20,
+):
+    request = Request(url, data=data, headers=headers or {}, method=method)
+    body = b""
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            body = response.read()
+    except HTTPError as error:
+        code = error.code
+        try:
+            raw = error.read()
+        except OSError:
+            raw = b""
+        error.close()
+        detail = ""
+        error_code = ""
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            payload = None
+        if isinstance(payload, dict):
+            google_error = payload.get("error")
+            if isinstance(google_error, dict):
+                detail = str(google_error.get("message") or "")
+            elif isinstance(google_error, str):
+                error_code = google_error
+                detail = str(payload.get("error_description") or google_error)
+            if not detail:
+                detail = str(payload.get("error_description") or "")
+        detail = re.sub(r"\s+", " ", detail).strip()[:200]
+        if code == 400 and "invalid_grant" in f"{error_code} {detail}":
+            raise RuntimeError(
+                "Il collegamento a Google Calendar è scaduto o è stato "
+                "revocato. Ricollegalo dalle impostazioni."
+            ) from None
+        suffix = f" {detail}" if detail else ""
+        raise RuntimeError(
+            f"{provider} ha rifiutato la richiesta (HTTP {code}).{suffix}"
+        ) from None
+    except URLError:
+        raise RuntimeError(
+            f"Impossibile raggiungere {provider}. Controlla la connessione."
+        ) from None
+    except (OSError, TimeoutError):
+        raise RuntimeError(
+            f"Timeout durante la comunicazione con {provider}."
+        ) from None
+    if not body:
+        return {}
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise RuntimeError(
+            f"{provider} ha restituito una risposta non valida."
+        ) from None
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"{provider} ha restituito una risposta non valida.")
+    return payload
+
+
+def google_calendar_status(redirect_uri):
+    client_id, client_secret = google_calendar_credentials()
+    with google_calendar_lock:
+        refresh_token = google_calendar_config["refresh_token"]
+        calendar_id = google_calendar_config["calendar_id"]
+        account = google_calendar_config["account"]
+    return {
+        "configured": bool(client_id and client_secret),
+        "connected": bool(refresh_token),
+        "client_id": client_id or "",
+        "calendar_id": calendar_id,
+        "account": account,
+        "redirect_uri": redirect_uri,
+        "scope": GOOGLE_CALENDAR_SCOPE,
+    }
+
+
+def google_calendar_access_token():
+    now = time.time()
+    with google_calendar_lock:
+        token = google_access_token_cache["token"]
+        expires_at = google_access_token_cache["expires_at"]
+        refresh_token = google_calendar_config["refresh_token"]
+    if token and expires_at > now:
+        return token
+    if not refresh_token:
+        raise RuntimeError(
+            "Google Calendar non è collegato. Collegalo dalle impostazioni."
+        )
+    client_id, client_secret = google_calendar_credentials()
+    if not client_id or not client_secret:
+        raise RuntimeError(
+            "Mancano client ID e client secret di Google Calendar: "
+            "inseriscili nelle impostazioni."
+        )
+    payload = _google_http_json(
+        GOOGLE_OAUTH_TOKEN_URL,
+        data=urlencode({
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+        }).encode("utf-8"),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    token = payload.get("access_token")
+    if not isinstance(token, str) or not token:
+        raise RuntimeError("Google non ha restituito un token di accesso valido.")
+    try:
+        expires_in = float(payload.get("expires_in", 3600))
+    except (TypeError, ValueError):
+        expires_in = 3600.0
+    with google_calendar_lock:
+        google_access_token_cache["token"] = token
+        google_access_token_cache["expires_at"] = time.time() + max(
+            expires_in - GOOGLE_ACCESS_TOKEN_MARGIN_SECONDS, 30
+        )
+    return token
+
+
+def _google_calendar_request(method, path, params=None, body=None):
+    token = google_calendar_access_token()
+    url = GOOGLE_CALENDAR_API_URL + path
+    if params:
+        url += "?" + urlencode({
+            key: value for key, value in params.items() if value is not None
+        })
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+    }
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    return _google_http_json(
+        url, data=data, headers=headers, method=method, provider="Google Calendar",
+    )
+
+
+def _google_parse_datetime(value, field):
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"Indica {field} nel formato YYYY-MM-DDTHH:MM.")
+    clean = value.strip()
+    try:
+        if GOOGLE_DATETIME_PATTERN.fullmatch(clean):
+            parsed = datetime.datetime.strptime(clean, "%Y-%m-%dT%H:%M")
+        else:
+            parsed = datetime.datetime.fromisoformat(clean.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError(
+            f"{field} non è una data valida: usa YYYY-MM-DDTHH:MM."
+        ) from None
+    if parsed.tzinfo is None:
+        parsed = parsed.astimezone()
+    return parsed
+
+
+def _google_event(event, calendar_id):
+    if not isinstance(event, dict):
+        raise RuntimeError("Google Calendar ha restituito un evento non valido.")
+    start = event.get("start") if isinstance(event.get("start"), dict) else {}
+    end = event.get("end") if isinstance(event.get("end"), dict) else {}
+    return {
+        "id": event.get("id"),
+        "title": event.get("summary") or "(senza titolo)",
+        "start": start.get("dateTime") or start.get("date"),
+        "end": end.get("dateTime") or end.get("date"),
+        "all_day": "date" in start,
+        "location": event.get("location") or "",
+        "description": event.get("description") or "",
+        "html_link": event.get("htmlLink") or "",
+        "calendar": calendar_id,
+    }
+
+
+def google_calendar_list(
+    time_min=None, time_max=None, query=None, max_results=10,
+):
+    if (
+        isinstance(max_results, bool)
+        or not isinstance(max_results, int)
+        or not 1 <= max_results <= MAX_GOOGLE_CALENDAR_RESULTS
+    ):
+        raise ValueError(f"Chiedi da 1 a {MAX_GOOGLE_CALENDAR_RESULTS} eventi.")
+    if query is not None and not isinstance(query, str):
+        raise ValueError("Testo di ricerca eventi non valido.")
+    if isinstance(query, str) and len(query.strip()) > 200:
+        raise ValueError("La ricerca eventi può avere al massimo 200 caratteri.")
+    start = (
+        _google_parse_datetime(time_min, "l'inizio dell'intervallo")
+        if time_min
+        else datetime.datetime.now().astimezone()
+    )
+    end = (
+        _google_parse_datetime(time_max, "la fine dell'intervallo")
+        if time_max
+        else start + datetime.timedelta(days=30)
+    )
+    if end <= start:
+        raise ValueError("La fine dell'intervallo deve essere dopo l'inizio.")
+    with google_calendar_lock:
+        calendar_id = google_calendar_config["calendar_id"]
+    payload = _google_calendar_request(
+        "GET",
+        f"/calendars/{quote(calendar_id, safe='')}/events",
+        params={
+            "timeMin": start.isoformat(timespec="seconds"),
+            "timeMax": end.isoformat(timespec="seconds"),
+            "singleEvents": "true",
+            "orderBy": "startTime",
+            "maxResults": max_results,
+            "q": query.strip() if isinstance(query, str) and query.strip() else None,
+        },
+    )
+    items = payload.get("items")
+    if not isinstance(items, list):
+        raise RuntimeError("Google Calendar ha restituito una risposta non valida.")
+    return {
+        "ok": True,
+        "calendar": calendar_id,
+        "time_min": start.isoformat(timespec="seconds"),
+        "time_max": end.isoformat(timespec="seconds"),
+        "events": [_google_event(item, calendar_id) for item in items],
+    }
+
+
+def google_calendar_create(
+    title, start, end=None, description="", location="",
+):
+    if not isinstance(title, str) or not title.strip() or len(title.strip()) > 200:
+        raise ValueError("Il titolo dell'evento deve avere da 1 a 200 caratteri.")
+    if description is None:
+        description = ""
+    if (
+        not isinstance(description, str)
+        or len(description) > MAX_GOOGLE_CALENDAR_DESCRIPTION
+    ):
+        raise ValueError(
+            "La descrizione dell'evento può avere al massimo "
+            f"{MAX_GOOGLE_CALENDAR_DESCRIPTION} caratteri."
+        )
+    if location is None:
+        location = ""
+    if not isinstance(location, str) or len(location) > 300:
+        raise ValueError("Il luogo dell'evento può avere al massimo 300 caratteri.")
+    start_dt = _google_parse_datetime(start, "l'inizio dell'evento")
+    end_dt = (
+        _google_parse_datetime(end, "la fine dell'evento")
+        if end
+        else start_dt + datetime.timedelta(hours=1)
+    )
+    if end_dt <= start_dt:
+        raise ValueError("La fine dell'evento deve essere dopo l'inizio.")
+    with google_calendar_lock:
+        calendar_id = google_calendar_config["calendar_id"]
+    payload = _google_calendar_request(
+        "POST",
+        f"/calendars/{quote(calendar_id, safe='')}/events",
+        body={
+            "summary": title.strip(),
+            "description": description.strip(),
+            "location": location.strip(),
+            "start": {"dateTime": start_dt.isoformat(timespec="seconds")},
+            "end": {"dateTime": end_dt.isoformat(timespec="seconds")},
+        },
+    )
+    return {"ok": True, "event": _google_event(payload, calendar_id)}
+
+
+def google_calendar_delete(event_id):
+    if not isinstance(event_id, str) or not GOOGLE_EVENT_ID_PATTERN.fullmatch(
+        event_id
+    ):
+        raise ValueError("Identificativo evento Google non valido.")
+    with google_calendar_lock:
+        calendar_id = google_calendar_config["calendar_id"]
+    _google_calendar_request(
+        "DELETE",
+        f"/calendars/{quote(calendar_id, safe='')}/events/"
+        f"{quote(event_id, safe='')}",
+    )
+    return {"ok": True, "id": event_id}
+
+
+def google_oauth_start(redirect_uri):
+    client_id, client_secret = google_calendar_credentials()
+    if not client_id or not client_secret:
+        raise ValueError(
+            "Inserisci client ID e client secret di Google Calendar "
+            "prima di collegarlo."
+        )
+    state = secrets.token_urlsafe(24)
+    now = time.time()
+    with google_calendar_lock:
+        for expired in [
+            key for key, expires in google_oauth_states.items()
+            if expires <= now
+        ]:
+            google_oauth_states.pop(expired, None)
+        google_oauth_states[state] = now + GOOGLE_OAUTH_STATE_TTL_SECONDS
+    return GOOGLE_OAUTH_AUTH_URL + "?" + urlencode({
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": GOOGLE_CALENDAR_SCOPE,
+        "access_type": "offline",
+        "prompt": "consent",
+        "include_granted_scopes": "true",
+        "state": state,
+    })
+
+
+def google_oauth_complete(code, state, redirect_uri):
+    if not isinstance(code, str) or not code.strip() or len(code) > 2048:
+        raise ValueError(
+            "Google non ha restituito un codice di autorizzazione valido."
+        )
+    if not isinstance(state, str) or not state:
+        raise ValueError("Richiesta di collegamento a Google non valida.")
+    now = time.time()
+    with google_calendar_lock:
+        expires = google_oauth_states.pop(state, None)
+    if expires is None or expires <= now:
+        raise ValueError(
+            "La richiesta di collegamento a Google è scaduta. Riprovala."
+        )
+    client_id, client_secret = google_calendar_credentials()
+    if not client_id or not client_secret:
+        raise RuntimeError(
+            "Mancano client ID e client secret di Google Calendar."
+        )
+    payload = _google_http_json(
+        GOOGLE_OAUTH_TOKEN_URL,
+        data=urlencode({
+            "code": code.strip(),
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": redirect_uri,
+            "grant_type": "authorization_code",
+        }).encode("utf-8"),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    refresh_token = payload.get("refresh_token")
+    if not isinstance(refresh_token, str) or not refresh_token:
+        raise RuntimeError(
+            "Google non ha restituito un token di aggiornamento. Rimuovi "
+            "l'accesso di NOKK dall'account Google e riprova il collegamento."
+        )
+    with google_calendar_lock:
+        updated = dict(google_calendar_config)
+        updated["refresh_token"] = refresh_token
+        save_google_calendar_file(updated)
+        google_calendar_config.clear()
+        google_calendar_config.update(updated)
+        google_access_token_cache["token"] = None
+        google_access_token_cache["expires_at"] = 0.0
+    return google_calendar_status(redirect_uri)
+
+
+def update_google_calendar_settings(data):
+    if not isinstance(data, dict):
+        raise ValueError("Impostazioni Google Calendar non valide.")
+    with google_calendar_lock:
+        previous = dict(google_calendar_config)
+        updated = dict(previous)
+    if "client_id" in data:
+        updated["client_id"] = data.get("client_id") or None
+    if "client_secret" in data:
+        secret = data.get("client_secret")
+        if secret:
+            updated["client_secret"] = secret
+    if "calendar_id" in data:
+        updated["calendar_id"] = data.get("calendar_id") or "primary"
+    validated = validate_google_calendar(updated)
+    if (
+        validated["client_id"] != previous["client_id"]
+        or validated["client_secret"] != previous["client_secret"]
+    ):
+        validated["refresh_token"] = None
+    with google_calendar_lock:
+        save_google_calendar_file(validated)
+        google_calendar_config.clear()
+        google_calendar_config.update(validated)
+        google_access_token_cache["token"] = None
+        google_access_token_cache["expires_at"] = 0.0
+    return validated
+
+
+def disconnect_google_calendar():
+    with google_calendar_lock:
+        updated = dict(google_calendar_config)
+        updated["refresh_token"] = None
+        save_google_calendar_file(updated)
+        google_calendar_config.clear()
+        google_calendar_config.update(updated)
+        google_access_token_cache["token"] = None
+        google_access_token_cache["expires_at"] = 0.0
+        google_oauth_states.clear()
+    return updated
+
+
 def save_config_file(new_config):
     save_json_file(CONFIG_FILE, new_config)
 
@@ -1819,6 +2505,10 @@ config = load_config_file()
 workflows = load_workflows_file()
 planner = load_planner_file()
 telegram_config = load_telegram_file()
+google_calendar_config = load_google_calendar_file()
+google_calendar_lock = threading.Lock()
+google_oauth_states = {}
+google_access_token_cache = {"token": None, "expires_at": 0.0}
 chat_jobs = {}
 chat_jobs_lock = threading.Lock()
 
@@ -3186,6 +3876,16 @@ def execute_app_tool(name, arguments):
                 safe_config["configured_providers"] = configured_providers(config)
                 safe_config["search_configured"] = search_configured()
                 safe_config["search_providers"] = search_providers()
+                safe_config["google_calendar_configured"] = bool(
+                    (google_calendar_config["client_id"] or GOOGLE_CLIENT_ID)
+                    and (
+                        google_calendar_config["client_secret"]
+                        or GOOGLE_CLIENT_SECRET
+                    )
+                )
+                safe_config["google_calendar_connected"] = bool(
+                    google_calendar_config["refresh_token"]
+                )
             return safe_config
         if section == "workflows":
             with config_lock:
@@ -3258,6 +3958,27 @@ def execute_app_tool(name, arguments):
         return web_search(
             arguments.get("query"), arguments.get("num_results", DEFAULT_SEARCH_RESULTS),
         )
+
+    if name == "google_calendar":
+        action = arguments.get("action")
+        if action == "list":
+            return google_calendar_list(
+                arguments.get("time_min"),
+                arguments.get("time_max"),
+                arguments.get("query"),
+                arguments.get("max_results", 10),
+            )
+        if action == "create":
+            return google_calendar_create(
+                arguments.get("title"),
+                arguments.get("start"),
+                arguments.get("end"),
+                arguments.get("description", ""),
+                arguments.get("location", ""),
+            )
+        if action == "delete":
+            return google_calendar_delete(arguments.get("event_id"))
+        raise ValueError("Azione Google Calendar non valida.")
 
     if name == "fetch_url":
         return fetch_url(
@@ -3438,6 +4159,19 @@ class AppHandler(BaseHTTPRequestHandler):
                     "configured_providers": configured_providers(config),
                     "search_configured": search_configured(),
                     "search_providers": search_providers(),
+                    "google_calendar_configured": bool(
+                        (
+                            google_calendar_config["client_id"]
+                            or GOOGLE_CLIENT_ID
+                        )
+                        and (
+                            google_calendar_config["client_secret"]
+                            or GOOGLE_CLIENT_SECRET
+                        )
+                    ),
+                    "google_calendar_connected": bool(
+                        google_calendar_config["refresh_token"]
+                    ),
                     "terminal_enabled": config["terminal_enabled"],
                     "approval_mode": config["approval_mode"],
                     "workspace": config["workspace"],
@@ -3456,6 +4190,40 @@ class AppHandler(BaseHTTPRequestHandler):
                     for kind in ("events", "tasks")
                 }
             self._send_json(200, public_planner)
+            return
+        if self.path == "/api/google-calendar":
+            self._send_json(
+                200, google_calendar_status(self._google_redirect_uri())
+            )
+            return
+        if self.path == "/api/google-calendar/start":
+            try:
+                destination = google_oauth_start(self._google_redirect_uri())
+            except (ValueError, RuntimeError) as error:
+                self._send_json(400, {"error": str(error)})
+                return
+            self._redirect(destination)
+            return
+        callback = urlsplit(self.path)
+        if callback.path == "/oauth/google/callback":
+            params = parse_qs(callback.query)
+            code = (params.get("code") or [""])[0]
+            state = (params.get("state") or [""])[0]
+            denied = (params.get("error") or [""])[0]
+            if denied:
+                self._redirect("/?google_calendar=denied")
+                return
+            try:
+                google_oauth_complete(
+                    code, state, self._google_redirect_uri()
+                )
+            except (ValueError, RuntimeError, OSError) as problem:
+                self.log_error(
+                    "Collegamento Google Calendar non riuscito: %s", problem
+                )
+                self._redirect("/?google_calendar=error")
+                return
+            self._redirect("/?google_calendar=connected")
             return
         if self.path == "/api/system":
             self._send_json(200, machine_status())
@@ -3525,7 +4293,7 @@ class AppHandler(BaseHTTPRequestHandler):
         )
         if self.path not in {
             "/api/config", "/api/chat", "/api/workflows", "/api/extract",
-            "/api/planner", "/api/telegram",
+            "/api/planner", "/api/telegram", "/api/google-calendar",
         } and not approval_match:
             self._send_json(404, {"error": "Endpoint non trovato."})
             return
@@ -3545,6 +4313,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 self._extract_document(data)
             elif self.path == "/api/planner":
                 self._save_planner(data)
+            elif self.path == "/api/google-calendar":
+                self._save_google_calendar(data)
             else:
                 self._approve_action(approval_match.group(1), data)
         except ValueError as error:
@@ -3726,6 +4496,49 @@ class AppHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True})
             return
         raise ValueError("Azione Telegram non valida.")
+
+    def _google_redirect_uri(self):
+        if GOOGLE_OAUTH_REDIRECT_URI:
+            return GOOGLE_OAUTH_REDIRECT_URI
+        host = str(self.headers.get("Host") or f"{HOST}:{PORT}").strip()
+        if not re.fullmatch(r"[A-Za-z0-9.\-:\[\]]{1,255}", host):
+            host = f"{HOST}:{PORT}"
+        scheme = (
+            (self.headers.get("X-Forwarded-Proto") or "http")
+            .split(",")[0].strip().lower()
+        )
+        if scheme not in {"http", "https"}:
+            scheme = "http"
+        return f"{scheme}://{host}/oauth/google/callback"
+
+    def _redirect(self, location):
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
+    def _save_google_calendar(self, data):
+        action = data.get("action")
+        try:
+            if action == "save":
+                update_google_calendar_settings(data)
+            elif action == "disconnect":
+                disconnect_google_calendar()
+            else:
+                raise ValueError("Azione Google Calendar non valida.")
+        except OSError as error:
+            self.log_error("Configurazione Google Calendar non salvata: %s", error)
+            self._send_json(500, {
+                "error": (
+                    "Impossibile salvare la configurazione Google Calendar. "
+                    "Controlla il percorso e i permessi."
+                ),
+            })
+            return
+        self._send_json(
+            200, google_calendar_status(self._google_redirect_uri())
+        )
 
     def _save_workflow(self, data):
         try:

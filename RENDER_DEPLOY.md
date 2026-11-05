@@ -25,8 +25,9 @@ remove the password or expose the service without another authentication layer.
 
 ## Persistence
 
-Configuration, workflows, planner data, Telegram settings, chat history and
-personal memory are saved in the `app_state` table, so they survive Render
+Configuration, workflows, planner data, Telegram settings, Google Calendar
+credentials and tokens, chat history and personal memory are saved in the
+`app_state` table, so they survive Render
 restarts, sleep cycles and redeployments. If `SUPABASE_URL` or `SUPABASE_SERVICE_ROLE_KEY` is missing,
 `render_start.py` falls back to local JSON files and prints a warning; those
 files are not durable on Render's free plan.
@@ -48,8 +49,22 @@ idempotent.
 ## Web search
 
 No paid key is required. `web_search` uses DuckDuckGo's public HTML endpoint by
-default. Optionally set `EXA_API_KEY` or `TAVILY_API_KEY` for their free tiers;
-the old `SERPER_API_KEY` is used only as a last fallback when present.
+default and falls back to Yahoo, then Bing, when DuckDuckGo answers with an
+anti-bot challenge; Bing results that do not match the query are discarded.
+Optionally set `EXA_API_KEY` or `TAVILY_API_KEY` for their free tiers; the old
+`SERPER_API_KEY` is used only as a last fallback when present.
+
+## Google Calendar
+
+Add the redirect URI shown in **Settings → Google Calendar** to your Google
+OAuth client; on Render it is the service URL plus
+`/oauth/google/callback`. The client ID, client secret and refresh token are
+stored in the private `app_state` row as `google_calendar.json` and never
+returned to the browser. The callback route is the only page that skips
+Basic Authentication, because Google redirects the browser there without
+credentials; the single-use OAuth state keeps it tied to an authenticated
+session. You can also provide `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and
+`GOOGLE_OAUTH_REDIRECT_URI` as service environment variables.
 
 ## Troubleshooting web search
 

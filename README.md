@@ -24,14 +24,15 @@ nel browser o nel repository.
 L'assistente usa lo strumento `web_search`, che restituisce titolo, URL ed
 estratto dei risultati. **Non serve alcuna chiave a pagamento**: senza
 configurazione usa DuckDuckGo tramite la sua pagina HTML pubblica e, se
-DuckDuckGo non risponde o chiede una verifica anti-bot, ripiega su Bing.
+DuckDuckGo non risponde o chiede una verifica anti-bot, ripiega su Yahoo e
+poi su Bing.
 
 Sono supportati anche provider opzionali con piano gratuito senza carta:
 
 - **Exa**: imposta `EXA_API_KEY` (crediti gratuiti iniziali e mensili).
 - **Tavily**: imposta `TAVILY_API_KEY` (circa 1.000 ricerche al mese).
 
-L'ordine è Exa, Tavily, DuckDuckGo, Bing e infine Serper se la vecchia
+L'ordine è Exa, Tavily, DuckDuckGo, Yahoo, Bing e infine Serper se la vecchia
 `SERPER_API_KEY` è ancora presente. Serper non è più obbligatorio e non viene
 usato se non configurato. Se nessun motore risponde, NOKK ripiega sulle voci di
 Wikipedia, segnalando che non si tratta di notizie aggiornate.
@@ -39,8 +40,32 @@ Wikipedia, segnalando che non si tratta di notizie aggiornate.
 Le chiavi restano solo lato server e non vengono salvate in Supabase, nel
 repository o nella cronologia chat. Le query vengono inviate al provider scelto:
 non inserire dati riservati. DuckDuckGo può temporaneamente bloccare le
-richieste automatizzate: in quel caso NOKK prova automaticamente con Bing,
+richieste automatizzate: in quel caso NOKK prova automaticamente con Yahoo e
+poi con Bing, scartando i risultati di Bing che non riguardano la query,
 mentre Exa o Tavily restano i provider più affidabili.
+
+## Google Calendar
+
+Puoi collegare il tuo Google Calendar e lasciare che l'assistente legga,
+crei o elimini eventi con lo strumento `google_calendar`.
+
+1. In Google Cloud Console crea un progetto e abilita la **Google Calendar API**.
+2. Crea un client OAuth di tipo **Applicazione web**.
+3. Apri **Impostazioni → Google Calendar** in NOKK, copia l'URI di
+   reindirizzamento mostrato (nel deploy hosted è l'indirizzo Render del
+   servizio seguito da `/oauth/google/callback`) e incollalo tra gli URI
+   autorizzati del client.
+4. Salva client ID, client secret e ID del calendario, premi **Collega Google
+   Calendar** e autorizza l'accesso: NOKK chiede solo `calendar.events`.
+
+Client ID, client secret e token di aggiornamento restano lato server: il
+secret non viene mai restituito all'interfaccia e `google_calendar.json` è
+salvato nella tabella privata `app_state` su Supabase, insieme al resto della
+configurazione, quindi non finisce nel repository né nella cronologia chat. Se
+preferisci, fornisci le credenziali con `GOOGLE_CLIENT_ID` e
+`GOOGLE_CLIENT_SECRET` e imposta l'URI con `GOOGLE_OAUTH_REDIRECT_URI`. Per un
+calendario diverso da quello principale indica il suo ID nelle impostazioni;
+**Disconnetti** rimuove il token salvato.
 
 ## Avvio
 
@@ -164,6 +189,10 @@ configurazione, con le stesse protezioni locali.
   proteggere il computer, le chat Telegram non possono usare il terminale.
   Messaggi e contesto della chat autorizzata vengono inoltrati al provider AI
   configurato; disconnettere il bot rimuove token e chat autorizzate.
+- Puoi collegare Google Calendar dalle impostazioni con un client OAuth
+  personale; credenziali e token restano lato server (in `app_state` su
+  Supabase) e l'assistente può leggere, creare o eliminare eventi con lo
+  strumento `google_calendar`.
 - Non esegue ancora codice generato come skill né si auto-modifica.
 - La cronologia delle conversazioni è disponibile nel deploy online e viene
   salvata in Supabase; con `python app.py` in locale la pagina non mostra il

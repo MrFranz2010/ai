@@ -11,6 +11,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
+from urllib.parse import parse_qsl, urlsplit
 from urllib.request import Request, urlopen
 
 from pypdf import PdfWriter
@@ -63,6 +64,9 @@ class AppRouteTests(unittest.TestCase):
         app.WORKFLOWS_FILE = Path(cls.config_directory.name) / "workflows.json"
         app.PLANNER_FILE = Path(cls.config_directory.name) / "planner.json"
         app.TELEGRAM_FILE = Path(cls.config_directory.name) / "telegram.json"
+        app.GOOGLE_CALENDAR_FILE = (
+            Path(cls.config_directory.name) / "google_calendar.json"
+        )
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), app.AppHandler)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
@@ -80,6 +84,13 @@ class AppRouteTests(unittest.TestCase):
         app.WORKFLOWS_FILE.unlink(missing_ok=True)
         app.PLANNER_FILE.unlink(missing_ok=True)
         app.TELEGRAM_FILE.unlink(missing_ok=True)
+        app.GOOGLE_CALENDAR_FILE.unlink(missing_ok=True)
+        with app.google_calendar_lock:
+            app.google_calendar_config.clear()
+            app.google_calendar_config.update(app.default_google_calendar())
+            app.google_oauth_states.clear()
+            app.google_access_token_cache["token"] = None
+            app.google_access_token_cache["expires_at"] = 0.0
         with app.config_lock:
             app.config.update(app.default_config())
             app.workflows.clear()
@@ -1088,6 +1099,225 @@ class TelegramFormattingTests(unittest.TestCase):
             )
 
 
+class GoogleCalendarToolTests(unittest.TestCase):
+    CLIENT_ID = "123456-nokk.apps.googleusercontent.com"
+    CLIENT_SECRET = "segreto-client"
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.addCleanup(self._restore)
+        app.GOOGLE_CALENDAR_FILE = Path(self.directory.name) / "google_calendar.json"
+        self._restore()
+        app.GOOGLE_CALENDAR_FILE.unlink(missing_ok=True)
+        with app.google_calendar_lock:
+            app.google_calendar_config.clear()
+            app.google_calendar_config.update(app.default_google_calendar())
+            app.google_oauth_states.clear()
+            app.google_access_token_cache["token"] = None
+            app.google_access_token_cache["expires_at"] = 0.0
+
+    def _restore(self):
+        with app.google_calendar_lock:
+            app.google_calendar_config.clear()
+            app.google_calendar_config.update(app.default_google_calendar())
+            app.google_oauth_states.clear()
+            app.google_access_token_cache["token"] = None
+            app.google_access_token_cache["expires_at"] = 0.0
+
+    def save_credentials(self):
+        app.update_google_calendar_settings({
+            "client_id": self.CLIENT_ID,
+            "client_secret": self.CLIENT_SECRET,
+            "calendar_id": "primary",
+        })
+
+    def start_flow(self):
+        url = app.google_oauth_start("http://127.0.0.1:8000/oauth/google/callback")
+        query = dict(parse_qsl(urlsplit(url).query))
+        return url, query
+
+    def test_status_does_not_expose_the_secret(self):
+        self.save_credentials()
+        status = app.google_calendar_status("http://localhost/callback")
+        self.assertTrue(status["configured"])
+        self.assertFalse(status["connected"])
+        self.assertNotIn("client_secret", status)
+        self.assertNotIn("refresh_token", status)
+        self.assertEqual(status["client_id"], self.CLIENT_ID)
+        self.assertEqual(status["redirect_uri"], "http://localhost/callback")
+
+    def test_oauth_start_builds_a_google_consent_url(self):
+        self.save_credentials()
+        url, query = self.start_flow()
+        self.assertTrue(url.startswith(app.GOOGLE_OAUTH_AUTH_URL))
+        self.assertEqual(query["client_id"], self.CLIENT_ID)
+        self.assertEqual(query["scope"], app.GOOGLE_CALENDAR_SCOPE)
+        self.assertEqual(query["access_type"], "offline")
+        self.assertEqual(query["response_type"], "code")
+        self.assertEqual(
+            query["redirect_uri"],
+            "http://127.0.0.1:8000/oauth/google/callback",
+        )
+        self.assertIn(query["state"], app.google_oauth_states)
+
+    def test_oauth_start_requires_credentials(self):
+        with self.assertRaises(ValueError):
+            app.google_oauth_start("http://127.0.0.1:8000/oauth/google/callback")
+
+    def test_callback_stores_the_refresh_token_once(self):
+        self.save_credentials()
+        _, query = self.start_flow()
+        payload = {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "expires_in": 3600,
+        }
+        with patch("app.urlopen", return_value=FakeResponse(payload)) as call:
+            status = app.google_oauth_complete(
+                "codice", query["state"],
+                "http://127.0.0.1:8000/oauth/google/callback",
+            )
+        self.assertTrue(status["connected"])
+        body = call.call_args.args[0].data.decode("utf-8")
+        self.assertIn("grant_type=authorization_code", body)
+        self.assertIn("code=codice", body)
+        saved = json.loads(app.GOOGLE_CALENDAR_FILE.read_text(encoding="utf-8"))
+        self.assertEqual(saved["refresh_token"], "refresh")
+        with self.assertRaises(ValueError):
+            app.google_oauth_complete(
+                "codice", query["state"],
+                "http://127.0.0.1:8000/oauth/google/callback",
+            )
+
+    def test_changing_the_client_credentials_disconnects(self):
+        self.save_credentials()
+        with app.google_calendar_lock:
+            app.google_calendar_config["refresh_token"] = "refresh"
+        app.update_google_calendar_settings({"client_secret": "nuovo-segreto"})
+        status = app.google_calendar_status("http://localhost/callback")
+        self.assertFalse(status["connected"])
+
+    def test_list_events_uses_the_calendar_api(self):
+        with app.google_calendar_lock:
+            app.google_calendar_config.update({
+                "client_id": self.CLIENT_ID,
+                "client_secret": self.CLIENT_SECRET,
+                "refresh_token": "refresh",
+            })
+        token_payload = {"access_token": "access", "expires_in": 3600}
+        events_payload = {"items": [{
+            "id": "abc_123",
+            "summary": "Dentista",
+            "start": {"dateTime": "2026-11-06T09:00:00+01:00"},
+            "end": {"dateTime": "2026-11-06T10:00:00+01:00"},
+            "location": "Studio",
+            "htmlLink": "https://calendar.google.com/event?eid=abc",
+        }]}
+        with patch(
+            "app.urlopen",
+            side_effect=[FakeResponse(token_payload), FakeResponse(events_payload)],
+        ) as call:
+            result = app.execute_app_tool("google_calendar", {
+                "action": "list",
+                "time_min": "2026-11-06T00:00",
+                "time_max": "2026-11-07T00:00",
+                "max_results": 5,
+            })
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["calendar"], "primary")
+        self.assertEqual(result["events"], [{
+            "id": "abc_123",
+            "title": "Dentista",
+            "start": "2026-11-06T09:00:00+01:00",
+            "end": "2026-11-06T10:00:00+01:00",
+            "all_day": False,
+            "location": "Studio",
+            "description": "",
+            "html_link": "https://calendar.google.com/event?eid=abc",
+            "calendar": "primary",
+        }])
+        api_request = call.call_args_list[1].args[0]
+        self.assertIn("/calendars/primary/events", api_request.full_url)
+        self.assertIn("singleEvents=true", api_request.full_url)
+        self.assertIn("timeMin=2026-11-06T00", api_request.full_url)
+        headers = {key.lower(): value for key, value in api_request.header_items()}
+        self.assertEqual(headers["authorization"], "Bearer access")
+
+    def test_create_event_defaults_to_one_hour(self):
+        with app.google_calendar_lock:
+            app.google_calendar_config.update({
+                "client_id": self.CLIENT_ID,
+                "client_secret": self.CLIENT_SECRET,
+                "refresh_token": "refresh",
+            })
+        token_payload = {"access_token": "access", "expires_in": 3600}
+        created = {
+            "id": "nuovo_1",
+            "summary": "Riunione",
+            "start": {"dateTime": "2026-11-06T15:00:00+01:00"},
+            "end": {"dateTime": "2026-11-06T16:00:00+01:00"},
+        }
+        with patch(
+            "app.urlopen",
+            side_effect=[FakeResponse(token_payload), FakeResponse(created)],
+        ) as call:
+            result = app.execute_app_tool("google_calendar", {
+                "action": "create",
+                "title": "Riunione",
+                "start": "2026-11-06T15:00",
+                "description": "Sala 2",
+            })
+        self.assertEqual(result["event"]["title"], "Riunione")
+        body = json.loads(call.call_args_list[1].args[0].data.decode("utf-8"))
+        self.assertEqual(body["summary"], "Riunione")
+        self.assertEqual(body["description"], "Sala 2")
+        self.assertTrue(body["start"]["dateTime"].startswith("2026-11-06T15:00"))
+        self.assertTrue(body["end"]["dateTime"].startswith("2026-11-06T16:00"))
+
+    def test_delete_event_validates_the_identifier(self):
+        with self.assertRaises(ValueError):
+            app.google_calendar_delete("../../altro")
+        with app.google_calendar_lock:
+            app.google_calendar_config.update({
+                "client_id": self.CLIENT_ID,
+                "client_secret": self.CLIENT_SECRET,
+                "refresh_token": "refresh",
+            })
+        token_payload = {"access_token": "access", "expires_in": 3600}
+        with patch(
+            "app.urlopen",
+            side_effect=[FakeResponse(token_payload), FakeResponse({})],
+        ) as call:
+            result = app.google_calendar_delete("abc_123")
+        self.assertEqual(result, {"ok": True, "id": "abc_123"})
+        self.assertEqual(call.call_args_list[1].args[0].get_method(), "DELETE")
+
+    def test_tool_reports_when_calendar_is_not_connected(self):
+        with self.assertRaises(RuntimeError) as raised:
+            app.execute_app_tool("google_calendar", {"action": "list"})
+        self.assertIn("non è collegato", str(raised.exception))
+
+    def test_authorization_rejection_is_explained(self):
+        with app.google_calendar_lock:
+            app.google_calendar_config.update({
+                "client_id": self.CLIENT_ID,
+                "client_secret": self.CLIENT_SECRET,
+                "refresh_token": "refresh",
+            })
+        error = HTTPError(
+            "https://oauth2.googleapis.com/token", 400, "Bad Request", {},
+            io.BytesIO(json.dumps({
+                "error": "invalid_grant",
+                "error_description": "Token has been expired or revoked.",
+            }).encode("utf-8")),
+        )
+        with patch("app.urlopen", side_effect=error):
+            with self.assertRaises(RuntimeError) as raised:
+                app.google_calendar_access_token()
+        self.assertIn("revocato", str(raised.exception))
+
+
 class WebSearchToolTests(unittest.TestCase):
     def setUp(self):
         app.SEARCH_CACHE.clear()
@@ -1120,7 +1350,10 @@ class WebSearchToolTests(unittest.TestCase):
             ),
             patch(
                 "app.urlopen",
-                side_effect=[challenge, FakeHtmlResponse(bing_page)],
+                side_effect=[
+                    challenge, FakeHtmlResponse("<html></html>"),
+                    FakeHtmlResponse(bing_page),
+                ],
             ) as search_call,
         ):
             result = app.execute_app_tool("web_search", {
@@ -1140,7 +1373,7 @@ class WebSearchToolTests(unittest.TestCase):
                 "snippet": "Secondo estratto.",
             },
         ])
-        bing_request = search_call.call_args_list[1].args[0]
+        bing_request = search_call.call_args_list[2].args[0]
         self.assertTrue(bing_request.full_url.startswith(app.BING_SEARCH_URL))
         self.assertIn("q=meteo+Roma", bing_request.full_url)
 
@@ -1152,7 +1385,7 @@ class WebSearchToolTests(unittest.TestCase):
             ),
             patch(
                 "app.urlopen",
-                side_effect=[challenge] + [FakeHtmlResponse("<html></html>")] * 3,
+                side_effect=[challenge] + [FakeHtmlResponse("<html></html>")] * 4,
             ),
             patch("app.time.sleep"),
         ):
@@ -1178,15 +1411,17 @@ class WebSearchToolTests(unittest.TestCase):
             ),
             patch(
                 "app.urlopen",
-                side_effect=[challenge, empty_page, result_page],
+                side_effect=[
+                    challenge, empty_page, empty_page, result_page,
+                ],
             ) as search_call,
             patch("app.time.sleep") as sleep,
         ):
             result = app.execute_app_tool("web_search", {"query": "meteo Roma"})
         self.assertEqual(result["provider"], "bing")
         self.assertEqual(result["results"][0]["url"], "https://example.com/roma")
-        self.assertEqual(search_call.call_count, 3)
-        second_bing = search_call.call_args_list[2].args[0].full_url
+        self.assertEqual(search_call.call_count, 4)
+        second_bing = search_call.call_args_list[3].args[0].full_url
         self.assertIn("cc=IT", second_bing)
         sleep.assert_called_once()
 
@@ -1206,7 +1441,7 @@ class WebSearchToolTests(unittest.TestCase):
             ),
             patch(
                 "app.urlopen",
-                side_effect=[challenge, empty_page, empty_page, rss],
+                side_effect=[challenge, empty_page, empty_page, empty_page, rss],
             ) as search_call,
             patch("app.time.sleep"),
         ):
@@ -1217,7 +1452,7 @@ class WebSearchToolTests(unittest.TestCase):
             "url": "https://example.com/roma",
             "snippet": "Sole & 24 gradi.",
         }])
-        self.assertIn("format=rss", search_call.call_args_list[3].args[0].full_url)
+        self.assertIn("format=rss", search_call.call_args_list[4].args[0].full_url)
 
     def test_search_falls_back_to_wikipedia_when_every_engine_is_blocked(self):
         challenge = FakeStatusHtmlResponse("<html>challenge</html>", status=202)
@@ -1236,7 +1471,7 @@ class WebSearchToolTests(unittest.TestCase):
                 "app.urlopen",
                 side_effect=[
                     challenge, empty_page, empty_page, empty_page,
-                    FakeResponse(payload),
+                    empty_page, FakeResponse(payload),
                 ],
             ) as search_call,
             patch("app.time.sleep"),
@@ -1250,7 +1485,7 @@ class WebSearchToolTests(unittest.TestCase):
         }])
         self.assertIn("notizie aggiornate", result["note"])
         self.assertIn(
-            "it.wikipedia.org", search_call.call_args_list[4].args[0].full_url,
+            "it.wikipedia.org", search_call.call_args_list[5].args[0].full_url,
         )
 
     def test_unexpected_provider_error_does_not_stop_the_chain(self):
@@ -1267,7 +1502,14 @@ class WebSearchToolTests(unittest.TestCase):
                 app, EXA_API_KEY="test-exa", TAVILY_API_KEY="", SERPER_API_KEY="",
             ),
             patch("app._exa_search", side_effect=KeyError("results")),
-            patch("app.urlopen", side_effect=[FakeHtmlResponse("<html></html>"), page]),
+            patch(
+                "app.urlopen",
+                side_effect=[
+                    FakeHtmlResponse("<html></html>"),
+                    FakeHtmlResponse("<html></html>"),
+                    page,
+                ],
+            ),
             patch("app.time.sleep"),
         ):
             result = app.execute_app_tool("web_search", {"query": "meteo Roma"})
@@ -1351,6 +1593,80 @@ class WebSearchToolTests(unittest.TestCase):
         headers = {key.lower(): value for key, value in request.header_items()}
         self.assertEqual(headers["x-api-key"], "test-exa")
         self.assertEqual(json.loads(request.data)["query"], "meteo Roma")
+
+    def test_search_falls_back_to_yahoo_when_other_engines_are_blocked(self):
+        challenge = FakeStatusHtmlResponse("<html>challenge</html>", status=202)
+        yahoo_page = """
+        <ol>
+          <li><div class="dd algo algo-sr relsrch richAlgo">
+            <div class="compTitle">
+              <a href="https://r.search.yahoo.com/_ylt=abc/RV=2/RE=1/RO=10/RU=https%3a%2f%2fexample.com%2froma/RK=2/RS=x">
+                <h3 class="title"><span>Meteo Roma</span></h3>
+              </a>
+            </div>
+            <div class="compText aAbs">
+              <p><span>Oggi</span> Sole e 24 gradi.</p>
+            </div>
+          </div></li>
+        </ol>
+        """
+        with (
+            patch.multiple(
+                app, EXA_API_KEY="", TAVILY_API_KEY="", SERPER_API_KEY="",
+            ),
+            patch(
+                "app.urlopen",
+                side_effect=[challenge, FakeHtmlResponse(yahoo_page)],
+            ) as search_call,
+        ):
+            result = app.execute_app_tool("web_search", {"query": "meteo Roma"})
+        self.assertEqual(result["provider"], "yahoo")
+        self.assertEqual(result["results"], [{
+            "title": "Meteo Roma",
+            "url": "https://example.com/roma",
+            "snippet": "Oggi Sole e 24 gradi.",
+        }])
+        self.assertTrue(
+            search_call.call_args_list[1].args[0].full_url.startswith(
+                app.YAHOO_SEARCH_URL
+            )
+        )
+
+    def test_bing_results_for_another_query_are_rejected(self):
+        challenge = FakeStatusHtmlResponse("<html>challenge</html>", status=202)
+        empty_page = FakeHtmlResponse("<html></html>")
+        unrelated_page = FakeHtmlResponse("""
+        <ol id="b_results">
+          <li class="b_algo">
+            <h2><a href="https://www.toyota.it/">Toyota Motor Italia</a></h2>
+            <p>Gamma Toyota e promozioni.</p>
+          </li>
+        </ol>
+        """)
+        empty_rss = FakeHtmlResponse(
+            '<?xml version="1.0" encoding="utf-8" ?>'
+            "<rss version=\"2.0\"><channel><title>Bing</title></channel></rss>"
+        )
+        wiki = FakeResponse({"query": {"search": [{
+            "title": "Roma",
+            "snippet": "Roma è la capitale d'Italia.",
+        }]}})
+        with (
+            patch.multiple(
+                app, EXA_API_KEY="", TAVILY_API_KEY="", SERPER_API_KEY="",
+            ),
+            patch(
+                "app.urlopen",
+                side_effect=[
+                    challenge, empty_page, unrelated_page, unrelated_page,
+                    empty_rss, wiki,
+                ],
+            ),
+            patch("app.time.sleep"),
+        ):
+            result = app.execute_app_tool("web_search", {"query": "meteo Roma"})
+        self.assertEqual(result["provider"], "wikipedia")
+        self.assertEqual(result["results"][0]["url"], "https://it.wikipedia.org/wiki/Roma")
 
     def test_search_validates_query_and_result_count(self):
         for arguments in (
