@@ -118,6 +118,12 @@ TELEGRAM_REMINDER_DEFAULT_TIME = "07:00"
 TELEGRAM_REMINDER_WINDOW_SECONDS = 15 * 60
 TELEGRAM_REMINDER_TIMEZONE = "Europe/Rome"
 TELEGRAM_REMINDER_TIME_PATTERN = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+TELEGRAM_BOT_COMMANDS = (
+    {"command": "oggi", "description": "Materie di oggi"},
+    {"command": "orario", "description": "Orario settimanale completo"},
+    {"command": "settimana", "description": "Stesso orario di /orario"},
+    {"command": "data", "description": "Data e ora correnti"},
+)
 TELEGRAM_WEEKDAYS = (
     "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato",
     "domenica",
@@ -4144,13 +4150,33 @@ def _handle_telegram_update(update):
     _send_telegram_message(bot["token"], chat["id"], reply)
 
 
+def publish_telegram_commands(token):
+    """Expose NOKK's commands in Telegram's "/" menu."""
+    if not isinstance(token, str) or not token:
+        return False
+    try:
+        telegram_api_call(
+            token,
+            "setMyCommands",
+            {"commands": [dict(item) for item in TELEGRAM_BOT_COMMANDS]},
+        )
+    except RuntimeError as error:
+        print(f"Telegram: comandi non pubblicati: {error}")
+        return False
+    return True
+
+
 def _telegram_poll_loop(stop_event):
+    published_token = None
     while not stop_event.is_set():
         with telegram_lock:
             active_config = telegram_config.copy()
         token = active_config["token"]
         if not token:
             return
+        if token != published_token:
+            publish_telegram_commands(token)
+            published_token = token
         try:
             updates = telegram_api_call(
                 token,
