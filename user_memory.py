@@ -4,7 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 
-MAX_MEMORY_FACTS = 30
+MAX_MEMORY_FACTS = 60
 MAX_MEMORY_FACT_LENGTH = 500
 MAX_MEMORY_TOTAL_LENGTH = 5000
 MAX_MEMORY_FILE_CHARS = 5000
@@ -16,7 +16,6 @@ def validate_memories(value):
     if not isinstance(value, list) or len(value) > MAX_MEMORY_FACTS:
         raise ValueError(f"Puoi salvare al massimo {MAX_MEMORY_FACTS} informazioni.")
     clean = []
-    seen = set()
     total = 0
     for fact in value:
         if not isinstance(fact, str):
@@ -26,13 +25,9 @@ def validate_memories(value):
             raise ValueError(
                 f"Ogni informazione deve avere da 1 a {MAX_MEMORY_FACT_LENGTH} caratteri."
             )
-        normalized = fact.casefold()
-        if normalized in seen:
-            continue
         total += len(fact)
         if total > MAX_MEMORY_TOTAL_LENGTH:
             raise ValueError("La memoria supera il limite totale di testo.")
-        seen.add(normalized)
         clean.append(fact)
     return clean
 

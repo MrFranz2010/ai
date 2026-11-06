@@ -61,6 +61,27 @@ class TimetableParsingTests(unittest.TestCase):
         self.assertEqual(schedule[1][:2], ["DISEGNO-ARTE", "ITAL-LATINO"])
         self.assertEqual(schedule[5][-2:], ["INGLESE", "INGLESE"])
 
+    def test_memory_file_upload_preserves_flat_timetable_order(self):
+        text = "\n".join(
+            "STO-FILOSOFIA MATEM-FISICA RELIG-M.ALT ITAL-LATINO "
+            "DISEGNO-ARTE DISEGNO-ARTE ITAL-LATINO STO-FILOSOFIA "
+            "STO-FILOSOFIA INGLESE MATEM-FISICA SCIENZE SCIENZE "
+            "STO-FILOSOFIA SC-MOTORIE SC-MOTORIE MATEM-FISICA "
+            "ITAL-LATINO STO-FILOSOFIA ITAL-LATINO ITAL-LATINO SCIENZE "
+            "MATEM-FISICA MATEM-FISICA MATEM-FISICA MATEM-FISICA "
+            "ITAL-LATINO ITAL-LATINO INGLESE INGLESE".split()
+        )
+        facts = user_memory.merge_memory_file(
+            ["Marco merrino è uno scrittore"], "orario.pdf", text
+        )
+        self.assertEqual(len(facts), 31)
+        schedule = app.timetable_from_memories(facts)
+        self.assertEqual(schedule[0], [
+            "STO-FILOSOFIA", "MATEM-FISICA", "RELIG-M.ALT",
+            "ITAL-LATINO", "DISEGNO-ARTE",
+        ])
+        self.assertEqual(schedule[5][-2:], ["INGLESE", "INGLESE"])
+
     def test_weekly_message_contains_all_saved_days(self):
         facts = ["[orario.pdf] Lunedì: Storia", "[orario.pdf] Sabato: Inglese"]
         now = datetime.datetime(2026, 11, 6, 7, 0)
