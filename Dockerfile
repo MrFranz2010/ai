@@ -8,7 +8,8 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py render_start.py supabase_store.py user_memory.py ./
+COPY app.py render_start.py supabase_store.py user_memory.py \
+     calendar_utils.py search_parsing.py telegram_text.py ./
 COPY web/ ./web/
 
 EXPOSE 10000
