@@ -243,6 +243,40 @@ APP_TOOLS = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "home_assistant",
+        "description": (
+            "Legge, crea o elimina entità e chiama servizi in Home Assistant collegato. "
+            "Usalo per gestire luci, interruttori, termostati e altri dispositivi."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list_entities", "call_service"]
+                },
+                "entity_id": {
+                    "type": "string",
+                    "description": "ID entità Home Assistant (es. light.living_room)"
+                },
+                "domain": {
+                    "type": "string",
+                    "description": "Dominio del servizio (es. homeassistant, light, climate)"
+                },
+                "service": {
+                    "type": "string",
+                    "description": "Nome del servizio da chiamare (es. turn_on, turn_off, set_temperature)"
+                },
+                "service_data": {
+                    "type": "object",
+                    "description": "Dati aggiuntivi per il servizio (es. brightness, temperature)"
+                }
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
 ]
 SELF_UPDATE_TOOLS = [
     {
@@ -308,40 +342,6 @@ SELF_UPDATE_TOOLS = [
             "additionalProperties": False,
         },
     },
-    {
-        "name": "home_assistant",
-        "description": (
-            "Legge, crea o elimina entità e chiama servizi in Home Assistant collegato. "
-            "Usalo per gestire luci, interruttori, termostati e altri dispositivi."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "action": {
-                    "type": "string",
-                    "enum": ["list_entities", "call_service"]
-                },
-                "entity_id": {
-                    "type": "string",
-                    "description": "ID entità Home Assistant (es. light.living_room)"
-                },
-                "domain": {
-                    "type": "string",
-                    "description": "Dominio del servizio (es. homeassistant, light, climate)"
-                },
-                "service": {
-                    "type": "string",
-                    "description": "Nome del servizio da chiamare (es. turn_on, turn_off, set_temperature)"
-                },
-                "service_data": {
-                    "type": "object",
-                    "description": "Dati aggiuntivi per il servizio (es. brightness, temperature)"
-                }
-            },
-            "required": ["action"],
-            "additionalProperties": False
-        }
-    }
 ]
 ALL_APP_TOOLS = APP_TOOLS + SELF_UPDATE_TOOLS
 
