@@ -1127,6 +1127,29 @@ class TelegramFormattingTests(unittest.TestCase):
         self.assertEqual(api_call.call_args.args[2]["text"], "**ciao**")
         self.assertNotIn("parse_mode", api_call.call_args.args[2])
 
+    def test_telegram_commands_are_published_for_the_slash_menu(self):
+        with patch("app.telegram_api_call") as api_call:
+            published = app.publish_telegram_commands("token")
+        self.assertTrue(published)
+        api_call.assert_called_once()
+        method = api_call.call_args.args[1]
+        payload = api_call.call_args.args[2]
+        self.assertEqual(method, "setMyCommands")
+        names = [item["command"] for item in payload["commands"]]
+        self.assertEqual(names, ["oggi", "orario", "settimana", "data"])
+        for item in payload["commands"]:
+            self.assertRegex(item["command"], r"^[a-z0-9_]{1,32}$")
+            self.assertLessEqual(len(item["description"]), 256)
+            self.assertTrue(item["description"])
+
+    def test_telegram_commands_publication_failure_is_not_fatal(self):
+        with patch(
+            "app.telegram_api_call",
+            side_effect=RuntimeError("Telegram ha rifiutato la richiesta API."),
+        ):
+            self.assertFalse(app.publish_telegram_commands("token"))
+        self.assertFalse(app.publish_telegram_commands(""))
+
     def test_telegram_message_splits_long_replies(self):
         with patch("app.telegram_api_call") as api_call:
             app._send_telegram_message("token", 42, "riga di prova\n" * 1500)
