@@ -37,6 +37,32 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
 
+from calendar_utils import (
+    build_calendar_ics as _build_calendar_ics,
+    google_event as _google_event,
+    google_parse_datetime as _google_parse_datetime,
+    google_schema_value,
+)
+from search_parsing import (
+    BingParser as _BingParser,
+    DuckDuckGoParser as _DuckDuckGoParser,
+    bing_html_results as _bing_html_results,
+    bing_rss_results as _bing_rss_results,
+    bing_target as _bing_target,
+    duckduckgo_target as _duckduckgo_target,
+    normalize_search_result as _normalize_search_result,
+    results_match_query as _results_match_query,
+    search_query_tokens as _search_query_tokens,
+    yahoo_results as _yahoo_results,
+    yahoo_target as _yahoo_target,
+)
+from telegram_text import (
+    markdown_to_telegram_html,
+    telegram_chunks as _telegram_chunks,
+    telegram_escape as _telegram_escape,
+    telegram_inline as _telegram_inline,
+)
+
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("PORT", "8000"))
@@ -438,7 +464,6 @@ MAX_GOOGLE_CALENDAR_RESULTS = 50
 MAX_GOOGLE_CALENDAR_DESCRIPTION = 2000
 GOOGLE_CALENDAR_ID_PATTERN = re.compile(r"^[A-Za-z0-9@._+#-]{1,256}$")
 GOOGLE_EVENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,1024}$")
-GOOGLE_DATETIME_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$")
 
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 GITHUB_REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "MrFranz2010/ai").strip()
@@ -984,165 +1009,6 @@ def configured_providers(saved):
     return sorted(names)
 
 
-class _DuckDuckGoParser(HTMLParser):
-    """Extract organic links and snippets from DuckDuckGo's HTML page."""
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.results = []
-        self._current = None
-        self._in_title = False
-        self._in_snippet = False
-
-    def handle_starttag(self, tag, attrs):
-        if tag != "a":
-            return
-        attributes = dict(attrs)
-        classes = attributes.get("class", "").split()
-        if "result__a" in classes:
-            self._current = {
-                "title": "",
-                "url": attributes.get("href", ""),
-                "snippet": "",
-            }
-            self._in_title = True
-        elif "result__snippet" in classes and self.results:
-            self._in_snippet = True
-
-    def handle_endtag(self, tag):
-        if tag != "a":
-            return
-        if self._in_title and self._current is not None:
-            self.results.append(self._current)
-            self._current = None
-            self._in_title = False
-        elif self._in_snippet:
-            self._in_snippet = False
-
-    def handle_data(self, data):
-        if self._in_title and self._current is not None:
-            self._current["title"] += data
-        elif self._in_snippet and self.results:
-            self.results[-1]["snippet"] += data
-
-
-class _BingParser(HTMLParser):
-    """Extract title, link and snippet from Bing's result blocks."""
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.results = []
-        self._current = None
-        self._depth = 0
-        self._in_heading = False
-        self._in_title = False
-        self._in_snippet = False
-
-    def handle_starttag(self, tag, attrs):
-        if tag == "li":
-            if self._current is not None:
-                self._depth += 1
-            elif "b_algo" in (dict(attrs).get("class") or "").split():
-                self._current = {"title": "", "url": "", "snippet": ""}
-                self._depth = 0
-            return
-        if self._current is None:
-            return
-        if tag == "h2":
-            self._in_heading = True
-        elif tag == "a":
-            href = dict(attrs).get("href") or ""
-            if not href:
-                return
-            if self._in_heading:
-                # The heading link is the result: drop any site name or
-                # breadcrumb captured from the smaller links before it.
-                self._current["url"] = href
-                self._current["title"] = ""
-                self._in_title = True
-            elif not self._current["url"]:
-                self._current["url"] = href
-                self._in_title = True
-        elif tag == "p" and self._current["url"] and not self._current["snippet"]:
-            self._in_snippet = True
-
-    def handle_endtag(self, tag):
-        if tag == "li":
-            if self._current is None:
-                return
-            if self._depth:
-                self._depth -= 1
-            else:
-                self.results.append(self._current)
-                self._current = None
-                self._in_title = False
-                self._in_snippet = False
-        elif tag in {"a", "h2"}:
-            self._in_title = False
-            if tag == "h2":
-                self._in_heading = False
-        elif tag == "p":
-            self._in_snippet = False
-
-    def handle_data(self, data):
-        if self._current is None:
-            return
-        if self._in_title:
-            self._current["title"] += data
-        elif self._in_snippet:
-            self._current["snippet"] += data
-
-
-def _normalize_search_result(title, url, snippet):
-    if not isinstance(url, str):
-        return None
-    clean_url = url.strip()
-    if not clean_url.startswith(("http://", "https://")):
-        return None
-    clean_title = re.sub(r"\s+", " ", title).strip() if isinstance(title, str) else ""
-    clean_snippet = (
-        re.sub(r"\s+", " ", snippet).strip() if isinstance(snippet, str) else ""
-    )
-    return {
-        "title": (clean_title or clean_url)[:200],
-        "url": clean_url[:500],
-        "snippet": clean_snippet[:500],
-    }
-
-
-SEARCH_STOPWORDS = frozenset({
-    "che", "chi", "come", "con", "cosa", "del", "dei", "della", "delle",
-    "degli", "dove", "gli", "per", "perche", "perché", "quale", "quando",
-    "sono", "una", "uno", "the", "and", "for", "what", "when", "where",
-    "who", "with",
-})
-
-
-def _search_query_tokens(query):
-    """Significant words used to check that results answer the query."""
-    tokens = re.findall(r"[0-9a-zà-ÿ]+", query.lower())
-    return [
-        token for token in tokens
-        if len(token) > 2 and token not in SEARCH_STOPWORDS
-    ]
-
-
-def _results_match_query(results, query):
-    """Reject pages an engine serves for a different query.
-
-    Bing sometimes answers a query with no results using cached results for
-    unrelated searches, so an empty page is safer than wrong data.
-    """
-    tokens = _search_query_tokens(query)
-    if not tokens:
-        return True
-    haystack = " ".join(
-        f'{item["title"]} {item["snippet"]} {item["url"]}'
-        for item in results
-    ).lower()
-    return any(token in haystack for token in tokens)
-
-
 def _search_http_json(request, provider):
     try:
         with urlopen(request, timeout=20) as response:
@@ -1262,24 +1128,6 @@ def _serper_search(query, num_results):
     return results
 
 
-def _duckduckgo_target(url):
-    if not isinstance(url, str):
-        return None
-    target = url.strip()
-    if target.startswith("//"):
-        target = "https:" + target
-    elif target.startswith("/l/"):
-        target = "https://duckduckgo.com" + target
-    parsed = urlsplit(target)
-    if parsed.hostname in {"duckduckgo.com", "www.duckduckgo.com"} and parsed.path.startswith("/l/"):
-        redirect = parse_qs(parsed.query).get("uddg")
-        if redirect:
-            target = unquote(redirect[0])
-    if not target.startswith(("http://", "https://")):
-        return None
-    return target
-
-
 def _duckduckgo_search(query, num_results):
     request = Request(
         DUCKDUCKGO_SEARCH_URL,
@@ -1337,31 +1185,6 @@ def _duckduckgo_search(query, num_results):
     return results
 
 
-def _bing_target(url):
-    """Resolve the real destination of a Bing result link."""
-    if not isinstance(url, str):
-        return None
-    target = url.strip()
-    if target.startswith("//"):
-        target = "https:" + target
-    parsed = urlsplit(target)
-    if parsed.hostname in {"bing.com", "www.bing.com"}:
-        redirect = parse_qs(parsed.query).get("u", [""])[0]
-        if redirect.startswith("a1"):
-            encoded = redirect[2:]
-            encoded += "=" * (-len(encoded) % 4)
-            try:
-                decoded = base64.urlsafe_b64decode(encoded).decode("utf-8")
-            except (ValueError, binascii.Error, UnicodeDecodeError):
-                return None
-            if decoded.startswith(("http://", "https://")):
-                return decoded
-        return None
-    if not target.startswith(("http://", "https://")):
-        return None
-    return target
-
-
 def _bing_fetch_page(params, accept):
     request = Request(
         BING_SEARCH_URL + "?" + urlencode(params),
@@ -1390,46 +1213,6 @@ def _bing_fetch_page(params, accept):
         ) from None
     except (OSError, TimeoutError):
         raise RuntimeError("Timeout durante la ricerca con Bing.") from None
-
-
-def _bing_html_results(page, num_results):
-    parser = _BingParser()
-    parser.feed(page)
-    results = []
-    seen = set()
-    for item in parser.results:
-        result = _normalize_search_result(
-            item.get("title"), _bing_target(item.get("url")), item.get("snippet"),
-        )
-        if result and result["url"] not in seen:
-            seen.add(result["url"])
-            results.append(result)
-        if len(results) >= num_results:
-            break
-    return results
-
-
-def _bing_rss_results(page, num_results):
-    try:
-        root = ET.fromstring(page)
-    except ET.ParseError:
-        raise RuntimeError("Bing ha restituito una risposta non valida.") from None
-    results = []
-    seen = set()
-    for item in root.iter("item"):
-        description = item.findtext("description") or ""
-        snippet = html.unescape(re.sub(r"<[^>]+>", " ", description))
-        result = _normalize_search_result(
-            item.findtext("title") or "",
-            (item.findtext("link") or "").strip(),
-            snippet,
-        )
-        if result and result["url"] not in seen:
-            seen.add(result["url"])
-            results.append(result)
-        if len(results) >= num_results:
-            break
-    return results
 
 
 def _bing_search(query, num_results):
@@ -1473,60 +1256,6 @@ def _bing_search(query, num_results):
         "Bing non ha restituito risultati pertinenti (possibile blocco "
         "temporaneo)."
     )
-
-
-def _yahoo_target(url):
-    """Resolve the real destination of a Yahoo result link."""
-    if not isinstance(url, str):
-        return None
-    target = url.strip()
-    if target.startswith("//"):
-        target = "https:" + target
-    if not target.startswith(("http://", "https://")):
-        return None
-    parsed = urlsplit(target)
-    if (parsed.hostname or "").endswith("search.yahoo.com"):
-        redirect = re.search(r"/RU=(.*?)/RK=", parsed.path)
-        if not redirect:
-            return None
-        target = unquote(redirect.group(1))
-    if not target.startswith(("http://", "https://")):
-        return None
-    return target
-
-
-def _yahoo_results(page, num_results):
-    """Extract organic results from Yahoo's server-rendered result page."""
-    starts = [
-        match.start()
-        for match in re.finditer(r'<div class="dd algo[^"]*"', page)
-    ]
-    results = []
-    seen = set()
-    for index, start in enumerate(starts):
-        end = starts[index + 1] if index + 1 < len(starts) else len(page)
-        block = page[start:end]
-        title_match = re.search(r"<h3[^>]*>(.*?)</h3>", block, re.S)
-        if not title_match:
-            continue
-        title = html.unescape(re.sub(r"<[^>]+>", " ", title_match.group(1)))
-        link_match = re.search(r'href="(https?://[^"]+)"', block)
-        target = _yahoo_target(link_match.group(1)) if link_match else None
-        snippet = ""
-        snippet_match = re.search(
-            r'<div class="compText[^"]*"[^>]*>(.*?)</div>', block, re.S
-        )
-        if snippet_match:
-            snippet = html.unescape(
-                re.sub(r"<[^>]+>", " ", snippet_match.group(1))
-            )
-        result = _normalize_search_result(title, target, snippet)
-        if result and result["url"] not in seen:
-            seen.add(result["url"])
-            results.append(result)
-        if len(results) >= num_results:
-            break
-    return results
 
 
 def _yahoo_search(query, num_results):
@@ -2196,30 +1925,6 @@ def create_self_update_pull_request(title, body="", changes=None):
     }
 
 
-def google_schema_value(schema):
-    """Convert a tool parameter schema to the Gemini declaration format."""
-    converted = {}
-    for key, value in schema.items():
-        if key == "type":
-            if isinstance(value, list):
-                types = [item for item in value if item != "null"]
-                if "null" in value:
-                    converted["nullable"] = True
-                converted["type"] = types[0].upper() if types else "STRING"
-            else:
-                converted["type"] = value.upper()
-        elif key == "properties":
-            converted[key] = {
-                name: google_schema_value(property_schema)
-                for name, property_schema in value.items()
-            }
-        elif key == "items":
-            converted[key] = google_schema_value(value)
-        else:
-            converted[key] = value
-    return converted
-
-
 def normalize_base_url(value):
     """Validate the base URL of an OpenAI-compatible endpoint."""
     if value is None:
@@ -2768,42 +2473,6 @@ def _google_calendar_request(method, path, params=None, body=None):
     return _google_http_json(
         url, data=data, headers=headers, method=method, provider="Google Calendar",
     )
-
-
-def _google_parse_datetime(value, field):
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"Indica {field} nel formato YYYY-MM-DDTHH:MM.")
-    clean = value.strip()
-    try:
-        if GOOGLE_DATETIME_PATTERN.fullmatch(clean):
-            parsed = datetime.datetime.strptime(clean, "%Y-%m-%dT%H:%M")
-        else:
-            parsed = datetime.datetime.fromisoformat(clean.replace("Z", "+00:00"))
-    except ValueError:
-        raise ValueError(
-            f"{field} non è una data valida: usa YYYY-MM-DDTHH:MM."
-        ) from None
-    if parsed.tzinfo is None:
-        parsed = parsed.astimezone()
-    return parsed
-
-
-def _google_event(event, calendar_id):
-    if not isinstance(event, dict):
-        raise RuntimeError("Google Calendar ha restituito un evento non valido.")
-    start = event.get("start") if isinstance(event.get("start"), dict) else {}
-    end = event.get("end") if isinstance(event.get("end"), dict) else {}
-    return {
-        "id": event.get("id"),
-        "title": event.get("summary") or "(senza titolo)",
-        "start": start.get("dateTime") or start.get("date"),
-        "end": end.get("dateTime") or end.get("date"),
-        "all_day": "date" in start,
-        "location": event.get("location") or "",
-        "description": event.get("description") or "",
-        "html_link": event.get("htmlLink") or "",
-        "calendar": calendar_id,
-    }
 
 
 def google_calendar_list(
@@ -3901,154 +3570,6 @@ def run_chat_job(job_id, messages, active_config):
         )
 
 
-_TELEGRAM_INLINE_CODE = re.compile(r"`([^`\n]+)`")
-_TELEGRAM_BOLD = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*")
-_TELEGRAM_STRIKE = re.compile(r"~~(?=\S)(.+?)(?<=\S)~~")
-_TELEGRAM_ITALIC_STAR = re.compile(
-    r"(?<![\w*])\*(?=\S)([^*\n]+?)(?<=\S)\*(?![\w*])"
-)
-_TELEGRAM_ITALIC_UNDERSCORE = re.compile(
-    r"(?<![\w])_(?=\S)([^_\n]+?)(?<=\S)_(?![\w])"
-)
-_TELEGRAM_LINK_URL = re.compile(r"\]\((https?://[^\s)]+)\)")
-_TELEGRAM_LINK = re.compile(r"\[([^\]\n]+)\]\((\d+)\x02\)")
-_TELEGRAM_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$")
-_TELEGRAM_RULE = re.compile(r"^\s{0,3}([-*_])(?:\s*\1){2,}\s*$")
-_TELEGRAM_BULLET = re.compile(r"^(\s*)[-*+]\s+(.*)$")
-_TELEGRAM_QUOTE = re.compile(r"^\s{0,3}>\s?(.*)$")
-_TELEGRAM_TABLE_RULE = re.compile(r"^:?-{2,}:?$")
-
-
-def _telegram_escape(text):
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-
-def _telegram_inline(text):
-    """Convert inline Markdown of an already escaped line into Telegram HTML."""
-    codes = []
-
-    def stash_code(match):
-        codes.append(match.group(1))
-        return f"\x01{len(codes) - 1}\x01"
-
-    text = _TELEGRAM_INLINE_CODE.sub(stash_code, text)
-    urls = []
-
-    def stash_url(match):
-        urls.append(match.group(1))
-        return f"]({len(urls) - 1}\x02)"
-
-    text = _TELEGRAM_LINK_URL.sub(stash_url, text)
-    text = _TELEGRAM_BOLD.sub(r"<b>\1</b>", text)
-    text = _TELEGRAM_STRIKE.sub(r"<s>\1</s>", text)
-    text = _TELEGRAM_ITALIC_STAR.sub(r"<i>\1</i>", text)
-    text = _TELEGRAM_ITALIC_UNDERSCORE.sub(r"<i>\1</i>", text)
-    text = _TELEGRAM_LINK.sub(
-        lambda match: '<a href="{}">{}</a>'.format(
-            urls[int(match.group(2))].replace('"', "&quot;"), match.group(1),
-        ),
-        text,
-    )
-    return re.sub(
-        r"\x01(\d+)\x01",
-        lambda match: "<code>{}</code>".format(codes[int(match.group(1))]),
-        text,
-    )
-
-
-def markdown_to_telegram_html(text):
-    """Turn assistant Markdown into the HTML subset Telegram can render."""
-    if not isinstance(text, str):
-        text = ""
-    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    output = []
-    code_lines = []
-    in_code = False
-    for line in lines:
-        if line.strip().startswith("```"):
-            if in_code:
-                output.append(
-                    "<pre>" + _telegram_escape("\n".join(code_lines)) + "</pre>"
-                )
-                code_lines = []
-                in_code = False
-            else:
-                in_code = True
-            continue
-        if in_code:
-            code_lines.append(line)
-            continue
-        if not line.strip():
-            output.append("")
-            continue
-        heading = _TELEGRAM_HEADING.match(line)
-        if heading:
-            output.append(
-                "<b>" + _telegram_inline(_telegram_escape(heading.group(1))) + "</b>"
-            )
-            continue
-        if _TELEGRAM_RULE.match(line):
-            output.append("─" * 12)
-            continue
-        stripped = line.strip()
-        if stripped.startswith("|") and stripped.endswith("|"):
-            cells = [cell.strip() for cell in stripped.strip("|").split("|")]
-            if cells and all(
-                _TELEGRAM_TABLE_RULE.match(cell) for cell in cells if cell
-            ):
-                continue
-            output.append(
-                " · ".join(
-                    _telegram_inline(_telegram_escape(cell)) for cell in cells if cell
-                )
-            )
-            continue
-        bullet = _TELEGRAM_BULLET.match(line)
-        if bullet:
-            output.append(
-                bullet.group(1)
-                + "• "
-                + _telegram_inline(_telegram_escape(bullet.group(2)))
-            )
-            continue
-        quote = _TELEGRAM_QUOTE.match(line)
-        if quote:
-            output.append(
-                "<blockquote>"
-                + _telegram_inline(_telegram_escape(quote.group(1)))
-                + "</blockquote>"
-            )
-            continue
-        output.append(_telegram_inline(_telegram_escape(line)))
-    if in_code:
-        output.append("<pre>" + _telegram_escape("\n".join(code_lines)) + "</pre>")
-    return "\n".join(output)
-
-
-def _telegram_chunks(text, limit):
-    """Split Markdown on line boundaries so converted messages stay valid."""
-    chunk = []
-    size = 0
-    for line in text.split("\n"):
-        while len(line) > limit:
-            if chunk:
-                yield "\n".join(chunk)
-                chunk = []
-                size = 0
-            yield line[:limit]
-            line = line[limit:]
-        extra = len(line) + (1 if chunk else 0)
-        if chunk and size + extra > limit:
-            yield "\n".join(chunk)
-            chunk = []
-            size = 0
-            extra = len(line)
-        chunk.append(line)
-        size += extra
-    if chunk:
-        yield "\n".join(chunk)
-
-
 def _send_telegram_message(token, chat_id, text):
     if not isinstance(text, str) or not text.strip():
         return
@@ -4986,57 +4507,11 @@ def execute_app_tool(name, arguments):
     raise ValueError("Strumento NOKK non supportato.")
 
 
-def _ics_escape(value):
-    return (
-        str(value or "")
-        .replace("\\", "\\\\")
-        .replace(";", "\\;")
-        .replace(",", "\\,")
-        .replace("\r\n", "\\n")
-        .replace("\n", "\\n")
-    )
-
-
 def build_calendar_ics():
-    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    lines = [
-        "BEGIN:VCALENDAR",
-        "VERSION:2.0",
-        "PRODID:-//NOKK//Assistente AI//IT",
-        "CALSCALE:GREGORIAN",
-        "X-WR-CALNAME:NOKK",
-    ]
     with config_lock:
         events = [item.copy() for item in planner["events"]]
         tasks = [item.copy() for item in planner["tasks"]]
-    for event in events:
-        start = datetime.datetime.strptime(event["starts_at"], "%Y-%m-%dT%H:%M")
-        end = start + datetime.timedelta(hours=1)
-        lines.extend([
-            "BEGIN:VEVENT",
-            f"UID:{event['id']}@nokk",
-            f"DTSTAMP:{stamp}",
-            f"DTSTART:{start.strftime('%Y%m%dT%H%M%S')}",
-            f"DTEND:{end.strftime('%Y%m%dT%H%M%S')}",
-            f"SUMMARY:{_ics_escape(event['title'])}",
-        ])
-        if event.get("description"):
-            lines.append(f"DESCRIPTION:{_ics_escape(event['description'])}")
-        lines.append("END:VEVENT")
-    for task in tasks:
-        lines.extend([
-            "BEGIN:VTODO",
-            f"UID:{task['id']}@nokk",
-            f"DTSTAMP:{stamp}",
-            f"SUMMARY:{_ics_escape(task['title'])}",
-        ])
-        if task.get("due_date"):
-            lines.append(f"DUE;VALUE=DATE:{task['due_date'].replace('-', '')}")
-        if task.get("completed"):
-            lines.extend(["STATUS:COMPLETED", f"COMPLETED:{stamp}"])
-        lines.append("END:VTODO")
-    lines.append("END:VCALENDAR")
-    return "\r\n".join(lines) + "\r\n"
+    return _build_calendar_ics(events, tasks)
 
 
 def export_snapshot():
