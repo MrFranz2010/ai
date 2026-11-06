@@ -3,6 +3,9 @@ const sidebar = document.querySelector("#sidebar");
 const sidebarToggle = document.querySelector("#sidebar-toggle");
 const sidebarClose = document.querySelector("#sidebar-close");
 const sidebarBackdrop = document.querySelector("#sidebar-backdrop");
+const sidebarResizer = document.querySelector("#sidebar-resizer");
+const sidebarClockTime = document.querySelector("#sidebar-clock-time");
+const sidebarClockDate = document.querySelector("#sidebar-clock-date");
 const mobileSidebarQuery = window.matchMedia("(max-width: 820px)");
 const tabletWindowQuery = window.matchMedia("(max-width: 1366px) and (any-pointer: coarse)");
 const welcome = document.querySelector("#welcome");
@@ -111,6 +114,107 @@ function setSidebarOpen(open) {
   sidebarToggle.setAttribute("aria-expanded", String(isOpen));
   sidebarBackdrop.hidden = !isOpen;
 }
+
+const SIDEBAR_WIDTH_KEY = "nokk-sidebar-width";
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 460;
+const SIDEBAR_DEFAULT_WIDTH = 252;
+
+function sidebarWidth(value) {
+  const width = Number(value);
+  if (!Number.isFinite(width)) return SIDEBAR_DEFAULT_WIDTH;
+  return Math.round(Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, width)));
+}
+
+function applySidebarWidth(value, persist = false) {
+  const width = sidebarWidth(value);
+  sidebar.style.setProperty("--sidebar-width", `${width}px`);
+  sidebarResizer.setAttribute("aria-valuenow", String(width));
+  if (persist) {
+    try {
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width));
+    } catch (error) {
+      console.warn("Preferenza larghezza menu non disponibile:", error);
+    }
+  }
+  return width;
+}
+
+try {
+  const savedSidebarWidth = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+  if (savedSidebarWidth !== null) applySidebarWidth(savedSidebarWidth);
+} catch (error) {
+  console.warn("Preferenza larghezza menu non disponibile:", error);
+}
+
+let sidebarDragging = false;
+
+sidebarResizer.addEventListener("pointerdown", (event) => {
+  if (mobileSidebarQuery.matches || event.button !== 0) return;
+  event.preventDefault();
+  const startX = event.clientX;
+  const startWidth = sidebar.getBoundingClientRect().width;
+  sidebarDragging = true;
+  document.body.classList.add("sidebar-resizing");
+
+  const move = (moveEvent) => {
+    if (!sidebarDragging) return;
+    applySidebarWidth(startWidth + moveEvent.clientX - startX);
+  };
+  const stop = () => {
+    if (!sidebarDragging) return;
+    sidebarDragging = false;
+    document.body.classList.remove("sidebar-resizing");
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", stop);
+    window.removeEventListener("pointercancel", stop);
+    applySidebarWidth(sidebar.getBoundingClientRect().width, true);
+  };
+
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", stop);
+  window.addEventListener("pointercancel", stop);
+});
+
+sidebarResizer.addEventListener("keydown", (event) => {
+  if (mobileSidebarQuery.matches) return;
+  const current = sidebar.getBoundingClientRect().width;
+  let next = null;
+  if (event.key === "ArrowLeft") next = current - 16;
+  else if (event.key === "ArrowRight") next = current + 16;
+  else if (event.key === "Home") next = SIDEBAR_MIN_WIDTH;
+  else if (event.key === "End") next = SIDEBAR_MAX_WIDTH;
+  if (next === null) return;
+  event.preventDefault();
+  applySidebarWidth(next, true);
+});
+
+sidebarResizer.addEventListener("dblclick", () => {
+  if (!mobileSidebarQuery.matches) {
+    applySidebarWidth(SIDEBAR_DEFAULT_WIDTH, true);
+  }
+});
+
+const sidebarClockFormatter = new Intl.DateTimeFormat("it-IT", {
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+});
+
+function updateSidebarClock() {
+  const now = new Date();
+  sidebarClockTime.textContent = now.toLocaleTimeString("it-IT", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  sidebarClockTime.dateTime = now.toISOString();
+  sidebarClockDate.textContent = sidebarClockFormatter.format(now);
+}
+
+updateSidebarClock();
+window.setInterval(updateSidebarClock, 1000);
 
 const textFileExtensions = new Set([
   ".txt", ".md", ".csv", ".json", ".log", ".py", ".js", ".ts",

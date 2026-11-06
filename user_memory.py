@@ -155,6 +155,7 @@ def install(app, handler_class, load_memories, save_memories):
     handler_class.do_POST = do_post
     handler_class._user_memory_installed = True
     app.user_memory_loader = load_memories
+    app.user_memory_saver = save_memories
 
     if not getattr(app, "_user_memory_chat_installed", False):
         original_run_chat_job = app.run_chat_job
