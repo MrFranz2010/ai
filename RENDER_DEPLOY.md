@@ -32,19 +32,21 @@ restarts, sleep cycles and redeployments. If `SUPABASE_URL` or `SUPABASE_SERVICE
 `render_start.py` falls back to local JSON files and prints a warning; those
 files are not durable on Render's free plan.
 
-## Chat history save error
+## app_state save error
 
 If the logs show `new row for relation "app_state" violates check constraint
-"app_state_key_check"` and the row contains `chats.json`, the Supabase table was
-created with an older constraint. Run
-[`supabase/migrations/2026-11-04_chats_key.sql`](supabase/migrations/2026-11-04_chats_key.sql)
-in the Supabase SQL Editor for the project used by Render. You can also re-run
-[`supabase/schema.sql`](supabase/schema.sql), which is idempotent. No Render
-redeploy is needed: the change is in the database.
+"app_state_key_check"`, the Supabase table was created with an older constraint.
+Run the migration for the row named in the error in the Supabase SQL Editor for
+the project used by Render:
 
-The same migration now also allows `memories.json` for the personal memory
-panel. If you applied the earlier version, run the updated file again; it is
-idempotent.
+- [`supabase/migrations/2026-11-04_chats_key.sql`](supabase/migrations/2026-11-04_chats_key.sql)
+  for `chats.json`;
+- [`supabase/migrations/2026-11-06_memory_and_calendar_keys.sql`](supabase/migrations/2026-11-06_memory_and_calendar_keys.sql)
+  for `memories.json` or `google_calendar.json`.
+
+You can also re-run [`supabase/schema.sql`](supabase/schema.sql), which is
+idempotent and now allows every persisted state file. No Render redeploy is
+needed: the change is in the database.
 
 ## Web search
 
