@@ -122,6 +122,7 @@ TELEGRAM_BOT_COMMANDS = (
     {"command": "oggi", "description": "Materie di oggi"},
     {"command": "orario", "description": "Orario settimanale completo"},
     {"command": "data", "description": "Data e ora correnti"},
+    {"command": "compiti", "description": "Compiti e verifiche aperte"},
     {"command": "nuova", "description": "Azzera la chat e riparte da zero"},
 )
 TELEGRAM_WEEKDAYS = (
@@ -247,7 +248,10 @@ APP_TOOLS = [
         "name": "manage_planner_item",
         "description": (
             "Crea, aggiorna o elimina un elemento di calendario o un'attività. "
-            "Per l'aggiornamento includi id e i campi da mantenere."
+            "Compiti, verifiche e interrogazioni scolastiche sono attività: "
+            "creale in section=tasks con due_date, ricavando il giorno dalla "
+            "data corrente. Per l'aggiornamento includi id e i campi da "
+            "mantenere."
         ),
         "parameters": {
             "type": "object",
@@ -3079,6 +3083,12 @@ def run_chat_job(job_id, messages, active_config):
             "or null. Never use DD/MM/YYYY, seconds or timezone suffixes."
         )
         app_prompt += (
+            " When the user mentions a school assignment, test or oral exam "
+            "(compito, verifica, interrogazione), save it with "
+            "manage_planner_item section=tasks action=create and a due_date "
+            "resolved from today's date, instead of only confirming in words."
+        )
+        app_prompt += (
             " Use get_app_data with section=datetime whenever you need to "
             "confirm today's date or time, and save_timetable when the user "
             "asks you to remember their weekly school timetable."
@@ -3556,6 +3566,63 @@ def build_weekly_timetable(now, facts):
     return "\n".join(lines)
 
 
+def _task_due_label(now, due_date):
+    try:
+        due = datetime.date.fromisoformat(due_date)
+    except (TypeError, ValueError):
+        return None
+    days = (due - now.date()).days
+    date_label = f"{due.day} {TELEGRAM_MONTHS[due.month - 1]}"
+    if days == 0:
+        return "oggi"
+    if days == 1:
+        return "domani"
+    if days == -1:
+        return f"scaduto ieri, {date_label}"
+    if days < 0:
+        return f"scaduto il {date_label}"
+    if 2 <= days <= 6:
+        return TELEGRAM_WEEKDAYS[due.weekday()]
+    return date_label
+
+
+def build_tasks_message(now, tasks):
+    """List the open assignments the user still has to do."""
+    dated = []
+    undated = []
+    for task in tasks:
+        if not isinstance(task, dict) or task.get("completed"):
+            continue
+        title = " ".join(str(task.get("title") or "").split())
+        if not title:
+            continue
+        due_date = task.get("due_date")
+        label = _task_due_label(now, due_date)
+        if label is None:
+            undated.append(title)
+        else:
+            dated.append((str(due_date), label, title))
+    if not dated and not undated:
+        return (
+            "✅ Nessun compito o verifica aperta. Scrivimi per esempio "
+            "«verifica di matematica venerdì» e la aggiungo alle attività."
+        )
+    dated.sort(key=lambda item: (item[0], item[2]))
+    lines = ["📝 Compiti e verifiche aperte:", ""]
+    lines.extend(f"• {title} — {label}" for _, label, title in dated)
+    if undated:
+        if dated:
+            lines.append("")
+        lines.append("Senza scadenza:")
+        lines.extend(f"• {title}" for title in undated)
+    return "\n".join(lines)
+
+
+def _telegram_planner_tasks():
+    with config_lock:
+        return [item.copy() for item in planner.get("tasks", [])]
+
+
 def _telegram_reminder_now():
     return _local_now(TELEGRAM_REMINDER_TIMEZONE)
 
@@ -3694,12 +3761,14 @@ def _handle_telegram_update(update):
         return
 
     command = text.strip().split(maxsplit=1)[0].split("@", 1)[0].casefold()
-    if command in {"/orario", "/oggi", "/data", "/nuova"}:
+    if command in {"/orario", "/oggi", "/data", "/compiti", "/nuova"}:
         now = _telegram_reminder_now()
         if command == "/data":
             message = build_current_datetime_message(now)
         elif command == "/orario":
             message = build_weekly_timetable(now, _telegram_memory_facts())
+        elif command == "/compiti":
+            message = build_tasks_message(now, _telegram_planner_tasks())
         elif command == "/nuova":
             with telegram_conversations_lock:
                 telegram_conversations.pop(chat_id, None)

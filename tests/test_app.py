@@ -1,5 +1,6 @@
 import io
 import base64
+import datetime
 import json
 import os
 import tempfile
@@ -1136,7 +1137,7 @@ class TelegramFormattingTests(unittest.TestCase):
         payload = api_call.call_args.args[2]
         self.assertEqual(method, "setMyCommands")
         names = [item["command"] for item in payload["commands"]]
-        self.assertEqual(names, ["oggi", "orario", "data", "nuova"])
+        self.assertEqual(names, ["oggi", "orario", "data", "compiti", "nuova"])
         for item in payload["commands"]:
             self.assertRegex(item["command"], r"^[a-z0-9_]{1,32}$")
             self.assertLessEqual(len(item["description"]), 256)
@@ -1164,6 +1165,7 @@ class TelegramCommandTests(unittest.TestCase):
     def setUp(self):
         self.saved_config = app.telegram_config.copy()
         self.saved_conversations = dict(app.telegram_conversations)
+        self.saved_tasks = [item.copy() for item in app.planner["tasks"]]
         app.telegram_config.clear()
         app.telegram_config.update({
             "token": "123456789:abcdefghijklmnopqrstuvwxyz0123456789",
@@ -1178,6 +1180,7 @@ class TelegramCommandTests(unittest.TestCase):
         app.telegram_config.update(self.saved_config)
         app.telegram_conversations.clear()
         app.telegram_conversations.update(self.saved_conversations)
+        app.planner["tasks"][:] = self.saved_tasks
 
     def _send(self, text):
         update = {
@@ -1201,6 +1204,68 @@ class TelegramCommandTests(unittest.TestCase):
         reply = self._send("/nuova")
         self.assertIn("Chat azzerata", reply)
         self.assertEqual(app.telegram_conversations.get("42", []), [])
+
+    def test_compiti_lists_only_open_assignments_in_date_order(self):
+        app.planner["tasks"][:] = [
+            {
+                "id": "a" * 32,
+                "title": "Verifica di matematica",
+                "due_date": "2026-11-13",
+                "completed": False,
+            },
+            {
+                "id": "b" * 32,
+                "title": "Interrogazione di storia",
+                "due_date": "2026-11-09",
+                "completed": False,
+            },
+            {
+                "id": "c" * 32,
+                "title": "Compito di latino",
+                "due_date": None,
+                "completed": False,
+            },
+            {
+                "id": "d" * 32,
+                "title": "Relazione consegnata",
+                "due_date": "2026-11-07",
+                "completed": True,
+            },
+        ]
+        reply = self._send("/compiti")
+        lines = reply.splitlines()
+        first = lines.index("• Interrogazione di storia — lunedì")
+        second = lines.index("• Verifica di matematica — 13 novembre")
+        self.assertLess(first, second)
+        self.assertIn("Senza scadenza:", lines)
+        self.assertIn("• Compito di latino", lines)
+        self.assertNotIn("Relazione consegnata", reply)
+
+    def test_compiti_labels_today_and_tomorrow(self):
+        today = app._local_now().date().isoformat()
+        tomorrow = (app._local_now().date() + datetime.timedelta(days=1)).isoformat()
+        app.planner["tasks"][:] = [
+            {
+                "id": "a" * 32,
+                "title": "Esercizi di fisica",
+                "due_date": today,
+                "completed": False,
+            },
+            {
+                "id": "b" * 32,
+                "title": "Parafrasi",
+                "due_date": tomorrow,
+                "completed": False,
+            },
+        ]
+        reply = self._send("/compiti")
+        self.assertIn("• Esercizi di fisica — oggi", reply)
+        self.assertIn("• Parafrasi — domani", reply)
+
+    def test_compiti_is_empty_when_nothing_is_open(self):
+        app.planner["tasks"][:] = []
+        reply = self._send("/compiti")
+        self.assertIn("Nessun compito o verifica aperta", reply)
 
     def test_settimana_alias_is_gone(self):
         names = [item["command"] for item in app.TELEGRAM_BOT_COMMANDS]
