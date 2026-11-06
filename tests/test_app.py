@@ -1136,7 +1136,7 @@ class TelegramFormattingTests(unittest.TestCase):
         payload = api_call.call_args.args[2]
         self.assertEqual(method, "setMyCommands")
         names = [item["command"] for item in payload["commands"]]
-        self.assertEqual(names, ["oggi", "orario", "settimana", "data"])
+        self.assertEqual(names, ["oggi", "orario", "data", "nuova"])
         for item in payload["commands"]:
             self.assertRegex(item["command"], r"^[a-z0-9_]{1,32}$")
             self.assertLessEqual(len(item["description"]), 256)
@@ -1158,6 +1158,53 @@ class TelegramFormattingTests(unittest.TestCase):
             self.assertLessEqual(
                 len(call.args[2]["text"]), app.MAX_TELEGRAM_REPLY_LENGTH,
             )
+
+
+class TelegramCommandTests(unittest.TestCase):
+    def setUp(self):
+        self.saved_config = app.telegram_config.copy()
+        self.saved_conversations = dict(app.telegram_conversations)
+        app.telegram_config.clear()
+        app.telegram_config.update({
+            "token": "123456789:abcdefghijklmnopqrstuvwxyz0123456789",
+            "bot_username": "nokk_test_bot",
+            "authorized_chats": ["42"],
+            "offset": 0,
+        })
+        app.telegram_conversations.clear()
+
+    def tearDown(self):
+        app.telegram_config.clear()
+        app.telegram_config.update(self.saved_config)
+        app.telegram_conversations.clear()
+        app.telegram_conversations.update(self.saved_conversations)
+
+    def _send(self, text):
+        update = {
+            "update_id": 7,
+            "message": {
+                "chat": {"id": 42, "type": "private"},
+                "from": {"id": 42},
+                "text": text,
+            },
+        }
+        with patch("app._send_telegram_message") as send_message:
+            app._handle_telegram_update(update)
+        send_message.assert_called_once()
+        return send_message.call_args.args[2]
+
+    def test_nuova_command_clears_the_telegram_chat(self):
+        app.telegram_conversations["42"] = [
+            {"role": "user", "content": "ciao"},
+            {"role": "assistant", "content": "ciao a te"},
+        ]
+        reply = self._send("/nuova")
+        self.assertIn("Chat azzerata", reply)
+        self.assertEqual(app.telegram_conversations.get("42", []), [])
+
+    def test_settimana_alias_is_gone(self):
+        names = [item["command"] for item in app.TELEGRAM_BOT_COMMANDS]
+        self.assertNotIn("settimana", names)
 
 
 class GoogleCalendarToolTests(unittest.TestCase):

@@ -121,8 +121,8 @@ TELEGRAM_REMINDER_TIME_PATTERN = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 TELEGRAM_BOT_COMMANDS = (
     {"command": "oggi", "description": "Materie di oggi"},
     {"command": "orario", "description": "Orario settimanale completo"},
-    {"command": "settimana", "description": "Stesso orario di /orario"},
     {"command": "data", "description": "Data e ora correnti"},
+    {"command": "nuova", "description": "Azzera la chat e riparte da zero"},
 )
 TELEGRAM_WEEKDAYS = (
     "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato",
@@ -3694,12 +3694,19 @@ def _handle_telegram_update(update):
         return
 
     command = text.strip().split(maxsplit=1)[0].split("@", 1)[0].casefold()
-    if command in {"/orario", "/settimana", "/oggi", "/data"}:
+    if command in {"/orario", "/oggi", "/data", "/nuova"}:
         now = _telegram_reminder_now()
         if command == "/data":
             message = build_current_datetime_message(now)
-        elif command in {"/orario", "/settimana"}:
+        elif command == "/orario":
             message = build_weekly_timetable(now, _telegram_memory_facts())
+        elif command == "/nuova":
+            with telegram_conversations_lock:
+                telegram_conversations.pop(chat_id, None)
+            message = (
+                "Chat azzerata: riparto da zero. Orario e memoria restano "
+                "salvati."
+            )
         else:
             message = build_timetable_reminder(now, _telegram_memory_facts())
             if not message:
