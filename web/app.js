@@ -4,6 +4,7 @@ const sidebarToggle = document.querySelector("#sidebar-toggle");
 const sidebarClose = document.querySelector("#sidebar-close");
 const sidebarBackdrop = document.querySelector("#sidebar-backdrop");
 const mobileSidebarQuery = window.matchMedia("(max-width: 820px)");
+const tabletWindowQuery = window.matchMedia("(max-width: 1366px) and (any-pointer: coarse)");
 const welcome = document.querySelector("#welcome");
 const chatForm = document.querySelector("#chat-form");
 const input = document.querySelector("#message-input");
@@ -259,6 +260,11 @@ function makeElement(tag, className = "", text = "") {
 }
 
 function focusApplicationWindow(windowElement) {
+  if (tabletWindowQuery.matches) {
+    for (const other of openWindows.values()) {
+      if (other !== windowElement) other.classList.add("is-minimized");
+    }
+  }
   windowZIndex += 1;
   windowElement.style.zIndex = String(windowZIndex);
   windowElement.classList.remove("is-minimized");
@@ -300,6 +306,7 @@ function toggleMaximized(windowElement) {
 }
 
 function enableWindowDragging(windowElement, titlebar) {
+  if (tabletWindowQuery.matches) return;
   titlebar.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || event.target.closest("button")) return;
     if (windowElement.classList.contains("is-maximized")) return;
