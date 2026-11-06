@@ -134,6 +134,56 @@ CLOCK_TIME_PATTERN = TELEGRAM_REMINDER_TIME_PATTERN
 WORKFLOW_SCHEDULE_WINDOW_SECONDS = 15 * 60
 WORKFLOW_TIMEZONE = "Europe/Rome"
 MAX_WORKFLOW_RESULT_LENGTH = 2000
+
+
+def _local_now(timezone_name=TELEGRAM_REMINDER_TIMEZONE):
+    if ZoneInfo is not None:
+        try:
+            return datetime.datetime.now(ZoneInfo(timezone_name))
+        except Exception:
+            pass
+    return datetime.datetime.now().astimezone()
+
+
+def current_datetime_data(now=None):
+    now = now or _local_now()
+    return {
+        "iso": now.replace(microsecond=0).isoformat(),
+        "date": now.date().isoformat(),
+        "time": now.strftime("%H:%M:%S"),
+        "weekday": TELEGRAM_WEEKDAYS[now.weekday()],
+        "timezone": TELEGRAM_REMINDER_TIMEZONE,
+    }
+
+
+def build_current_datetime_context(now=None):
+    now = now or _local_now()
+    date_label = (
+        f"{TELEGRAM_WEEKDAYS[now.weekday()]} {now.day} "
+        f"{TELEGRAM_MONTHS[now.month - 1]} {now.year}"
+    )
+    return (
+        "Contesto temporale obbligatorio: oggi è "
+        f"{date_label} (data ISO {now.date().isoformat()}), ora locale "
+        f"{now.strftime('%H:%M')} nel fuso {TELEGRAM_REMINDER_TIMEZONE}. "
+        "Usa sempre questa data per riferimenti a oggi, domani, ieri, giorni "
+        "della settimana, scadenze e anni. Non usare anni passati e non "
+        "dedurre la data dal modello. Se serve verificarla, usa "
+        "get_app_data con section=datetime."
+    )
+
+
+def build_current_datetime_message(now=None):
+    now = now or _local_now()
+    date_label = (
+        f"{TELEGRAM_WEEKDAYS[now.weekday()]} {now.day} "
+        f"{TELEGRAM_MONTHS[now.month - 1]} {now.year}"
+    )
+    return (
+        f"📅 Oggi è {date_label}.\n"
+        f"🕒 Ora locale: {now.strftime('%H:%M')} "
+        f"({TELEGRAM_REMINDER_TIMEZONE})."
+    )
 FETCH_URL_TOOL = {
     "name": "fetch_url",
     "description": (
@@ -177,7 +227,10 @@ APP_TOOLS = [
             "properties": {
                 "section": {
                     "type": "string",
-                    "enum": ["calendar", "tasks", "workflows", "system", "settings"],
+                    "enum": [
+                        "calendar", "tasks", "workflows", "system", "settings",
+                        "datetime",
+                    ],
                 },
             },
             "required": ["section"],
@@ -233,6 +286,30 @@ APP_TOOLS = [
                 "prompt": {"type": "string"},
             },
             "required": ["action"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "save_timetable",
+        "description": (
+            "Salva o sostituisce l'orario settimanale nella memoria personale. "
+            "Passa le materie di ogni giorno da lunedì a sabato, nell'ordine "
+            "delle ore. Usalo quando l'utente chiede di ricordare il suo orario."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "lunedi": {"type": "array", "items": {"type": "string"}},
+                "martedi": {"type": "array", "items": {"type": "string"}},
+                "mercoledi": {"type": "array", "items": {"type": "string"}},
+                "giovedi": {"type": "array", "items": {"type": "string"}},
+                "venerdi": {"type": "array", "items": {"type": "string"}},
+                "sabato": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": [
+                "lunedi", "martedi", "mercoledi", "giovedi", "venerdi",
+                "sabato",
+            ],
             "additionalProperties": False,
         },
     },
@@ -422,6 +499,7 @@ telegram_reminder_thread = None
 telegram_reminder_sent_day = None
 telegram_pairing = None
 user_memory_loader = None
+user_memory_saver = None
 workflow_scheduler_thread = None
 workflow_scheduler_stop_event = threading.Event()
 telegram_conversations = {}
@@ -2995,6 +3073,11 @@ def run_chat_job(job_id, messages, active_config):
             "or null. Never use DD/MM/YYYY, seconds or timezone suffixes."
         )
         app_prompt += (
+            " Use get_app_data with section=datetime whenever you need to "
+            "confirm today's date or time, and save_timetable when the user "
+            "asks you to remember their weekly school timetable."
+        )
+        app_prompt += (
             " You can use fetch_url to read a public web page and verify search "
             "results. Never fetch localhost, private addresses or pages that "
             "require login. Cite the page URL when you use its content."
@@ -3011,6 +3094,9 @@ def run_chat_job(job_id, messages, active_config):
         system_prompt = "\n\n".join(
             part for part in (system_prompt, app_prompt) if part
         )
+    system_prompt = "\n\n".join(
+        part for part in (system_prompt, build_current_datetime_context()) if part
+    )
     try:
         round_index = 0
         while round_index <= MAX_TOOL_ROUNDS:
@@ -3288,6 +3374,28 @@ def _append_subjects(schedule, day, subjects):
             known.add(subject.casefold())
 
 
+def _timetable_from_flat_grid(lines):
+    """Read a PDF grid that lost its headers and contains only subjects.
+
+    The school timetable this parser was added for is exported as one flat
+    sequence of 30 uppercase subjects, in reading order. Its six school days
+    each contain five subjects, so groups of five are assigned to Monday
+    through Saturday.
+    """
+    if any(TELEGRAM_WEEKDAY_PATTERN.search(line) for line in lines):
+        return {}
+    subjects = []
+    for line in lines:
+        subjects.extend(re.findall(r"\b[A-Z][A-Z0-9.\-]{1,}\b", line))
+    if len(subjects) != 30:
+        return {}
+    schedule = {}
+    for day in range(6):
+        # Keep repeated subjects: they represent double periods.
+        schedule[day] = subjects[day * 5:(day + 1) * 5]
+    return schedule
+
+
 def _timetable_from_table(lines):
     header_index = None
     columns = {}
@@ -3380,6 +3488,7 @@ def timetable_from_memories(facts):
     lines = _memory_lines(facts)
     schedule = {}
     for parser in (
+        _timetable_from_flat_grid,
         _timetable_from_table,
         _timetable_from_positions,
         _timetable_from_blocks,
@@ -3387,7 +3496,11 @@ def timetable_from_memories(facts):
         for day, subjects in parser(lines).items():
             if day in schedule:
                 continue
-            _append_subjects(schedule, day, subjects)
+            if parser is _timetable_from_flat_grid:
+                # A flat grid preserves double periods as repeated subjects.
+                schedule[day] = list(subjects)
+            else:
+                _append_subjects(schedule, day, subjects)
     for line in lines:
         if _is_timetable_header(line):
             continue
@@ -3402,7 +3515,7 @@ def build_timetable_reminder(now, facts):
         return None
     date_label = (
         f"{TELEGRAM_WEEKDAYS[now.weekday()]} {now.day} "
-        f"{TELEGRAM_MONTHS[now.month - 1]}"
+        f"{TELEGRAM_MONTHS[now.month - 1]} {now.year}"
     )
     return "\n".join(
         [f"📚 Materie di oggi, {date_label}:", ""]
@@ -3410,13 +3523,31 @@ def build_timetable_reminder(now, facts):
     )
 
 
+def build_weekly_timetable(now, facts):
+    schedule = timetable_from_memories(facts)
+    if not schedule:
+        return (
+            "Non ho ancora un orario salvato. Carica il PDF dalla sezione "
+            "Profilo per NOKK oppure dimmi le materie di ogni giorno."
+        )
+    date_label = (
+        f"{TELEGRAM_WEEKDAYS[now.weekday()]} {now.day} "
+        f"{TELEGRAM_MONTHS[now.month - 1]} {now.year}"
+    )
+    lines = [f"🗓️ Orario settimanale · {date_label}", ""]
+    for day in range(6):
+        subjects = schedule.get(day, [])
+        if subjects:
+            lines.append(
+                f"{TELEGRAM_WEEKDAYS[day].capitalize()}: "
+                + ", ".join(subjects)
+            )
+    lines.extend(["", "Scrivi /oggi per le materie di oggi."])
+    return "\n".join(lines)
+
+
 def _telegram_reminder_now():
-    if ZoneInfo is not None:
-        try:
-            return datetime.datetime.now(ZoneInfo(TELEGRAM_REMINDER_TIMEZONE))
-        except Exception:
-            pass
-    return datetime.datetime.now().astimezone()
+    return _local_now(TELEGRAM_REMINDER_TIMEZONE)
 
 
 def _telegram_memory_facts():
@@ -3550,6 +3681,23 @@ def _handle_telegram_update(update):
                 chat["id"],
                 "Chat collegata a NOKK. Ora puoi scrivermi qui in privato.",
             )
+        return
+
+    command = text.strip().split(maxsplit=1)[0].split("@", 1)[0].casefold()
+    if command in {"/orario", "/settimana", "/oggi", "/data"}:
+        now = _telegram_reminder_now()
+        if command == "/data":
+            message = build_current_datetime_message(now)
+        elif command in {"/orario", "/settimana"}:
+            message = build_weekly_timetable(now, _telegram_memory_facts())
+        else:
+            message = build_timetable_reminder(now, _telegram_memory_facts())
+            if not message:
+                message = (
+                    "Non risultano materie per oggi. Controlla l'orario "
+                    "salvato nella sezione Profilo per NOKK."
+                )
+        _send_telegram_message(bot["token"], chat["id"], message)
         return
 
     if not text.strip():
@@ -3943,11 +4091,68 @@ def store_planner_item(data):
         }
 
 
+TIMETABLE_TOOL_DAY_KEYS = (
+    "lunedi", "martedi", "mercoledi", "giovedi", "venerdi", "sabato",
+)
+
+
+def _timetable_tool_facts(days):
+    if not isinstance(days, dict):
+        raise ValueError("Orario non valido.")
+    facts = []
+    for key, label in zip(TIMETABLE_TOOL_DAY_KEYS, TELEGRAM_WEEKDAYS):
+        subjects = days.get(key, [])
+        if not isinstance(subjects, list) or len(subjects) > 12:
+            raise ValueError(f"Materie non valide per {label}.")
+        clean = []
+        known = set()
+        for subject in subjects:
+            if not isinstance(subject, str):
+                raise ValueError(f"Materia non valida per {label}.")
+            subject = " ".join(subject.split()).strip()
+            if not subject or len(subject) > 80:
+                raise ValueError(f"Materia non valida per {label}.")
+            normalized = subject.casefold()
+            if normalized in known:
+                continue
+            known.add(normalized)
+            clean.append(subject)
+        if clean:
+            facts.append(f"[orario] {label.capitalize()}: {', '.join(clean)}")
+    if not facts:
+        raise ValueError("L'orario non contiene materie.")
+    return facts
+
+
+def save_timetable_from_tool(days):
+    facts = _timetable_tool_facts(days)
+    loader = user_memory_loader
+    saver = user_memory_saver
+    if not callable(loader) or not callable(saver):
+        raise ValueError("La memoria personale non è disponibile.")
+    current = loader()
+    if not isinstance(current, list):
+        current = []
+    kept = [
+        fact for fact in current
+        if not (
+            isinstance(fact, str)
+            and fact.lstrip().casefold().startswith("[orario")
+        )
+    ]
+    saver(kept + facts)
+    return {"ok": True, "days": len(facts), "facts": facts}
+
+
 def execute_app_tool(name, arguments):
     if not isinstance(arguments, dict):
         raise ValueError("Argomenti dello strumento non validi.")
+    if name == "save_timetable":
+        return save_timetable_from_tool(arguments)
     if name == "get_app_data":
         section = arguments.get("section")
+        if section == "datetime":
+            return current_datetime_data()
         if section == "system":
             return machine_status()
         if section == "settings":

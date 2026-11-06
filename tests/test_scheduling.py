@@ -42,6 +42,70 @@ class TimetableParsingTests(unittest.TestCase):
         self.assertEqual(schedule[0], ["Italiano", "Matematica"])
         self.assertEqual(schedule[1], ["Storia"])
 
+    def test_flat_pdf_grid_is_read_as_six_days_of_five_subjects(self):
+        facts = [
+            "[orario.pdf] STO-FILOSOFIA MATEM-FISICA RELIG-M.ALT "
+            "ITAL-LATINO DISEGNO-ARTE DISEGNO-ARTE ITAL-LATINO "
+            "STO-FILOSOFIA STO-FILOSOFIA INGLESE MATEM-FISICA SCIENZE "
+            "SCIENZE STO-FILOSOFIA SC-MOTORIE SC-MOTORIE MATEM-FISICA "
+            "ITAL-LATINO STO-FILOSOFIA ITAL-LATINO ITAL-LATINO SCIENZE "
+            "MATEM-FISICA MATEM-FISICA MATEM-FISICA MATEM-FISICA "
+            "ITAL-LATINO ITAL-LATINO INGLESE INGLESE"
+        ]
+        schedule = app.timetable_from_memories(facts)
+        self.assertEqual(len(schedule), 6)
+        self.assertEqual(schedule[0], [
+            "STO-FILOSOFIA", "MATEM-FISICA", "RELIG-M.ALT",
+            "ITAL-LATINO", "DISEGNO-ARTE",
+        ])
+        self.assertEqual(schedule[1][:2], ["DISEGNO-ARTE", "ITAL-LATINO"])
+        self.assertEqual(schedule[5][-2:], ["INGLESE", "INGLESE"])
+
+    def test_weekly_message_contains_all_saved_days(self):
+        facts = ["[orario.pdf] Lunedì: Storia", "[orario.pdf] Sabato: Inglese"]
+        now = datetime.datetime(2026, 11, 6, 7, 0)
+        message = app.build_weekly_timetable(now, facts)
+        self.assertIn("Orario settimanale", message)
+        self.assertIn("Lunedì: Storia", message)
+        self.assertIn("Sabato: Inglese", message)
+
+    def test_current_date_context_is_explicit(self):
+        now = datetime.datetime(2026, 11, 6, 7, 0)
+        context = app.build_current_datetime_context(now)
+        self.assertIn("venerdì 6 novembre 2026", context)
+        self.assertIn("2026-11-06", context)
+        self.assertIn("Non usare anni passati", context)
+        self.assertEqual(
+            app.current_datetime_data(now)["weekday"], "venerdì"
+        )
+        self.assertIn(
+            "Oggi è venerdì 6 novembre 2026",
+            app.build_current_datetime_message(now),
+        )
+
+    def test_save_timetable_tool_replaces_previous_schedule(self):
+        days = {
+            "lunedi": ["Italiano", "Storia"],
+            "martedi": ["Matematica"],
+            "mercoledi": [],
+            "giovedi": ["Fisica"],
+            "venerdi": ["Inglese"],
+            "sabato": [],
+        }
+        with (
+            patch.object(
+                app, "user_memory_loader",
+                return_value=["Preferisco risposte brevi.", "[orario] vecchio"],
+            ),
+            patch.object(app, "user_memory_saver") as saver,
+        ):
+            result = app.save_timetable_from_tool(days)
+        self.assertTrue(result["ok"])
+        saved = saver.call_args.args[0]
+        self.assertIn("Preferisco risposte brevi.", saved)
+        self.assertIn("[orario] Lunedì: Italiano, Storia", saved)
+        self.assertNotIn("[orario] vecchio", saved)
+
     def test_reminder_uses_the_requested_day(self):
         facts = ["[orario.pdf] Venerdì: Storia, Scienze"]
         now = datetime.datetime(2026, 11, 6, 7, 0)

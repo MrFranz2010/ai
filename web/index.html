@@ -11,6 +11,9 @@
 <body>
   <div class="layout">
     <aside class="sidebar" id="sidebar">
+      <div class="sidebar-resizer" id="sidebar-resizer" role="separator"
+        aria-orientation="vertical" aria-label="Ridimensiona il menu"
+        aria-valuemin="220" aria-valuemax="460" aria-valuenow="252" tabindex="0"></div>
       <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Chiudi il menu">×</button>
       <a class="brand" href="/" aria-label="NOKK, home">
         <span class="brand-icon">N</span>
@@ -33,6 +36,10 @@
         <span><small>CONNESSIONE</small><strong id="connection-label">Configura un provider</strong></span>
       </div>
       <div class="window-dock" id="window-dock" aria-label="Finestre ridotte a icona"></div>
+      <div class="sidebar-clock" aria-label="Data e ora correnti">
+        <time id="sidebar-clock-time" datetime="">--:--:--</time>
+        <span id="sidebar-clock-date">Caricamento…</span>
+      </div>
       <div class="sidebar-bottom">
         <p><span class="system-pulse"></span> NOKK · LOCALE</p>
         <p>Le risposte AI possono contenere errori.</p>
