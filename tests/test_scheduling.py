@@ -42,7 +42,7 @@ class TimetableParsingTests(unittest.TestCase):
         self.assertEqual(schedule[0], ["Italiano", "Matematica"])
         self.assertEqual(schedule[1], ["Storia"])
 
-    def test_flat_pdf_grid_is_read_as_six_days_of_five_subjects(self):
+    def test_flat_pdf_grid_is_read_as_five_days_of_six_subjects(self):
         facts = [
             "[orario.pdf] STO-FILOSOFIA MATEM-FISICA RELIG-M.ALT "
             "ITAL-LATINO DISEGNO-ARTE DISEGNO-ARTE ITAL-LATINO "
@@ -53,13 +53,18 @@ class TimetableParsingTests(unittest.TestCase):
             "ITAL-LATINO ITAL-LATINO INGLESE INGLESE"
         ]
         schedule = app.timetable_from_memories(facts)
-        self.assertEqual(len(schedule), 6)
+        self.assertEqual(len(schedule), 5)
         self.assertEqual(schedule[0], [
             "STO-FILOSOFIA", "MATEM-FISICA", "RELIG-M.ALT",
-            "ITAL-LATINO", "DISEGNO-ARTE",
+            "ITAL-LATINO", "DISEGNO-ARTE", "DISEGNO-ARTE",
         ])
-        self.assertEqual(schedule[1][:2], ["DISEGNO-ARTE", "ITAL-LATINO"])
-        self.assertEqual(schedule[5][-2:], ["INGLESE", "INGLESE"])
+        self.assertEqual(schedule[1][:3], [
+            "ITAL-LATINO", "STO-FILOSOFIA", "STO-FILOSOFIA",
+        ])
+        self.assertEqual(schedule[4], [
+            "MATEM-FISICA", "MATEM-FISICA", "ITAL-LATINO",
+            "ITAL-LATINO", "INGLESE", "INGLESE",
+        ])
 
     def test_memory_file_upload_preserves_flat_timetable_order(self):
         text = "\n".join(
@@ -78,9 +83,12 @@ class TimetableParsingTests(unittest.TestCase):
         schedule = app.timetable_from_memories(facts)
         self.assertEqual(schedule[0], [
             "STO-FILOSOFIA", "MATEM-FISICA", "RELIG-M.ALT",
-            "ITAL-LATINO", "DISEGNO-ARTE",
+            "ITAL-LATINO", "DISEGNO-ARTE", "DISEGNO-ARTE",
         ])
-        self.assertEqual(schedule[5][-2:], ["INGLESE", "INGLESE"])
+        self.assertEqual(schedule[4], [
+            "MATEM-FISICA", "MATEM-FISICA", "ITAL-LATINO",
+            "ITAL-LATINO", "INGLESE", "INGLESE",
+        ])
 
     def test_explicit_timetable_keeps_double_periods(self):
         facts = [

@@ -3381,9 +3381,9 @@ def _timetable_from_flat_grid(lines):
     """Read a PDF grid that lost its headers and contains only subjects.
 
     The school timetable this parser was added for is exported as one flat
-    sequence of 30 uppercase subjects, in reading order. Its six school days
-    each contain five subjects, so groups of five are assigned to Monday
-    through Saturday.
+    sequence of 30 uppercase subjects, in reading order. Its five school days
+    each contain six subjects, so groups of six are assigned to Monday through
+    Friday.
     """
     if any(TELEGRAM_WEEKDAY_PATTERN.search(line) for line in lines):
         return {}
@@ -3393,9 +3393,9 @@ def _timetable_from_flat_grid(lines):
     if len(subjects) != 30:
         return {}
     schedule = {}
-    for day in range(6):
+    for day in range(5):
         # Keep repeated subjects: they represent double periods.
-        schedule[day] = subjects[day * 5:(day + 1) * 5]
+        schedule[day] = subjects[day * 6:(day + 1) * 6]
     return schedule
 
 
