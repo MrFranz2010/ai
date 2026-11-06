@@ -119,6 +119,43 @@ class AppRouteTests(unittest.TestCase):
         with urlopen(request) as response:
             return json.loads(response.read())
 
+    def test_weather_endpoint_is_disabled_by_default(self):
+        with urlopen(f"{self.base_url}/api/weather") as response:
+            self.assertEqual(response.status, 200)
+            payload = json.loads(response.read())
+        self.assertEqual(payload, {"configured": False})
+
+    def test_weather_endpoint_returns_the_city_forecast(self):
+        with app.config_lock:
+            app.config["weather_enabled"] = True
+            app.config["weather_city"] = "Roma"
+        fake = {
+            "city": "Roma",
+            "country": "IT",
+            "temperature": 18,
+            "minimum": 11,
+            "maximum": 20,
+            "description": "sereno",
+            "updated_at": "2026-11-06T07:00:00+00:00",
+        }
+        with patch("app.fetch_weather", return_value=fake):
+            with urlopen(f"{self.base_url}/api/weather") as response:
+                payload = json.loads(response.read())
+        self.assertTrue(payload["configured"])
+        self.assertEqual(payload["temperature"], 18)
+        self.assertEqual(payload["city"], "Roma")
+
+    def test_weather_failure_is_reported_without_crashing(self):
+        with app.config_lock:
+            app.config["weather_enabled"] = True
+            app.config["weather_city"] = "Roma"
+        with patch(
+            "app.fetch_weather", side_effect=RuntimeError("servizio non raggiungibile")
+        ):
+            with self.assertRaises(HTTPError) as raised:
+                urlopen(f"{self.base_url}/api/weather")
+        self.assertEqual(raised.exception.code, 503)
+
     def run_chat(self, messages, approve=True, expect_failure=False):
         response = self.request_json("/api/chat", {"messages": messages})
         job_id = response["job_id"]
@@ -690,6 +727,11 @@ class AppRouteTests(unittest.TestCase):
             "wake_phrase": "Nok",
             "tts_auto_play": True,
             "notifications_enabled": False,
+            "weather_enabled": False,
+            "weather_city": "",
+            "alerts_enabled": False,
+            "alerts_disk_percent": 90,
+            "alerts_memory_percent": 92,
         })
         if os.name != "nt":
             self.assertEqual(app.CONFIG_FILE.stat().st_mode & 0o777, 0o600)
@@ -1396,6 +1438,31 @@ class TelegramCommandTests(unittest.TestCase):
     def test_settimana_alias_is_gone(self):
         names = [item["command"] for item in app.TELEGRAM_BOT_COMMANDS]
         self.assertNotIn("settimana", names)
+
+
+class WeatherConfigTests(unittest.TestCase):
+    def test_weather_settings_are_validated(self):
+        with self.assertRaises(ValueError):
+            app.validate_config(
+                "openai", "gpt-4o-mini", "key",
+                weather_enabled=True, weather_city="  ",
+            )
+        with self.assertRaises(ValueError):
+            app.validate_config(
+                "openai", "gpt-4o-mini", "key", alerts_disk_percent=99.5,
+            )
+        saved = app.validate_config(
+            "openai", "gpt-4o-mini", "key",
+            weather_enabled=True,
+            weather_city="  Milano  ",
+            alerts_enabled=True,
+            alerts_disk_percent=85,
+            alerts_memory_percent=90,
+        )
+        self.assertEqual(saved["weather_city"], "Milano")
+        self.assertTrue(saved["weather_enabled"])
+        self.assertTrue(saved["alerts_enabled"])
+        self.assertEqual(saved["alerts_disk_percent"], 85)
 
 
 class GoogleCalendarToolTests(unittest.TestCase):

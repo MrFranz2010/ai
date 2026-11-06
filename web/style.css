@@ -96,6 +96,43 @@ body.sidebar-resizing { cursor: col-resize; user-select: none; }
   text-transform: capitalize;
 }
 
+.sidebar-weather {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 5px 6px;
+  padding: 8px 12px;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.sidebar-weather[hidden] { display: none; }
+.sidebar-weather-temperature {
+  color: var(--text);
+  font: 600 15px/1.1 "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+.sidebar-weather-detail {
+  overflow: hidden;
+  font-size: 10px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.alert-thresholds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 6px 0 2px;
+}
+.alert-thresholds > div {
+  flex: 1 1 120px;
+  min-width: 120px;
+}
+.alert-thresholds input { width: 100%; }
+
 .brand {
   display: flex;
   align-items: center;
