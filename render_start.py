@@ -111,6 +111,7 @@ def _configure_supabase_storage():
             return {
                 "token": None, "bot_username": None,
                 "authorized_chats": [], "offset": 0,
+                **app.default_telegram_reminder(),
             }
         if not isinstance(saved, dict):
             raise RuntimeError("Supabase telegram.json must contain a JSON object.")
@@ -121,9 +122,16 @@ def _configure_supabase_storage():
                 or saved.get("offset", 0) != 0
             ):
                 raise RuntimeError("Supabase Telegram configuration is invalid.")
+            try:
+                reminder = app.normalize_telegram_reminder(saved)
+            except ValueError as error:
+                raise RuntimeError(
+                    "Supabase Telegram configuration is invalid."
+                ) from error
             return {
                 "token": None, "bot_username": None,
                 "authorized_chats": [], "offset": 0,
+                **reminder,
             }
         if (
             not isinstance(saved.get("token"), str)
@@ -140,11 +148,18 @@ def _configure_supabase_storage():
             or saved.get("offset", 0) < 0
         ):
             raise RuntimeError("Supabase Telegram configuration is invalid.")
+        try:
+            reminder = app.normalize_telegram_reminder(saved)
+        except ValueError as error:
+            raise RuntimeError(
+                "Supabase Telegram configuration is invalid."
+            ) from error
         return {
             "token": saved["token"],
             "bot_username": saved["bot_username"],
             "authorized_chats": list(dict.fromkeys(saved["authorized_chats"])),
             "offset": saved.get("offset", 0),
+            **reminder,
         }
 
     app.config = load_config()
@@ -423,6 +438,7 @@ if __name__ == "__main__":
     app.HOST = "0.0.0.0"
     app.PORT = int(os.environ.get("PORT", "10000"))
     app.start_telegram_polling()
+    app.start_workflow_scheduler()
     print("Web search: " + ", ".join(app.search_providers()), flush=True)
     print(f"NOKK listening on {app.HOST}:{app.PORT}", flush=True)
     ThreadingHTTPServer((app.HOST, app.PORT), AuthenticatedAppHandler).serve_forever()

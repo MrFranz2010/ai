@@ -441,6 +441,30 @@ body { background: var(--page); }
 #workflow-form input { min-height: 41px; }
 #workflow-form textarea { min-height: 130px; resize: vertical; line-height: 1.5; }
 #workflow-form input:focus, #workflow-form textarea:focus { border-color: #7d9de0; }
+.workflow-schedule-fields { min-width: 0; margin: 15px 0 0; padding: 12px; border: 1px solid #e3e6e8; border-radius: 8px; }
+.workflow-schedule-fields legend { padding: 0 5px; color: #343a40; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.workflow-schedule-fields .toggle-label { margin: 0 0 9px; font-weight: 400; }
+.workflow-schedule-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.workflow-schedule-row label { margin: 0; }
+.workflow-schedule-row input { flex: 1; }
+.workflow-days { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; border: 0; }
+.workflow-days legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.workflow-day { display: inline-flex; align-items: center; gap: 4px; margin: 0 !important; padding: 5px 8px; color: #3a4249 !important; background: #fff; border: 1px solid #dfe3e6; border-radius: 999px; font-size: 11px !important; font-weight: 400 !important; cursor: pointer; }
+.workflow-day input { width: auto !important; min-height: 0 !important; margin: 0; }
+.workflow-schedule-fields .field-help { margin: 10px 0 0; }
+.workflow-card-item .workflow-schedule,
+.workflow-card-item .workflow-last-run { display: block; min-height: 0; margin: 8px 0 0; color: #707980; font-size: 10px; line-height: 1.45; -webkit-line-clamp: unset; }
+.workflow-card-item .workflow-last-result { margin-top: 8px; color: #707980; font-size: 10px; }
+.workflow-card-item .workflow-last-result summary { cursor: pointer; color: #3a4249; font-weight: 600; }
+.workflow-card-item .workflow-last-result p { max-height: 130px; margin: 6px 0 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+:root[data-theme="dark"] .workflow-schedule-fields { border-color: #24434b; }
+:root[data-theme="dark"] .workflow-schedule-fields legend,
+:root[data-theme="dark"] .workflow-day { color: #c5dadd !important; }
+:root[data-theme="dark"] .workflow-day { background: #0c2029; border-color: #24434b; }
+:root[data-theme="dark"] .workflow-card-item .workflow-schedule,
+:root[data-theme="dark"] .workflow-card-item .workflow-last-run,
+:root[data-theme="dark"] .workflow-card-item .workflow-last-result { color: #91aaaf; }
+:root[data-theme="dark"] .workflow-card-item .workflow-last-result summary { color: #dceced; }
 .composer-footer { gap: 12px; }
 .composer-footer #voice-status { min-width: 0; overflow-wrap: anywhere; }
 .composer-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; }
@@ -1164,6 +1188,15 @@ body { background: var(--page); }
   text-align: center;
 }
 .telegram-settings code { color: var(--text); }
+.telegram-reminder {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.telegram-reminder .toggle-label { margin: 0; }
+.telegram-reminder input[type="time"] { width: 100%; }
 
 @media (max-width: 520px) {
   .task-quick-add { grid-template-columns: minmax(0, 1fr) auto; }

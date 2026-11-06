@@ -1,10 +1,14 @@
 import json
+import re
 from pathlib import Path
 
 
 MAX_MEMORY_FACTS = 30
 MAX_MEMORY_FACT_LENGTH = 500
 MAX_MEMORY_TOTAL_LENGTH = 5000
+MAX_MEMORY_FILE_CHARS = 5000
+MEMORY_FILE_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".log", ".pdf", ".docx"}
+MEMORY_FILE_NAME_PATTERN = re.compile(r"^[^/\\\x00]{1,120}$")
 
 
 def validate_memories(value):
@@ -30,6 +34,72 @@ def validate_memories(value):
         seen.add(normalized)
         clean.append(fact)
     return clean
+
+
+def validate_memory_file_name(name):
+    if (
+        not isinstance(name, str)
+        or Path(name).name != name
+        or not MEMORY_FILE_NAME_PATTERN.fullmatch(name)
+        or Path(name).suffix.lower() not in MEMORY_FILE_EXTENSIONS
+    ):
+        raise ValueError(
+            "Formato file non supportato. Usa TXT, MD, CSV, JSON, LOG, PDF o DOCX."
+        )
+    return name
+
+
+def _split_memory_line(line, limit):
+    chunks = []
+    remaining = line
+    while len(remaining) > limit:
+        cut = remaining.rfind(" ", 0, limit + 1)
+        if cut <= 0:
+            cut = limit
+        chunk = remaining[:cut].strip()
+        if chunk:
+            chunks.append(chunk)
+        remaining = remaining[cut:].strip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
+def memory_facts_from_file(name, text):
+    """Turn an uploaded text document into prefixed memory facts."""
+    name = validate_memory_file_name(name)
+    if not isinstance(text, str):
+        raise ValueError("Il contenuto del file deve essere testo.")
+    text = text.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
+    if not text.strip():
+        raise ValueError("Il file è vuoto.")
+    if len(text) > MAX_MEMORY_FILE_CHARS:
+        raise ValueError(
+            f"Il file supera il limite di {MAX_MEMORY_FILE_CHARS} caratteri "
+            "per la memoria."
+        )
+    prefix = f"[{name}] "
+    facts = []
+    for line in text.split("\n"):
+        line = line.replace("\t", " | ").strip()
+        if not line:
+            continue
+        for chunk in _split_memory_line(
+            line, MAX_MEMORY_FACT_LENGTH - len(prefix)
+        ):
+            facts.append(prefix + chunk)
+    if not facts:
+        raise ValueError("Il file non contiene testo da salvare.")
+    return facts
+
+
+def merge_memory_file(memories, name, text):
+    """Add a file to memory, replacing an earlier copy of the same file."""
+    name = validate_memory_file_name(name)
+    current = validate_memories(memories)
+    prefix = f"[{name}] ".casefold()
+    kept = [fact for fact in current if not fact.casefold().startswith(prefix)]
+    return validate_memories(kept + memory_facts_from_file(name, text))
 
 
 def install(app, handler_class, load_memories, save_memories):
@@ -62,9 +132,20 @@ def install(app, handler_class, load_memories, save_memories):
             return
         try:
             data = self._read_json()
-            if not isinstance(data, dict) or data.get("action") != "save":
+            if not isinstance(data, dict):
                 raise ValueError("Azione memoria non valida.")
-            memories = validate_memories(data.get("memories"))
+            action = data.get("action")
+            if action == "save":
+                memories = validate_memories(data.get("memories"))
+            elif action == "append_file":
+                current = data.get("memories")
+                if current is None:
+                    current = load_memories()
+                memories = merge_memory_file(
+                    current, data.get("name"), data.get("text")
+                )
+            else:
+                raise ValueError("Azione memoria non valida.")
             save_memories(memories)
             self._send_json(200, {"ok": True, "memories": memories})
         except ValueError as error:
@@ -76,6 +157,7 @@ def install(app, handler_class, load_memories, save_memories):
     handler_class.do_GET = do_get
     handler_class.do_POST = do_post
     handler_class._user_memory_installed = True
+    app.user_memory_loader = load_memories
 
     if not getattr(app, "_user_memory_chat_installed", False):
         original_run_chat_job = app.run_chat_job
