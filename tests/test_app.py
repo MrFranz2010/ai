@@ -210,6 +210,12 @@ class AppRouteTests(unittest.TestCase):
             "id": workflow_id,
             "name": "Verbale riunione",
             "prompt": "Estrai decisioni e attività.",
+            "schedule_enabled": False,
+            "schedule_time": "07:00",
+            "schedule_days": [],
+            "last_run": None,
+            "last_status": None,
+            "last_result": None,
         }])
         self.assertEqual(app.load_workflows_file(), updated)
 
@@ -220,6 +226,36 @@ class AppRouteTests(unittest.TestCase):
         self.assertEqual(deleted, [])
         if os.name != "nt":
             self.assertEqual(app.WORKFLOWS_FILE.stat().st_mode & 0o777, 0o600)
+
+    def test_workflow_schedule_is_saved_and_returned(self):
+        created = self.request_json("/api/workflows", {
+            "action": "save",
+            "name": "Controllo mattutino",
+            "prompt": "Controlla le attività di oggi.",
+            "schedule_enabled": True,
+            "schedule_time": "07:30",
+            "schedule_days": [0, 2, 4],
+        })["workflows"]
+        workflow = created[0]
+        self.assertTrue(workflow["schedule_enabled"])
+        self.assertEqual(workflow["schedule_time"], "07:30")
+        self.assertEqual(workflow["schedule_days"], [0, 2, 4])
+        with urlopen(f"{self.base_url}/api/workflows") as response:
+            listed = json.loads(response.read())["workflows"]
+        self.assertEqual(listed, created)
+
+        updated = self.request_json("/api/workflows", {
+            "action": "save",
+            "id": workflow["id"],
+            "name": "Controllo serale",
+            "prompt": "Controlla le attività di domani.",
+            "schedule_enabled": False,
+            "schedule_time": "20:00",
+            "schedule_days": [5],
+        })["workflows"][0]
+        self.assertFalse(updated["schedule_enabled"])
+        self.assertEqual(updated["schedule_time"], "20:00")
+        self.assertEqual(updated["schedule_days"], [5])
 
     def test_workflow_validation_rejects_empty_or_oversized_content(self):
         with self.assertRaises(ValueError):

@@ -18,6 +18,9 @@ const telegramConnectButton = document.querySelector("#telegram-connect");
 const telegramPairButton = document.querySelector("#telegram-pair");
 const telegramDisconnectButton = document.querySelector("#telegram-disconnect");
 const telegramPairCode = document.querySelector("#telegram-pair-code");
+const telegramReminderEnabled = document.querySelector("#telegram-reminder-enabled");
+const telegramReminderTime = document.querySelector("#telegram-reminder-time");
+const telegramReminderSave = document.querySelector("#telegram-reminder-save");
 const googleCalendarStatus = document.querySelector("#google-calendar-status");
 const googleClientIdInput = document.querySelector("#google-client-id");
 const googleClientSecretInput = document.querySelector("#google-client-secret");
@@ -52,6 +55,9 @@ const workflowPromptInput = document.querySelector("#workflow-prompt");
 const workflowError = document.querySelector("#workflow-error");
 const workflowSave = document.querySelector("#workflow-save");
 const workflowTitle = document.querySelector("#workflow-form-title");
+const workflowScheduleEnabled = document.querySelector("#workflow-schedule-enabled");
+const workflowScheduleTime = document.querySelector("#workflow-schedule-time");
+const workflowDayInputs = [...document.querySelectorAll(".workflow-day input")];
 const wakePhraseInput = document.querySelector("#wake-phrase");
 const ttsAutoPlayInput = document.querySelector("#tts-auto-play");
 const notificationsInput = document.querySelector("#notifications-enabled");
@@ -205,6 +211,14 @@ function openWorkflowEditor(workflow = null) {
   workflowTitle.textContent = workflow ? "Modifica procedura" : "Nuova procedura";
   workflowNameInput.value = workflow?.name || "";
   workflowPromptInput.value = workflow?.prompt || "";
+  workflowScheduleEnabled.checked = Boolean(workflow?.schedule_enabled);
+  workflowScheduleTime.value = workflow?.schedule_time || "07:00";
+  const scheduleDays = new Set(
+    workflow ? (workflow.schedule_days || []) : [0, 1, 2, 3, 4]
+  );
+  workflowDayInputs.forEach((dayInput) => {
+    dayInput.checked = scheduleDays.has(Number(dayInput.value));
+  });
   workflowError.hidden = true;
   workflowOverlay.hidden = false;
   workflowNameInput.focus();
@@ -1420,7 +1434,36 @@ function renderWorkflows() {
     deleteButton.textContent = "Elimina";
     deleteButton.addEventListener("click", () => deleteWorkflow(workflow));
     actions.append(useButton, editButton, deleteButton);
-    card.append(title, description, actions);
+    card.append(title, description);
+    if (workflow.schedule_enabled) {
+      const dayNames = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
+      const days = (workflow.schedule_days || [])
+        .map((day) => dayNames[day])
+        .filter(Boolean);
+      const schedule = document.createElement("p");
+      schedule.className = "workflow-schedule";
+      schedule.textContent = `Programmata: ${days.join(", ") || "nessun giorno"} alle ${workflow.schedule_time || "07:00"}`;
+      card.append(schedule);
+    }
+    if (workflow.last_run) {
+      let when = workflow.last_run;
+      try { when = new Date(workflow.last_run).toLocaleString("it-IT"); } catch {}
+      const lastRun = document.createElement("p");
+      lastRun.className = "workflow-last-run";
+      lastRun.textContent = `Ultima esecuzione: ${when} · ${workflow.last_status === "ok" ? "completata" : "errore"}`;
+      card.append(lastRun);
+      if (workflow.last_result) {
+        const details = document.createElement("details");
+        details.className = "workflow-last-result";
+        const summary = document.createElement("summary");
+        summary.textContent = "Risultato";
+        const body = document.createElement("p");
+        body.textContent = workflow.last_result;
+        details.append(summary, body);
+        card.append(details);
+      }
+    }
+    card.append(actions);
     workflowList.append(card);
   }
 }
@@ -1438,6 +1481,8 @@ async function loadTelegramStatus() {
   telegramAuthorizedChatCount = result.authorized_chats;
   telegramPairButton.disabled = !result.configured;
   telegramDisconnectButton.hidden = !result.configured;
+  telegramReminderEnabled.checked = result.reminder_enabled !== false;
+  telegramReminderTime.value = result.reminder_time || "07:00";
   return result;
 }
 
@@ -2183,6 +2228,28 @@ telegramConnectButton.addEventListener("click", async () => {
   }
 });
 
+telegramReminderSave.addEventListener("click", async () => {
+  telegramReminderSave.disabled = true;
+  try {
+    const time = telegramReminderTime.value;
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+      throw new Error("Scegli un orario valido per il promemoria.");
+    }
+    await sendTelegramAction({
+      action: "reminder",
+      enabled: telegramReminderEnabled.checked,
+      time,
+    });
+    telegramStatus.textContent = telegramReminderEnabled.checked
+      ? `Promemoria materie attivo alle ${time}, ora italiana.`
+      : "Promemoria materie disattivato.";
+  } catch (error) {
+    telegramStatus.textContent = error.message;
+  } finally {
+    telegramReminderSave.disabled = false;
+  }
+});
+
 telegramPairButton.addEventListener("click", async () => {
   telegramPairButton.disabled = true;
   telegramStatus.textContent = "Generazione del codice…";
@@ -2284,6 +2351,16 @@ workflowForm.addEventListener("submit", async (event) => {
   workflowError.hidden = true;
   workflowSave.disabled = true;
   try {
+    const scheduleDays = workflowDayInputs
+      .filter((dayInput) => dayInput.checked)
+      .map((dayInput) => Number(dayInput.value));
+    const scheduleEnabled = workflowScheduleEnabled.checked;
+    if (scheduleEnabled && scheduleDays.length === 0) {
+      throw new Error("Scegli almeno un giorno per la programmazione.");
+    }
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(workflowScheduleTime.value)) {
+      throw new Error("Scegli un orario valido per la programmazione.");
+    }
     const response = await fetch("/api/workflows", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2292,6 +2369,9 @@ workflowForm.addEventListener("submit", async (event) => {
         id: editingWorkflowId,
         name: workflowNameInput.value.trim(),
         prompt: workflowPromptInput.value.trim(),
+        schedule_enabled: scheduleEnabled,
+        schedule_time: workflowScheduleTime.value,
+        schedule_days: scheduleDays,
       }),
     });
     const result = await response.json();
@@ -2412,6 +2492,18 @@ input.addEventListener("keydown", (event) => {
     chatForm.requestSubmit();
   }
 });
+
+async function refreshWorkflows() {
+  const response = await fetch("/api/workflows");
+  const result = await response.json();
+  if (!response.ok) return;
+  workflows = result.workflows || [];
+  renderWorkflows();
+}
+
+window.setInterval(() => {
+  if (!workflowPanel.hidden) void refreshWorkflows();
+}, 30000);
 
 loadConfig().catch((error) => {
   connectionLabel.textContent = error.message;

@@ -121,6 +121,28 @@
             <label for="workflow-prompt">Istruzioni</label>
             <textarea id="workflow-prompt" rows="7" maxlength="4000" required
               placeholder="Descrivi il risultato desiderato e i passaggi da seguire."></textarea>
+            <fieldset class="workflow-schedule-fields">
+              <legend>Programmazione automatica</legend>
+              <label class="toggle-label" for="workflow-schedule-enabled">
+                <input id="workflow-schedule-enabled" type="checkbox">
+                <span>Avvia automaticamente</span>
+              </label>
+              <div class="workflow-schedule-row">
+                <label for="workflow-schedule-time">Ora</label>
+                <input id="workflow-schedule-time" type="time" value="07:00" step="60">
+              </div>
+              <fieldset class="workflow-days" aria-label="Giorni della settimana">
+                <legend>Giorni</legend>
+                <label class="workflow-day"><input type="checkbox" value="0" checked> Lun</label>
+                <label class="workflow-day"><input type="checkbox" value="1" checked> Mar</label>
+                <label class="workflow-day"><input type="checkbox" value="2" checked> Mer</label>
+                <label class="workflow-day"><input type="checkbox" value="3" checked> Gio</label>
+                <label class="workflow-day"><input type="checkbox" value="4" checked> Ven</label>
+                <label class="workflow-day"><input type="checkbox" value="5"> Sab</label>
+                <label class="workflow-day"><input type="checkbox" value="6"> Dom</label>
+              </fieldset>
+              <p class="field-help">La procedura parte da sola all’ora scelta, nei giorni selezionati (ora italiana). Il risultato resta nella scheda della procedura.</p>
+            </fieldset>
             <div class="settings-error" id="workflow-error" role="alert" hidden></div>
             <div class="settings-actions">
               <button class="cancel-button" id="workflow-cancel" type="button">Annulla</button>
@@ -262,6 +284,18 @@
                   </div>
                   <p class="telegram-pair-code" id="telegram-pair-code" hidden></p>
                   <p class="field-help">Dopo il collegamento, genera il codice e invia <code>/pair CODICE</code> al tuo bot in una chat privata. Solo la chat associata può usare NOKK. Le conversazioni Telegram vengono inviate al provider AI configurato.</p>
+                  <div class="telegram-reminder">
+                    <label class="toggle-label" for="telegram-reminder-enabled">
+                      <input id="telegram-reminder-enabled" type="checkbox">
+                      <span>Promemoria materie ogni giorno</span>
+                    </label>
+                    <label for="telegram-reminder-time">Ora del promemoria</label>
+                    <input id="telegram-reminder-time" type="time" value="07:00" step="60">
+                    <div class="telegram-actions">
+                      <button class="telegram-action" id="telegram-reminder-save" type="button">Salva promemoria</button>
+                    </div>
+                    <p class="field-help">Carica l’orario in PDF dal Profilo per NOKK. Il promemoria legge le materie del giorno e le invia alla chat Telegram collegata, con orario italiano.</p>
+                  </div>
                 </div>
               </div>
             </details>

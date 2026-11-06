@@ -17,12 +17,19 @@ import subprocess
 import tempfile
 import threading
 import time
+import unicodedata
 import uuid
 import xml.etree.ElementTree as ET
 import zipfile
 from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover - Python < 3.9
+    ZoneInfo = None
+
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
@@ -81,6 +88,26 @@ MAX_COMMAND_OUTPUT = 20000
 MAX_TELEGRAM_MESSAGE_LENGTH = 12000
 MAX_TELEGRAM_REPLY_LENGTH = 4000
 TELEGRAM_PAIRING_TTL_SECONDS = 600
+TELEGRAM_REMINDER_DEFAULT_TIME = "07:00"
+TELEGRAM_REMINDER_WINDOW_SECONDS = 15 * 60
+TELEGRAM_REMINDER_TIMEZONE = "Europe/Rome"
+TELEGRAM_REMINDER_TIME_PATTERN = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+TELEGRAM_WEEKDAYS = (
+    "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato",
+    "domenica",
+)
+TELEGRAM_MONTHS = (
+    "gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio",
+    "agosto", "settembre", "ottobre", "novembre", "dicembre",
+)
+TELEGRAM_WEEKDAY_PATTERN = re.compile(
+    r"(?i)\b(luned[ìi]|marted[ìi]|mercoled[ìi]|gioved[ìi]|venerd[ìi]|"
+    r"sabato|domenica)\b"
+)
+CLOCK_TIME_PATTERN = TELEGRAM_REMINDER_TIME_PATTERN
+WORKFLOW_SCHEDULE_WINDOW_SECONDS = 15 * 60
+WORKFLOW_TIMEZONE = "Europe/Rome"
+MAX_WORKFLOW_RESULT_LENGTH = 2000
 FETCH_URL_TOOL = {
     "name": "fetch_url",
     "description": (
@@ -455,7 +482,12 @@ config_lock = threading.Lock()
 telegram_lock = threading.Lock()
 telegram_stop_event = threading.Event()
 telegram_polling_thread = None
+telegram_reminder_thread = None
+telegram_reminder_sent_day = None
 telegram_pairing = None
+user_memory_loader = None
+workflow_scheduler_thread = None
+workflow_scheduler_stop_event = threading.Event()
 telegram_conversations = {}
 telegram_conversations_lock = threading.Lock()
 TELEGRAM_TOKEN_PATTERN = re.compile(r"^[0-9]+:[A-Za-z0-9_-]{20,}$")
@@ -586,6 +618,52 @@ def _provider_user_message(provider, message):
     return {"role": "user", "content": text}
 
 
+def _normalize_workflow_schedule(workflow):
+    enabled = workflow.get("schedule_enabled", False)
+    if not isinstance(enabled, bool):
+        raise ValueError("Impostazione di programmazione non valida.")
+    schedule_time = workflow.get("schedule_time", "07:00")
+    if (
+        not isinstance(schedule_time, str)
+        or not CLOCK_TIME_PATTERN.fullmatch(schedule_time)
+    ):
+        raise ValueError("Orario della procedura non valido.")
+    days_value = workflow.get("schedule_days", [])
+    if not isinstance(days_value, list):
+        raise ValueError("Giorni della settimana non validi.")
+    days = []
+    for day in days_value:
+        if (
+            not isinstance(day, int)
+            or isinstance(day, bool)
+            or not 0 <= day <= 6
+        ):
+            raise ValueError("Giorni della settimana non validi.")
+        if day not in days:
+            days.append(day)
+    if enabled and not days:
+        raise ValueError("Scegli almeno un giorno per la procedura programmata.")
+    return enabled, schedule_time, sorted(days)
+
+
+def _normalize_workflow_run(workflow):
+    last_run = workflow.get("last_run")
+    if last_run is not None and (
+        not isinstance(last_run, str) or len(last_run) > 40
+    ):
+        raise ValueError("Data dell'ultima esecuzione non valida.")
+    last_status = workflow.get("last_status")
+    if last_status not in {None, "ok", "error"}:
+        raise ValueError("Stato dell'ultima esecuzione non valido.")
+    last_result = workflow.get("last_result")
+    if last_result is not None and (
+        not isinstance(last_result, str)
+        or len(last_result) > MAX_WORKFLOW_RESULT_LENGTH
+    ):
+        raise ValueError("Risultato dell'ultima esecuzione non valido.")
+    return last_run, last_status, last_result
+
+
 def validate_workflows(workflows):
     if not isinstance(workflows, list) or len(workflows) > MAX_WORKFLOWS:
         raise ValueError(f"Puoi salvare al massimo {MAX_WORKFLOWS} procedure.")
@@ -621,11 +699,21 @@ def validate_workflows(workflows):
                 f"Le istruzioni devono avere da 1 a "
                 f"{MAX_WORKFLOW_PROMPT_LENGTH} caratteri."
             )
+        schedule_enabled, schedule_time, schedule_days = (
+            _normalize_workflow_schedule(workflow)
+        )
+        last_run, last_status, last_result = _normalize_workflow_run(workflow)
         seen_ids.add(workflow_id)
         validated.append({
             "id": workflow_id,
             "name": name.strip(),
             "prompt": prompt.strip(),
+            "schedule_enabled": schedule_enabled,
+            "schedule_time": schedule_time,
+            "schedule_days": schedule_days,
+            "last_run": last_run,
+            "last_status": last_status,
+            "last_result": last_result,
         })
     return validated
 
@@ -2332,6 +2420,39 @@ def save_json_file(path, data):
         raise
 
 
+def default_telegram_reminder():
+    return {
+        "reminder_enabled": True,
+        "reminder_time": TELEGRAM_REMINDER_DEFAULT_TIME,
+        "reminder_last_sent": None,
+    }
+
+
+def normalize_telegram_reminder(saved):
+    if not isinstance(saved, dict):
+        raise ValueError("Configurazione promemoria Telegram non valida.")
+    enabled = saved.get("reminder_enabled", True)
+    if not isinstance(enabled, bool):
+        raise ValueError("Impostazione promemoria Telegram non valida.")
+    reminder_time = saved.get("reminder_time", TELEGRAM_REMINDER_DEFAULT_TIME)
+    if (
+        not isinstance(reminder_time, str)
+        or not TELEGRAM_REMINDER_TIME_PATTERN.fullmatch(reminder_time)
+    ):
+        raise ValueError("Orario del promemoria Telegram non valido.")
+    last_sent = saved.get("reminder_last_sent")
+    if last_sent is not None and (
+        not isinstance(last_sent, str)
+        or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", last_sent)
+    ):
+        raise ValueError("Data dell'ultimo promemoria Telegram non valida.")
+    return {
+        "reminder_enabled": enabled,
+        "reminder_time": reminder_time,
+        "reminder_last_sent": last_sent,
+    }
+
+
 def load_telegram_file():
     try:
         if os.name != "nt":
@@ -2344,6 +2465,7 @@ def load_telegram_file():
             "bot_username": None,
             "authorized_chats": [],
             "offset": 0,
+            **default_telegram_reminder(),
         }
     except (OSError, json.JSONDecodeError) as error:
         raise RuntimeError(
@@ -2358,11 +2480,18 @@ def load_telegram_file():
             or saved.get("offset", 0) != 0
         ):
             raise RuntimeError("Il file di configurazione Telegram non è valido.")
+        try:
+            reminder = normalize_telegram_reminder(saved)
+        except ValueError as error:
+            raise RuntimeError(
+                "Il file di configurazione Telegram non è valido."
+            ) from error
         return {
             "token": None,
             "bot_username": None,
             "authorized_chats": [],
             "offset": 0,
+            **reminder,
         }
     if (
         not isinstance(saved.get("token"), str)
@@ -2378,11 +2507,18 @@ def load_telegram_file():
         or saved.get("offset", 0) < 0
     ):
         raise RuntimeError("Il file di configurazione Telegram non è valido.")
+    try:
+        reminder = normalize_telegram_reminder(saved)
+    except ValueError as error:
+        raise RuntimeError(
+            "Il file di configurazione Telegram non è valido."
+        ) from error
     return {
         "token": saved["token"],
         "bot_username": saved["bot_username"],
         "authorized_chats": list(dict.fromkeys(saved["authorized_chats"])),
         "offset": saved.get("offset", 0),
+        **reminder,
     }
 
 
@@ -3943,6 +4079,278 @@ def _send_telegram_message(token, chat_id, text):
             )
 
 
+def _normalize_weekday_name(value):
+    return (
+        unicodedata.normalize("NFKD", value)
+        .encode("ascii", "ignore")
+        .decode("ascii")
+        .casefold()
+    )
+
+
+def _weekday_index(value):
+    normalized = _normalize_weekday_name(value)
+    for index, day in enumerate(TELEGRAM_WEEKDAYS):
+        if _normalize_weekday_name(day) == normalized:
+            return index
+    raise ValueError("Giorno della settimana non valido.")
+
+
+def _strip_memory_file_prefix(fact):
+    fact = fact.strip()
+    if fact.startswith("[") and "] " in fact:
+        fact = fact.split("] ", 1)[1]
+    return fact.lstrip("-•* ").strip()
+
+
+def _memory_lines(facts):
+    lines = []
+    for fact in facts:
+        if not isinstance(fact, str):
+            continue
+        for line in _strip_memory_file_prefix(fact).splitlines():
+            line = line.strip()
+            if line:
+                lines.append(line)
+    return lines
+
+
+def _timetable_cells(line):
+    return [
+        cell.strip()
+        for cell in re.split(r"\s*[|;,\t]\s*|\s{2,}", line)
+    ]
+
+
+def _is_weekday_cell(cell):
+    match = TELEGRAM_WEEKDAY_PATTERN.search(cell)
+    return bool(match and not cell[match.end():].strip(" .:-–—"))
+
+
+def _is_timetable_header(line):
+    return sum(1 for cell in _timetable_cells(line) if _is_weekday_cell(cell)) >= 3
+
+
+def _split_subjects(text):
+    subjects = []
+    for part in re.split(r"\s*[|;]\s*|\s*,\s*|\s{2,}", text):
+        subject = part.strip(" .:–—-")
+        if subject:
+            subjects.append(subject)
+    return subjects
+
+
+def _append_subjects(schedule, day, subjects):
+    bucket = schedule.setdefault(day, [])
+    known = {subject.casefold() for subject in bucket}
+    for subject in subjects:
+        if subject and subject.casefold() not in known:
+            bucket.append(subject)
+            known.add(subject.casefold())
+
+
+def _timetable_from_table(lines):
+    header_index = None
+    columns = {}
+    for index, line in enumerate(lines):
+        candidate = {}
+        for column, cell in enumerate(_timetable_cells(line)):
+            match = TELEGRAM_WEEKDAY_PATTERN.search(cell)
+            if match and _is_weekday_cell(cell):
+                candidate[column] = _weekday_index(match.group(1))
+        if len(candidate) >= 3:
+            header_index = index
+            columns = candidate
+            break
+    if header_index is None:
+        return {}
+    schedule = {}
+    for line in lines[header_index + 1:]:
+        cells = _timetable_cells(line)
+        for column, day in columns.items():
+            if column >= len(cells):
+                continue
+            cell = cells[column].strip()
+            if not cell or _is_weekday_cell(cell):
+                continue
+            _append_subjects(schedule, day, _split_subjects(cell))
+    return schedule
+
+
+def _timetable_from_positions(lines):
+    for index, line in enumerate(lines):
+        matches = list(TELEGRAM_WEEKDAY_PATTERN.finditer(line))
+        if len(matches) < 3 or not re.search(r"\s{2,}", line):
+            continue
+        columns = [
+            (match.start(), _weekday_index(match.group(1))) for match in matches
+        ]
+        schedule = {}
+        for row in lines[index + 1:]:
+            if not row.strip() or len(TELEGRAM_WEEKDAY_PATTERN.findall(row)) >= 3:
+                continue
+            for column_index, (start, day) in enumerate(columns):
+                end = (
+                    columns[column_index + 1][0]
+                    if column_index + 1 < len(columns)
+                    else len(row)
+                )
+                cell = row[start:end].strip(" |;,\t")
+                if cell and not _is_weekday_cell(cell):
+                    _append_subjects(schedule, day, _split_subjects(cell))
+        if schedule:
+            return schedule
+    return {}
+
+
+def _timetable_from_blocks(lines):
+    schedule = {}
+    current_day = None
+    saw_day = False
+    for line in lines:
+        if _is_weekday_cell(line):
+            current_day = _weekday_index(line)
+            saw_day = True
+            continue
+        if current_day is None:
+            continue
+        if _is_timetable_header(line) or len(TELEGRAM_WEEKDAY_PATTERN.findall(line)) >= 2:
+            current_day = None
+            continue
+        _append_subjects(schedule, current_day, _split_subjects(line))
+    return schedule if saw_day else {}
+
+
+def _timetable_from_line(line):
+    schedule = {}
+    matches = list(TELEGRAM_WEEKDAY_PATTERN.finditer(line))
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(line)
+        rest = line[match.end():end].strip(" \t:;,-–—|")
+        if not rest:
+            continue
+        _append_subjects(
+            schedule, _weekday_index(match.group(1)), _split_subjects(rest)
+        )
+    return schedule
+
+
+def timetable_from_memories(facts):
+    if not isinstance(facts, list):
+        return {}
+    lines = _memory_lines(facts)
+    schedule = {}
+    for parser in (
+        _timetable_from_table,
+        _timetable_from_positions,
+        _timetable_from_blocks,
+    ):
+        for day, subjects in parser(lines).items():
+            if day in schedule:
+                continue
+            _append_subjects(schedule, day, subjects)
+    for line in lines:
+        if _is_timetable_header(line):
+            continue
+        for day, subjects in _timetable_from_line(line).items():
+            _append_subjects(schedule, day, subjects)
+    return schedule
+
+
+def build_timetable_reminder(now, facts):
+    subjects = timetable_from_memories(facts).get(now.weekday(), [])
+    if not subjects:
+        return None
+    date_label = (
+        f"{TELEGRAM_WEEKDAYS[now.weekday()]} {now.day} "
+        f"{TELEGRAM_MONTHS[now.month - 1]}"
+    )
+    return "\n".join(
+        [f"📚 Materie di oggi, {date_label}:", ""]
+        + [f"• {subject}" for subject in subjects]
+    )
+
+
+def _telegram_reminder_now():
+    if ZoneInfo is not None:
+        try:
+            return datetime.datetime.now(ZoneInfo(TELEGRAM_REMINDER_TIMEZONE))
+        except Exception:
+            pass
+    return datetime.datetime.now().astimezone()
+
+
+def _telegram_memory_facts():
+    loader = user_memory_loader
+    if not callable(loader):
+        return []
+    try:
+        facts = loader()
+    except Exception as error:
+        print(f"Telegram promemoria: memoria non disponibile: {error}")
+        return []
+    return facts if isinstance(facts, list) else []
+
+
+def _maybe_send_telegram_reminder(now=None):
+    global telegram_reminder_sent_day
+    with telegram_lock:
+        bot = telegram_config.copy()
+    if not bot.get("token") or not bot.get("reminder_enabled", True):
+        return False
+    chats = bot.get("authorized_chats") or []
+    if not chats:
+        return False
+    now = now or _telegram_reminder_now()
+    today = now.strftime("%Y-%m-%d")
+    if bot.get("reminder_last_sent") == today or telegram_reminder_sent_day == today:
+        return False
+    reminder_time = bot.get("reminder_time", TELEGRAM_REMINDER_DEFAULT_TIME)
+    if (
+        not isinstance(reminder_time, str)
+        or not TELEGRAM_REMINDER_TIME_PATTERN.fullmatch(reminder_time)
+    ):
+        return False
+    hour, minute = (int(part) for part in reminder_time.split(":"))
+    scheduled = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    elapsed = (now - scheduled).total_seconds()
+    if elapsed < 0 or elapsed > TELEGRAM_REMINDER_WINDOW_SECONDS:
+        return False
+    message = build_timetable_reminder(now, _telegram_memory_facts())
+    if not message:
+        return False
+    delivered = False
+    for chat_id in chats:
+        try:
+            _send_telegram_message(bot["token"], int(chat_id), message)
+            delivered = True
+        except (RuntimeError, ValueError, OSError) as error:
+            print(f"Telegram promemoria: invio non riuscito: {error}")
+    if not delivered:
+        return False
+    telegram_reminder_sent_day = today
+    with telegram_lock:
+        if telegram_config.get("token") != bot.get("token"):
+            return True
+        updated = telegram_config.copy()
+        updated["reminder_last_sent"] = today
+        try:
+            save_telegram_file(updated)
+        except Exception as error:
+            print(f"Telegram promemoria: stato non salvato: {error}")
+        telegram_config.update(updated)
+    return True
+
+
+def _telegram_reminder_loop(stop_event):
+    while not stop_event.is_set():
+        try:
+            _maybe_send_telegram_reminder()
+        except Exception as error:
+            print(f"Telegram promemoria: {error}")
+        stop_event.wait(20)
+
+
 def _handle_telegram_update(update):
     global telegram_pairing
     message = update.get("message") if isinstance(update, dict) else None
@@ -4112,7 +4520,7 @@ def _telegram_poll_loop(stop_event):
 
 
 def start_telegram_polling():
-    global telegram_polling_thread, telegram_stop_event
+    global telegram_polling_thread, telegram_reminder_thread, telegram_stop_event
     with telegram_lock:
         if not telegram_config["token"]:
             return
@@ -4126,6 +4534,13 @@ def start_telegram_polling():
             daemon=True,
         )
         telegram_polling_thread.start()
+        telegram_reminder_thread = threading.Thread(
+            target=_telegram_reminder_loop,
+            args=(telegram_stop_event,),
+            name="nokk-telegram-reminder",
+            daemon=True,
+        )
+        telegram_reminder_thread.start()
 
 
 def stop_telegram_polling():
@@ -4153,11 +4568,6 @@ def store_workflow(data):
                 workflow_id
             ):
                 raise ValueError("Identificativo procedura non valido.")
-            replacement = {
-                "id": workflow_id,
-                "name": data.get("name"),
-                "prompt": data.get("prompt"),
-            }
             existing_index = next(
                 (
                     index for index, item in enumerate(updated)
@@ -4165,9 +4575,29 @@ def store_workflow(data):
                 ),
                 None,
             )
+            if existing_index is None and data.get("id") is not None:
+                raise ValueError("Procedura non trovata.")
+            existing = (
+                updated[existing_index] if existing_index is not None else {}
+            )
+            replacement = {
+                "id": workflow_id,
+                "name": data.get("name"),
+                "prompt": data.get("prompt"),
+                "schedule_enabled": data.get(
+                    "schedule_enabled", existing.get("schedule_enabled", False)
+                ),
+                "schedule_time": data.get(
+                    "schedule_time", existing.get("schedule_time", "07:00")
+                ),
+                "schedule_days": data.get(
+                    "schedule_days", existing.get("schedule_days", [])
+                ),
+                "last_run": existing.get("last_run"),
+                "last_status": existing.get("last_status"),
+                "last_result": existing.get("last_result"),
+            }
             if existing_index is None:
-                if data.get("id") is not None:
-                    raise ValueError("Procedura non trovata.")
                 updated.append(replacement)
             else:
                 updated[existing_index] = replacement
@@ -4178,6 +4608,133 @@ def store_workflow(data):
         save_json_file(WORKFLOWS_FILE, updated)
         workflows[:] = updated
         return updated
+
+
+def _workflow_now():
+    if ZoneInfo is not None:
+        try:
+            return datetime.datetime.now(ZoneInfo(WORKFLOW_TIMEZONE))
+        except Exception:
+            pass
+    return datetime.datetime.now().astimezone()
+
+
+def _workflow_is_due(workflow, now):
+    if workflow.get("schedule_enabled") is not True:
+        return False
+    if now.weekday() not in (workflow.get("schedule_days") or []):
+        return False
+    schedule_time = workflow.get("schedule_time")
+    if (
+        not isinstance(schedule_time, str)
+        or not CLOCK_TIME_PATTERN.fullmatch(schedule_time)
+    ):
+        return False
+    hour, minute = (int(part) for part in schedule_time.split(":"))
+    scheduled = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    elapsed = (now - scheduled).total_seconds()
+    if elapsed < 0 or elapsed > WORKFLOW_SCHEDULE_WINDOW_SECONDS:
+        return False
+    last_run = workflow.get("last_run")
+    return not (
+        isinstance(last_run, str)
+        and last_run[:10] == now.strftime("%Y-%m-%d")
+    )
+
+
+def record_workflow_run(workflow_id, status, result):
+    with config_lock:
+        updated = [item.copy() for item in workflows]
+        target = next(
+            (item for item in updated if item["id"] == workflow_id), None
+        )
+        if target is None:
+            return
+        target["last_run"] = _workflow_now().isoformat(timespec="seconds")
+        target["last_status"] = status
+        target["last_result"] = (result or "")[:MAX_WORKFLOW_RESULT_LENGTH]
+        updated = validate_workflows(updated)
+        save_json_file(WORKFLOWS_FILE, updated)
+        workflows[:] = updated
+
+
+def run_scheduled_workflow(workflow):
+    with config_lock:
+        active_config = config.copy()
+    if not active_config["api_key"]:
+        record_workflow_run(
+            workflow["id"],
+            "error",
+            "Configura un provider AI per eseguire le procedure programmate.",
+        )
+        return
+    active_config["terminal_enabled"] = False
+    active_config["app_tools_enabled"] = True
+    job_id = uuid.uuid4().hex
+    now = time.time()
+    with chat_jobs_lock:
+        chat_jobs[job_id] = {
+            "status": "running",
+            "created_at": now,
+            "updated_at": now,
+            "tool_events": [],
+            "workspace": active_config["workspace"],
+            "approved": None,
+        }
+    try:
+        run_chat_job(
+            job_id,
+            [{"role": "user", "content": workflow["prompt"]}],
+            active_config,
+        )
+    except Exception as error:
+        print(f"Procedura programmata: {error}")
+    with chat_jobs_lock:
+        job = chat_jobs.pop(job_id, {}).copy()
+    if job.get("status") == "complete":
+        record_workflow_run(workflow["id"], "ok", job.get("reply", ""))
+    else:
+        record_workflow_run(
+            workflow["id"],
+            "error",
+            job.get("error") or "La procedura non ha prodotto un risultato.",
+        )
+
+
+def _workflow_scheduler_loop(stop_event):
+    while not stop_event.is_set():
+        try:
+            now = _workflow_now()
+            with config_lock:
+                due = [
+                    item.copy() for item in workflows
+                    if _workflow_is_due(item, now)
+                ]
+            for workflow in due:
+                if stop_event.is_set():
+                    break
+                run_scheduled_workflow(workflow)
+        except Exception as error:
+            print(f"Programmazione procedure: {error}")
+        stop_event.wait(20)
+
+
+def start_workflow_scheduler():
+    global workflow_scheduler_thread, workflow_scheduler_stop_event
+    if workflow_scheduler_thread and workflow_scheduler_thread.is_alive():
+        return
+    workflow_scheduler_stop_event = threading.Event()
+    workflow_scheduler_thread = threading.Thread(
+        target=_workflow_scheduler_loop,
+        args=(workflow_scheduler_stop_event,),
+        name="nokk-workflow-scheduler",
+        daemon=True,
+    )
+    workflow_scheduler_thread.start()
+
+
+def stop_workflow_scheduler():
+    workflow_scheduler_stop_event.set()
 
 
 def store_planner_item(data):
@@ -4550,6 +5107,12 @@ class AppHandler(BaseHTTPRequestHandler):
                     "configured": bool(telegram_config["token"]),
                     "bot_username": telegram_config["bot_username"],
                     "authorized_chats": len(telegram_config["authorized_chats"]),
+                    "reminder_enabled": telegram_config.get(
+                        "reminder_enabled", True
+                    ),
+                    "reminder_time": telegram_config.get(
+                        "reminder_time", TELEGRAM_REMINDER_DEFAULT_TIME
+                    ),
                 }
             self._send_json(200, status)
             return
@@ -4587,6 +5150,11 @@ class AppHandler(BaseHTTPRequestHandler):
                     "workflows": list(workflows),
                 }
             self._send_json(200, public_config)
+            return
+        if self.path == "/api/workflows":
+            with config_lock:
+                public_workflows = [item.copy() for item in workflows]
+            self._send_json(200, {"workflows": public_workflows})
             return
         if self.path == "/api/planner":
             with config_lock:
@@ -4834,11 +5402,16 @@ class AppHandler(BaseHTTPRequestHandler):
                 or not re.fullmatch(r"[A-Za-z0-9_]{5,32}", bot["username"])
             ):
                 raise ValueError("Telegram non ha restituito un bot valido.")
+            try:
+                reminder = normalize_telegram_reminder(telegram_config)
+            except ValueError:
+                reminder = default_telegram_reminder()
             updated = {
                 "token": token,
                 "bot_username": bot["username"],
                 "authorized_chats": [],
                 "offset": 0,
+                **reminder,
             }
             try:
                 with telegram_lock:
@@ -4876,12 +5449,42 @@ class AppHandler(BaseHTTPRequestHandler):
             })
             return
 
+        if action == "reminder":
+            enabled = data.get("enabled")
+            if not isinstance(enabled, bool):
+                raise ValueError("Impostazione promemoria non valida.")
+            with telegram_lock:
+                last_sent = telegram_config.get("reminder_last_sent")
+            try:
+                reminder = normalize_telegram_reminder({
+                    "reminder_enabled": enabled,
+                    "reminder_time": data.get("time"),
+                    "reminder_last_sent": last_sent,
+                })
+            except ValueError as error:
+                raise ValueError(str(error)) from None
+            try:
+                with telegram_lock:
+                    updated = telegram_config.copy()
+                    updated.update(reminder)
+                    save_telegram_file(updated)
+                    telegram_config.update(updated)
+            except OSError as error:
+                self.log_error("Promemoria Telegram non salvato: %s", error)
+                self._send_json(500, {
+                    "error": "Impossibile salvare il promemoria Telegram.",
+                })
+                return
+            self._send_json(200, {"ok": True, **reminder})
+            return
+
         if action == "disconnect":
             empty_config = {
                 "token": None,
                 "bot_username": None,
                 "authorized_chats": [],
                 "offset": 0,
+                **default_telegram_reminder(),
             }
             try:
                 with telegram_lock:
@@ -5106,5 +5709,6 @@ class AppHandler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     start_telegram_polling()
+    start_workflow_scheduler()
     print(f"Apri http://{HOST}:{PORT} nel browser.")
     ThreadingHTTPServer((HOST, PORT), AppHandler).serve_forever()

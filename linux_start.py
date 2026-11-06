@@ -130,5 +130,6 @@ class LocalAppHandler(app.AppHandler):
 
 if __name__ == "__main__":
     app.start_telegram_polling()
+    app.start_workflow_scheduler()
     print(f"Apri http://{app.HOST}:{app.PORT} nel browser.")
     ThreadingHTTPServer((app.HOST, app.PORT), LocalAppHandler).serve_forever()
