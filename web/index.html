@@ -175,7 +175,7 @@
       </form>
 
       <section class="settings-overlay" id="settings-overlay" hidden>
-        <div class="settings-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div class="settings-card settings-window" role="dialog" aria-modal="true" aria-labelledby="settings-title">
           <div class="settings-heading">
             <div>
               <p class="eyebrow">COLLEGAMENTO AI</p>
@@ -184,161 +184,160 @@
             <button class="close-button" id="settings-close" type="button" aria-label="Chiudi impostazioni">×</button>
           </div>
           <p class="settings-description">Configura la connessione e personalizza il comportamento di NOKK. Le modifiche vengono salvate in locale.</p>
-          <form id="settings-form">
-            <details class="settings-section" open>
-              <summary><span class="section-index">01</span><span>Connessione AI<small>Provider, modello e chiave</small></span></summary>
-              <div class="settings-section-body">
-            <label for="provider">Provider AI</label>
-            <select id="provider" name="provider">
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic</option>
-              <option value="google">Google Gemini</option>
-              <option value="mistral">Mistral AI</option>
-              <option value="groq">Groq</option>
-              <option value="deepseek">DeepSeek</option>
-              <option value="xai">xAI (Grok)</option>
-              <option value="openrouter">OpenRouter · modelli gratuiti automatici</option>
-              <option value="custom">API compatibile OpenAI</option>
-            </select>
-
-            <label for="model">Nome del modello</label>
-            <input id="model" name="model" value="gpt-4o-mini" maxlength="120" required>
-            <p class="field-help" id="model-help">Il nome deve corrispondere a un modello disponibile nel tuo account.</p>
-
-            <label for="base-url" id="base-url-label" hidden>Indirizzo API</label>
-            <input id="base-url" name="base_url" type="url" autocomplete="off"
-              maxlength="300" placeholder="https://api.example.com/v1" hidden>
-            <p class="field-help" id="base-url-help" hidden>Base dell'API compatibile OpenAI: NOKK aggiunge /chat/completions. Serve https://, mentre http:// funziona solo per un server locale come Ollama o LM Studio.</p>
-
-            <label for="api-key">Chiave API</label>
-            <input id="api-key" name="api_key" type="password" autocomplete="off"
-              placeholder="Incolla la chiave API">
-            <p class="field-help" id="api-key-help">Non inserire la chiave in una chat. Le chiamate al provider partono dal backend. La chiave resta salvata per ogni provider.</p>
+          <form id="settings-form" novalidate>
+            <div class="settings-workspace">
+              <div class="settings-tabs" role="tablist" aria-label="Sezioni impostazioni">
+                <button class="settings-tab" id="settings-tab-connection" type="button" role="tab" aria-selected="true" aria-controls="settings-panel-connection" data-settings-tab="connection" tabindex="0">
+                  <span class="section-index">01</span><span>Connessione AI<small>Provider, modello e chiave</small></span>
+                </button>
+                <button class="settings-tab" id="settings-tab-personality" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-personality" data-settings-tab="personality" tabindex="-1">
+                  <span class="section-index">02</span><span>Personalità<small>Istruzioni permanenti</small></span>
+                </button>
+                <button class="settings-tab" id="settings-tab-voice" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-voice" data-settings-tab="voice" tabindex="-1">
+                  <span class="section-index">03</span><span>Voce<small>Wake word e sintesi vocale</small></span>
+                </button>
+                <button class="settings-tab" id="settings-tab-tools" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-tools" data-settings-tab="tools" tabindex="-1">
+                  <span class="section-index">04</span><span>Strumenti<small>Accesso locale al terminale</small></span>
+                </button>
+                <button class="settings-tab" id="settings-tab-telegram" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-telegram" data-settings-tab="telegram" tabindex="-1">
+                  <span class="section-index">05</span><span>Telegram<small>Chat privata con NOKK</small></span>
+                </button>
+                <button class="settings-tab" id="settings-tab-data" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-data" data-settings-tab="data" tabindex="-1">
+                  <span class="section-index">06</span><span>Dati e notifiche<small>Backup, calendario e avvisi</small></span>
+                </button>
+                <button class="settings-tab" id="settings-tab-google-calendar" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-google-calendar" data-settings-tab="google-calendar" tabindex="-1">
+                  <span class="section-index">07</span><span>Google Calendar<small>Agenda collegata</small></span>
+                </button>
               </div>
-            </details>
+              <div class="settings-panels">
+                <section class="settings-panel" id="settings-panel-connection" role="tabpanel" aria-labelledby="settings-tab-connection" data-settings-panel="connection">
+                  <label for="provider">Provider AI</label>
+                  <select id="provider" name="provider">
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="google">Google Gemini</option>
+                    <option value="mistral">Mistral AI</option>
+                    <option value="groq">Groq</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="xai">xAI (Grok)</option>
+                    <option value="openrouter">OpenRouter · modelli gratuiti automatici</option>
+                    <option value="custom">API compatibile OpenAI</option>
+                  </select>
 
-            <details class="settings-section">
-              <summary><span class="section-index">02</span><span>Personalità<small>Istruzioni permanenti</small></span></summary>
-              <div class="settings-section-body">
-            <label for="system-prompt">Istruzioni per NOKK</label>
-            <textarea id="system-prompt" name="system_prompt" rows="5" maxlength="10000"
-              placeholder="Es. Rispondi in italiano, in modo chiaro e conciso."></textarea>
-            <p class="field-help">Queste istruzioni vengono aggiunte a ogni conversazione. Lascia vuoto per usare le istruzioni predefinite.</p>
-              </div>
-            </details>
+                  <label for="model">Nome del modello</label>
+                  <input id="model" name="model" value="gpt-4o-mini" maxlength="120" required>
+                  <p class="field-help" id="model-help">Il nome deve corrispondere a un modello disponibile nel tuo account.</p>
 
-            <details class="settings-section">
-              <summary><span class="section-index">03</span><span>Voce<small>Wake word e sintesi vocale</small></span></summary>
-              <div class="settings-section-body">
-            <div class="voice-settings">
-              <p class="voice-settings-title">Voce</p>
-              <label for="wake-phrase">Wake word</label>
-              <input id="wake-phrase" name="wake_phrase" maxlength="40" value="Nok" required>
-              <p class="field-help">Premi il pulsante ◉ nella chat per attivarla. Resta in ascolto e prova a riprendere anche se cambi scheda o il browser interrompe la sessione. Non parte da sola all’apertura e non invia messaggi senza il tuo invio.</p>
-              <label class="toggle-label" for="tts-auto-play">
-                <input id="tts-auto-play" name="tts_auto_play" type="checkbox">
-                <span>Leggi automaticamente le risposte</span>
-              </label>
-              <p class="field-help">La sintesi vocale usa le voci disponibili nel browser.</p>
-              <p class="field-help voice-privacy">Il riconoscimento vocale usa il servizio del browser e può inviare l’audio a terzi. L’indicatore nella chat mostra quando il microfono è attivo.</p>
-            </div>
-              </div>
-            </details>
+                  <label for="base-url" id="base-url-label" hidden>Indirizzo API</label>
+                  <input id="base-url" name="base_url" type="url" autocomplete="off"
+                    maxlength="300" placeholder="https://api.example.com/v1" hidden>
+                  <p class="field-help" id="base-url-help" hidden>Base dell'API compatibile OpenAI: NOKK aggiunge /chat/completions. Serve https://, mentre http:// funziona solo per un server locale come Ollama o LM Studio.</p>
 
-            <details class="settings-section">
-              <summary><span class="section-index">04</span><span>Strumenti<small>Accesso locale al terminale</small></span></summary>
-              <div class="settings-section-body">
-            <div class="terminal-settings">
-              <label class="toggle-label" for="terminal-enabled">
-                <input id="terminal-enabled" name="terminal_enabled" type="checkbox">
-                <span>Consenti all’assistente di usare il terminale</span>
-              </label>
-              <p class="field-help">I comandi modificano il computer con i tuoi permessi. La cartella indicata è quella di partenza, non una sandbox.</p>
-
-              <label for="workspace">Cartella di lavoro</label>
-              <input id="workspace" name="workspace" type="text" autocomplete="off" required>
-
-              <label for="approval-mode">Approvazione dei comandi</label>
-              <select id="approval-mode" name="approval_mode">
-                <option value="manual">Chiedi conferma per ogni comando</option>
-                <option value="auto_readonly">Automatico solo per letture consentite</option>
-              </select>
-              <p class="field-help">L’automatico consente solo pwd, ls e lettura di file locali non sensibili (fino a 100 KB). Gli altri comandi richiedono conferma.</p>
-            </div>
-              </div>
-            </details>
-
-            <details class="settings-section">
-              <summary><span class="section-index">05</span><span>Telegram<small>Chat privata con NOKK</small></span></summary>
-              <div class="settings-section-body">
-                <div class="telegram-settings">
-                  <p class="telegram-status" id="telegram-status" role="status">Bot non collegato</p>
-                  <label for="telegram-token">Token del bot</label>
-                  <input id="telegram-token" type="password" autocomplete="off"
-                    placeholder="Incolla il token creato con BotFather">
-                  <p class="field-help">Crea un bot con @BotFather e incolla qui il token. Il token resta nel file locale e non viene mostrato all’assistente. NOKK comunica con Telegram tramite polling locale; non serve esporre il computer a Internet.</p>
-                  <div class="telegram-actions">
-                    <button class="telegram-action" id="telegram-connect" type="button">Collega bot</button>
-                    <button class="telegram-action" id="telegram-pair" type="button" disabled>Genera codice di collegamento</button>
-                    <button class="telegram-action telegram-disconnect" id="telegram-disconnect" type="button" hidden>Disconnetti</button>
-                  </div>
-                  <p class="telegram-pair-code" id="telegram-pair-code" hidden></p>
-                  <p class="field-help">Dopo il collegamento, genera il codice e invia <code>/pair CODICE</code> al tuo bot in una chat privata. Solo la chat associata può usare NOKK. Le conversazioni Telegram vengono inviate al provider AI configurato.</p>
-                  <div class="telegram-reminder">
-                    <label class="toggle-label" for="telegram-reminder-enabled">
-                      <input id="telegram-reminder-enabled" type="checkbox">
-                      <span>Promemoria materie ogni giorno</span>
+                  <label for="api-key">Chiave API</label>
+                  <input id="api-key" name="api_key" type="password" autocomplete="off"
+                    placeholder="Incolla la chiave API">
+                  <p class="field-help" id="api-key-help">Non inserire la chiave in una chat. Le chiamate al provider partono dal backend. La chiave resta salvata per ogni provider.</p>
+                </section>
+                <section class="settings-panel" id="settings-panel-personality" role="tabpanel" aria-labelledby="settings-tab-personality" data-settings-panel="personality" hidden>
+                  <label for="system-prompt">Istruzioni per NOKK</label>
+                  <textarea id="system-prompt" name="system_prompt" rows="5" maxlength="10000"
+                    placeholder="Es. Rispondi in italiano, in modo chiaro e conciso."></textarea>
+                  <p class="field-help">Queste istruzioni vengono aggiunte a ogni conversazione. Lascia vuoto per usare le istruzioni predefinite.</p>
+                </section>
+                <section class="settings-panel" id="settings-panel-voice" role="tabpanel" aria-labelledby="settings-tab-voice" data-settings-panel="voice" hidden>
+                  <div class="voice-settings">
+                    <p class="voice-settings-title">Voce</p>
+                    <label for="wake-phrase">Wake word</label>
+                    <input id="wake-phrase" name="wake_phrase" maxlength="40" value="Nok" required>
+                    <p class="field-help">Premi il pulsante ◉ nella chat per attivarla. Resta in ascolto e prova a riprendere anche se cambi scheda o il browser interrompe la sessione. Non parte da sola all’apertura e non invia messaggi senza il tuo invio.</p>
+                    <label class="toggle-label" for="tts-auto-play">
+                      <input id="tts-auto-play" name="tts_auto_play" type="checkbox">
+                      <span>Leggi automaticamente le risposte</span>
                     </label>
-                    <label for="telegram-reminder-time">Ora del promemoria</label>
-                    <input id="telegram-reminder-time" type="time" value="07:00" step="60">
+                    <p class="field-help">La sintesi vocale usa le voci disponibili nel browser.</p>
+                    <p class="field-help voice-privacy">Il riconoscimento vocale usa il servizio del browser e può inviare l’audio a terzi. L’indicatore nella chat mostra quando il microfono è attivo.</p>
+                  </div>
+                </section>
+                <section class="settings-panel" id="settings-panel-tools" role="tabpanel" aria-labelledby="settings-tab-tools" data-settings-panel="tools" hidden>
+                  <div class="terminal-settings">
+                    <label class="toggle-label" for="terminal-enabled">
+                      <input id="terminal-enabled" name="terminal_enabled" type="checkbox">
+                      <span>Consenti all’assistente di usare il terminale</span>
+                    </label>
+                    <p class="field-help">I comandi modificano il computer con i tuoi permessi. La cartella indicata è quella di partenza, non una sandbox.</p>
+
+                    <label for="workspace">Cartella di lavoro</label>
+                    <input id="workspace" name="workspace" type="text" autocomplete="off" required>
+
+                    <label for="approval-mode">Approvazione dei comandi</label>
+                    <select id="approval-mode" name="approval_mode">
+                      <option value="manual">Chiedi conferma per ogni comando</option>
+                      <option value="auto_readonly">Automatico solo per letture consentite</option>
+                    </select>
+                    <p class="field-help">L’automatico consente solo pwd, ls e lettura di file locali non sensibili (fino a 100 KB). Gli altri comandi richiedono conferma.</p>
+                  </div>
+                </section>
+                <section class="settings-panel" id="settings-panel-telegram" role="tabpanel" aria-labelledby="settings-tab-telegram" data-settings-panel="telegram" hidden>
+                  <div class="telegram-settings">
+                    <p class="telegram-status" id="telegram-status" role="status">Bot non collegato</p>
+                    <label for="telegram-token">Token del bot</label>
+                    <input id="telegram-token" type="password" autocomplete="off"
+                      placeholder="Incolla il token creato con BotFather">
+                    <p class="field-help">Crea un bot con @BotFather e incolla qui il token. Il token resta nel file locale e non viene mostrato all’assistente. NOKK comunica con Telegram tramite polling locale; non serve esporre il computer a Internet.</p>
                     <div class="telegram-actions">
-                      <button class="telegram-action" id="telegram-reminder-save" type="button">Salva promemoria</button>
+                      <button class="telegram-action" id="telegram-connect" type="button">Collega bot</button>
+                      <button class="telegram-action" id="telegram-pair" type="button" disabled>Genera codice di collegamento</button>
+                      <button class="telegram-action telegram-disconnect" id="telegram-disconnect" type="button" hidden>Disconnetti</button>
                     </div>
-                    <p class="field-help">Carica l’orario in PDF dal Profilo per NOKK. Il promemoria legge le materie del giorno e le invia alla chat Telegram collegata, con orario italiano.</p>
+                    <p class="telegram-pair-code" id="telegram-pair-code" hidden></p>
+                    <p class="field-help">Dopo il collegamento, genera il codice e invia <code>/pair CODICE</code> al tuo bot in una chat privata. Solo la chat associata può usare NOKK. Le conversazioni Telegram vengono inviate al provider AI configurato.</p>
+                    <div class="telegram-reminder">
+                      <label class="toggle-label" for="telegram-reminder-enabled">
+                        <input id="telegram-reminder-enabled" type="checkbox">
+                        <span>Promemoria materie ogni giorno</span>
+                      </label>
+                      <label for="telegram-reminder-time">Ora del promemoria</label>
+                      <input id="telegram-reminder-time" type="time" value="07:00" step="60">
+                      <div class="telegram-actions">
+                        <button class="telegram-action" id="telegram-reminder-save" type="button">Salva promemoria</button>
+                      </div>
+                      <p class="field-help">Carica l’orario in PDF dal Profilo per NOKK. Il promemoria legge le materie del giorno e le invia alla chat Telegram collegata, con orario italiano.</p>
+                    </div>
                   </div>
-                </div>
-              </div>
-            </details>
-
-            <details class="settings-section">
-              <summary><span class="section-index">06</span><span>Dati e notifiche<small>Backup, calendario e avvisi</small></span></summary>
-              <div class="settings-section-body">
-                <label class="toggle-label" for="notifications-enabled">
-                  <input id="notifications-enabled" name="notifications_enabled" type="checkbox">
-                  <span>Avvisami per appuntamenti e attività in scadenza</span>
-                </label>
-                <p class="field-help">Le notifiche usano il browser e richiedono il permesso. Funzionano quando NOKK è aperto; su Telegram i promemoria arrivano anche dalla chat collegata.</p>
-                <div class="data-actions">
-                  <button class="telegram-action" id="export-data" type="button">Esporta dati (JSON)</button>
-                  <a class="telegram-action" href="/api/calendar.ics" download="nokk-calendario.ics">Esporta calendario (.ics)</a>
-                </div>
-              </div>
-            </details>
-
-            <details class="settings-section">
-              <summary><span class="section-index">07</span><span>Google Calendar<small>Agenda collegata</small></span></summary>
-              <div class="settings-section-body">
-                <div class="google-calendar-settings">
-                  <p class="telegram-status" id="google-calendar-status" role="status">Google Calendar non collegato</p>
-                  <label for="google-client-id">Client ID OAuth</label>
-                  <input id="google-client-id" type="text" autocomplete="off" maxlength="256"
-                    placeholder="...apps.googleusercontent.com">
-                  <label for="google-client-secret">Client secret OAuth</label>
-                  <input id="google-client-secret" type="password" autocomplete="off" maxlength="256"
-                    placeholder="Client secret del progetto Google Cloud">
-                  <label for="google-calendar-id">ID del calendario</label>
-                  <input id="google-calendar-id" type="text" autocomplete="off" maxlength="256" placeholder="primary">
-                  <p class="field-help" id="google-redirect-help">Salva le credenziali: qui compare l'URI di reindirizzamento da registrare nel client OAuth di Google Cloud.</p>
-                  <div class="telegram-actions">
-                    <button class="telegram-action" id="google-calendar-save" type="button">Salva credenziali</button>
-                    <button class="telegram-action" id="google-calendar-connect" type="button" disabled>Collega Google Calendar</button>
-                    <button class="telegram-action telegram-disconnect" id="google-calendar-disconnect" type="button" hidden>Disconnetti</button>
+                </section>
+                <section class="settings-panel" id="settings-panel-data" role="tabpanel" aria-labelledby="settings-tab-data" data-settings-panel="data" hidden>
+                  <label class="toggle-label" for="notifications-enabled">
+                    <input id="notifications-enabled" name="notifications_enabled" type="checkbox">
+                    <span>Avvisami per appuntamenti e attività in scadenza</span>
+                  </label>
+                  <p class="field-help">Le notifiche usano il browser e richiedono il permesso. Funzionano quando NOKK è aperto; su Telegram i promemoria arrivano anche dalla chat collegata.</p>
+                  <div class="data-actions">
+                    <button class="telegram-action" id="export-data" type="button">Esporta dati (JSON)</button>
+                    <a class="telegram-action" href="/api/calendar.ics" download="nokk-calendario.ics">Esporta calendario (.ics)</a>
                   </div>
-                  <p class="field-help">NOKK chiede il permesso <code>calendar.events</code>: può leggere, creare ed eliminare eventi del calendario scelto. Client secret e token di aggiornamento restano sul server e non vengono mai mostrati all'assistente.</p>
-                </div>
+                </section>
+                <section class="settings-panel" id="settings-panel-google-calendar" role="tabpanel" aria-labelledby="settings-tab-google-calendar" data-settings-panel="google-calendar" hidden>
+                  <div class="google-calendar-settings">
+                    <p class="telegram-status" id="google-calendar-status" role="status">Google Calendar non collegato</p>
+                    <label for="google-client-id">Client ID OAuth</label>
+                    <input id="google-client-id" type="text" autocomplete="off" maxlength="256"
+                      placeholder="...apps.googleusercontent.com">
+                    <label for="google-client-secret">Client secret OAuth</label>
+                    <input id="google-client-secret" type="password" autocomplete="off" maxlength="256"
+                      placeholder="Client secret del progetto Google Cloud">
+                    <label for="google-calendar-id">ID del calendario</label>
+                    <input id="google-calendar-id" type="text" autocomplete="off" maxlength="256" placeholder="primary">
+                    <p class="field-help" id="google-redirect-help">Salva le credenziali: qui compare l'URI di reindirizzamento da registrare nel client OAuth di Google Cloud.</p>
+                    <div class="telegram-actions">
+                      <button class="telegram-action" id="google-calendar-save" type="button">Salva credenziali</button>
+                      <button class="telegram-action" id="google-calendar-connect" type="button" disabled>Collega Google Calendar</button>
+                      <button class="telegram-action telegram-disconnect" id="google-calendar-disconnect" type="button" hidden>Disconnetti</button>
+                    </div>
+                    <p class="field-help">NOKK chiede il permesso <code>calendar.events</code>: può leggere, creare ed eliminare eventi del calendario scelto. Client secret e token di aggiornamento restano sul server e non vengono mai mostrati all'assistente.</p>
+                  </div>
+                </section>
               </div>
-            </details>
-
+            </div>
             <div class="settings-error" id="settings-error" role="alert" hidden></div>
             <div class="settings-actions">
               <button class="cancel-button" id="settings-cancel" type="button">Annulla</button>

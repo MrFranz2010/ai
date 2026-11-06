@@ -12,6 +12,8 @@ const settingsOverlay = document.querySelector("#settings-overlay");
 const settingsForm = document.querySelector("#settings-form");
 const settingsError = document.querySelector("#settings-error");
 const settingsSave = document.querySelector("#settings-save");
+const settingsTabs = [...document.querySelectorAll("[data-settings-tab]")];
+const settingsPanels = document.querySelector(".settings-panels");
 const telegramStatus = document.querySelector("#telegram-status");
 const telegramTokenInput = document.querySelector("#telegram-token");
 const telegramConnectButton = document.querySelector("#telegram-connect");
@@ -189,17 +191,31 @@ function updateProviderFields() {
   apiKeyInput.placeholder = apiKeyPlaceholder(provider);
 }
 
+function activateSettingsTab(name = "", { focus = false } = {}) {
+  const target = settingsTabs.find((tab) => tab.dataset.settingsTab === name)
+    || settingsTabs.find((tab) => tab.textContent.includes(name))
+    || settingsTabs.find((tab) => tab.getAttribute("aria-selected") === "true")
+    || settingsTabs[0];
+  if (!target) return;
+  for (const tab of settingsTabs) {
+    const selected = tab === target;
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+    const panel = document.getElementById(tab.getAttribute("aria-controls"));
+    if (panel) panel.hidden = !selected;
+  }
+  if (settingsPanels) settingsPanels.scrollTop = 0;
+  if (focus) {
+    const panel = document.getElementById(target.getAttribute("aria-controls"));
+    const firstField = panel?.querySelector("input:not([type=hidden]), select, textarea");
+    (firstField || target).focus();
+  }
+}
+
 function openSettings(sectionName = "") {
   settingsError.hidden = true;
   settingsOverlay.hidden = false;
-  const sections = [...settingsForm.querySelectorAll(".settings-section")];
-  if (sectionName) {
-    for (const section of sections) {
-      section.open = section.querySelector("summary").textContent.includes(sectionName);
-    }
-  }
-  const selectedSection = sections.find((section) => section.open);
-  (selectedSection?.querySelector("input, select, textarea") || apiKeyInput).focus();
+  activateSettingsTab(sectionName, { focus: true });
 }
 
 function closeSettings() {
@@ -2116,6 +2132,22 @@ document.addEventListener("keydown", (event) => {
 document.querySelector("#welcome-setup").addEventListener("click", () => openSettings());
 document.querySelector("#settings-close").addEventListener("click", closeSettings);
 document.querySelector("#settings-cancel").addEventListener("click", closeSettings);
+settingsTabs.forEach((tab, index) => {
+  tab.addEventListener("click", () => activateSettingsTab(tab.dataset.settingsTab));
+  tab.addEventListener("keydown", (event) => {
+    const keys = ["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft", "Home", "End"];
+    if (!keys.includes(event.key)) return;
+    event.preventDefault();
+    let nextIndex = index;
+    if (event.key === "ArrowDown" || event.key === "ArrowRight") nextIndex = (index + 1) % settingsTabs.length;
+    if (event.key === "ArrowUp" || event.key === "ArrowLeft") nextIndex = (index - 1 + settingsTabs.length) % settingsTabs.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = settingsTabs.length - 1;
+    const nextTab = settingsTabs[nextIndex];
+    activateSettingsTab(nextTab.dataset.settingsTab);
+    nextTab.focus();
+  });
+});
 document.querySelector("#launcher-open").addEventListener("click", openLauncher);
 launcherInput.addEventListener("input", () => {
   launcherSelection = 0;
@@ -2394,6 +2426,26 @@ settingsForm.addEventListener("submit", async (event) => {
   settingsSave.disabled = true;
   settingsSave.textContent = "Collegamento...";
   try {
+    const requiredFields = [
+      { input: modelInput, tab: "connection", message: "Inserisci il nome del modello." },
+      { input: wakePhraseInput, tab: "voice", message: "Inserisci una wake word." },
+      { input: workspaceInput, tab: "tools", message: "Indica la cartella di lavoro." },
+    ];
+    const missingField = requiredFields.find(({ input: field }) => !field.value.trim());
+    if (missingField) {
+      activateSettingsTab(missingField.tab);
+      missingField.input.focus();
+      throw new Error(missingField.message);
+    }
+    if (providerSelect.value === "custom" && baseUrlInput.value.trim()) {
+      try {
+        new URL(baseUrlInput.value.trim());
+      } catch {
+        activateSettingsTab("connection");
+        baseUrlInput.focus();
+        throw new Error("Inserisci un indirizzo API valido.");
+      }
+    }
     const response = await fetch("/api/config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
