@@ -138,6 +138,39 @@ TELEGRAM_WEEKDAY_PATTERN = re.compile(
     r"sabato|domenica)\b"
 )
 CLOCK_TIME_PATTERN = TELEGRAM_REMINDER_TIME_PATTERN
+ALERT_DISK_PERCENT_DEFAULT = 90
+ALERT_MEMORY_PERCENT_DEFAULT = 92
+ALERT_PERCENT_MIN = 50
+ALERT_PERCENT_MAX = 99
+ALERT_COOLDOWN_SECONDS = 6 * 60 * 60
+MAX_WEATHER_CITY_LENGTH = 80
+WEATHER_CACHE_SECONDS = 15 * 60
+WEATHER_TIMEZONE = "Europe/Rome"
+WEATHER_GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
+WEATHER_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+WEATHER_DESCRIPTIONS = {
+    0: "sereno",
+    1: "prevalentemente sereno",
+    2: "parzialmente nuvoloso",
+    3: "nuvoloso",
+    45: "nebbia",
+    48: "nebbia con brina",
+    51: "pioviggine debole",
+    53: "pioviggine",
+    55: "pioviggine intensa",
+    61: "pioggia debole",
+    63: "pioggia",
+    65: "pioggia forte",
+    71: "neve debole",
+    73: "neve",
+    75: "neve forte",
+    80: "rovesci deboli",
+    81: "rovesci",
+    82: "rovesci forti",
+    95: "temporale",
+    96: "temporale con grandine",
+    99: "temporale forte",
+}
 WORKFLOW_SCHEDULE_WINDOW_SECONDS = 15 * 60
 WORKFLOW_TIMEZONE = "Europe/Rome"
 MAX_WORKFLOW_RESULT_LENGTH = 2000
@@ -273,6 +306,14 @@ APP_TOOLS = [
                     "description": (
                         "Scadenza nel formato YYYY-MM-DD, oppure null se non "
                         "esiste una scadenza."
+                    ),
+                },
+                "remind_days_before": {
+                    "type": ["integer", "null"],
+                    "description": (
+                        "Quanti giorni prima della scadenza inviare il "
+                        "promemoria su Telegram, da 0 a 30. Usa 0 per il giorno "
+                        "stesso, null se non serve un promemoria."
                     ),
                 },
                 "completed": {"type": "boolean"},
@@ -787,6 +828,23 @@ def normalize_event_starts_at(value):
     return parsed.replace(second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
 
 
+def normalize_remind_days_before(value):
+    """Normalize how many days before the deadline a reminder is sent."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if isinstance(value, bool):
+        raise ValueError("Anticipo del promemoria non valido.")
+    if isinstance(value, str):
+        if not value.strip().isdigit():
+            raise ValueError("Anticipo del promemoria non valido.")
+        value = int(value.strip())
+    if not isinstance(value, int) or not 0 <= value <= 30:
+        raise ValueError(
+            "L'anticipo del promemoria deve essere tra 0 e 30 giorni."
+        )
+    return value
+
+
 def normalize_due_date(value):
     """Normalize a due date, accepting ISO or common day-first formats."""
     if value is None or (isinstance(value, str) and not value.strip()):
@@ -856,7 +914,13 @@ def validate_planner(planner):
                 completed = item.get("completed")
                 if not isinstance(completed, bool):
                     raise ValueError("Stato attività non valido.")
-                clean_item.update({"due_date": due_date, "completed": completed})
+                clean_item.update({
+                    "due_date": due_date,
+                    "completed": completed,
+                    "remind_days_before": normalize_remind_days_before(
+                        item.get("remind_days_before")
+                    ),
+                })
             seen_ids.add(item_id)
             validated[kind].append(clean_item)
     return validated
@@ -1697,6 +1761,11 @@ def validate_config(
     notifications_enabled=False,
     base_url=None,
     models=None,
+    weather_enabled=False,
+    weather_city="",
+    alerts_enabled=False,
+    alerts_disk_percent=ALERT_DISK_PERCENT_DEFAULT,
+    alerts_memory_percent=ALERT_MEMORY_PERCENT_DEFAULT,
 ):
     if not isinstance(provider, str) or provider not in PROVIDERS:
         raise ValueError("Provider non supportato nel file di configurazione.")
@@ -1742,6 +1811,32 @@ def validate_config(
         raise ValueError("Impostazione di lettura vocale non valida.")
     if not isinstance(notifications_enabled, bool):
         raise ValueError("Impostazione notifiche non valida.")
+    if not isinstance(weather_enabled, bool):
+        raise ValueError("Impostazione meteo non valida.")
+    if weather_city is None:
+        weather_city = ""
+    if not isinstance(weather_city, str):
+        raise ValueError("Città del meteo non valida.")
+    weather_city = " ".join(weather_city.split())
+    if len(weather_city) > MAX_WEATHER_CITY_LENGTH:
+        raise ValueError("Il nome della città è troppo lungo.")
+    if weather_enabled and not weather_city:
+        raise ValueError("Indica la città per mostrare il meteo.")
+    if not isinstance(alerts_enabled, bool):
+        raise ValueError("Impostazione avvisi macchina non valida.")
+    for label, percent in (
+        ("disco", alerts_disk_percent),
+        ("memoria", alerts_memory_percent),
+    ):
+        if (
+            not isinstance(percent, int)
+            or isinstance(percent, bool)
+            or not ALERT_PERCENT_MIN <= percent <= ALERT_PERCENT_MAX
+        ):
+            raise ValueError(
+                f"La soglia {label} deve essere un numero tra "
+                f"{ALERT_PERCENT_MIN} e {ALERT_PERCENT_MAX}."
+            )
     workspace_path = Path(workspace).expanduser()
     if not workspace_path.is_absolute() or not workspace_path.is_dir():
         raise ValueError("La cartella di lavoro deve esistere ed essere assoluta.")
@@ -1759,6 +1854,11 @@ def validate_config(
         "wake_phrase": wake_phrase.strip(),
         "tts_auto_play": tts_auto_play,
         "notifications_enabled": notifications_enabled,
+        "weather_enabled": weather_enabled,
+        "weather_city": weather_city,
+        "alerts_enabled": alerts_enabled,
+        "alerts_disk_percent": alerts_disk_percent,
+        "alerts_memory_percent": alerts_memory_percent,
     }
 
 
@@ -1777,6 +1877,11 @@ def default_config():
         "wake_phrase": "Nok",
         "tts_auto_play": False,
         "notifications_enabled": False,
+        "weather_enabled": False,
+        "weather_city": "",
+        "alerts_enabled": False,
+        "alerts_disk_percent": ALERT_DISK_PERCENT_DEFAULT,
+        "alerts_memory_percent": ALERT_MEMORY_PERCENT_DEFAULT,
     }
 
 
@@ -1809,6 +1914,15 @@ def load_config_file():
             saved.get("notifications_enabled", False),
             base_url=saved.get("base_url", ""),
             models=saved.get("models", {}),
+            weather_enabled=saved.get("weather_enabled", False),
+            weather_city=saved.get("weather_city", ""),
+            alerts_enabled=saved.get("alerts_enabled", False),
+            alerts_disk_percent=saved.get(
+                "alerts_disk_percent", ALERT_DISK_PERCENT_DEFAULT
+            ),
+            alerts_memory_percent=saved.get(
+                "alerts_memory_percent", ALERT_MEMORY_PERCENT_DEFAULT
+            ),
         )
     except ValueError as error:
         raise RuntimeError(f"File di configurazione non valido: {error}") from error
@@ -1852,6 +1966,7 @@ def default_telegram_reminder():
         "reminder_enabled": True,
         "reminder_time": TELEGRAM_REMINDER_DEFAULT_TIME,
         "reminder_last_sent": None,
+        "task_reminders_sent": {},
     }
 
 
@@ -1873,10 +1988,22 @@ def normalize_telegram_reminder(saved):
         or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", last_sent)
     ):
         raise ValueError("Data dell'ultimo promemoria Telegram non valida.")
+    sent = saved.get("task_reminders_sent", {})
+    if not isinstance(sent, dict):
+        raise ValueError("Registro dei promemoria Telegram non valido.")
+    clean_sent = {}
+    for key, value in sent.items():
+        if (
+            isinstance(key, str)
+            and isinstance(value, str)
+            and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value)
+        ):
+            clean_sent[key[:80]] = value
     return {
         "reminder_enabled": enabled,
         "reminder_time": reminder_time,
         "reminder_last_sent": last_sent,
+        "task_reminders_sent": clean_sent,
     }
 
 
@@ -3089,6 +3216,10 @@ def run_chat_job(job_id, messages, active_config):
             "resolved from today's date, instead of only confirming in words."
         )
         app_prompt += (
+            " When the user asks to be warned some days before a deadline, set "
+            "remind_days_before on the task accordingly."
+        )
+        app_prompt += (
             " Use get_app_data with section=datetime whenever you need to "
             "confirm today's date or time, and save_timetable when the user "
             "asks you to remember their weekly school timetable."
@@ -3623,6 +3754,269 @@ def _telegram_planner_tasks():
         return [item.copy() for item in planner.get("tasks", [])]
 
 
+def build_task_reminders(now, tasks):
+    """Messages for tasks whose lead time matches today."""
+    today = now.date()
+    reminders = []
+    for task in tasks:
+        if not isinstance(task, dict) or task.get("completed"):
+            continue
+        due_date = task.get("due_date")
+        days = task.get("remind_days_before")
+        if due_date is None or days is None:
+            continue
+        try:
+            due = datetime.date.fromisoformat(str(due_date))
+        except ValueError:
+            continue
+        if (due - today).days != days:
+            continue
+        title = " ".join(str(task.get("title") or "").split()) or "Attività"
+        if days == 0:
+            when = "oggi"
+        elif days == 1:
+            when = "domani"
+        else:
+            when = f"tra {days} giorni"
+        reminders.append({
+            "id": task.get("id"),
+            "key": f"{task.get('id')}:{due.isoformat()}",
+            "message": (
+                f"⏰ Promemoria: «{title}» scade {when} "
+                f"({due.day} {TELEGRAM_MONTHS[due.month - 1]})."
+            ),
+        })
+    reminders.sort(key=lambda item: item["message"])
+    return reminders
+
+
+def _maybe_send_task_reminders(now=None):
+    with telegram_lock:
+        bot = telegram_config.copy()
+    if not bot.get("token") or not bot.get("reminder_enabled", True):
+        return False
+    chats = bot.get("authorized_chats") or []
+    if not chats:
+        return False
+    now = now or _telegram_reminder_now()
+    reminder_time = bot.get("reminder_time", TELEGRAM_REMINDER_DEFAULT_TIME)
+    if (
+        not isinstance(reminder_time, str)
+        or not TELEGRAM_REMINDER_TIME_PATTERN.fullmatch(reminder_time)
+    ):
+        return False
+    hour, minute = (int(part) for part in reminder_time.split(":"))
+    scheduled = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    elapsed = (now - scheduled).total_seconds()
+    if elapsed < 0 or elapsed > TELEGRAM_REMINDER_WINDOW_SECONDS:
+        return False
+    today = now.strftime("%Y-%m-%d")
+    sent = bot.get("task_reminders_sent") or {}
+    pending = [
+        reminder
+        for reminder in build_task_reminders(now, _telegram_planner_tasks())
+        if sent.get(reminder["key"]) != today
+    ]
+    if not pending:
+        return False
+    updated_sent = {
+        key: value for key, value in sent.items() if value == today
+    }
+    delivered = False
+    for reminder in pending:
+        for chat_id in chats:
+            try:
+                _send_telegram_message(
+                    bot["token"], int(chat_id), reminder["message"],
+                )
+            except (RuntimeError, ValueError, OSError) as error:
+                print(f"Telegram promemoria attività: invio non riuscito: {error}")
+                continue
+            delivered = True
+            updated_sent[reminder["key"]] = today
+    if not delivered:
+        return False
+    with telegram_lock:
+        if telegram_config.get("token") != bot.get("token"):
+            return True
+        updated = telegram_config.copy()
+        updated["task_reminders_sent"] = updated_sent
+        try:
+            save_telegram_file(updated)
+        except Exception as error:
+            print(f"Telegram promemoria attività: stato non salvato: {error}")
+        telegram_config.update(updated)
+    return True
+
+
+alert_last_sent = {}
+alert_last_sent_lock = threading.Lock()
+
+
+def machine_metrics():
+    """Current disk and memory usage as percentages."""
+    disk = shutil.disk_usage(APP_DIR)
+    disk_percent = round(disk.used / disk.total * 100) if disk.total else 0
+    status = machine_status()
+    total = status.get("memory_total")
+    available = status.get("memory_available")
+    memory_percent = None
+    if total and available is not None:
+        memory_percent = round((total - available) / total * 100)
+    return {"disk": disk_percent, "memory": memory_percent}
+
+
+def build_machine_alerts(active_config, metrics):
+    """Alert messages for thresholds that were exceeded."""
+    alerts = []
+    disk_threshold = active_config.get(
+        "alerts_disk_percent", ALERT_DISK_PERCENT_DEFAULT
+    )
+    memory_threshold = active_config.get(
+        "alerts_memory_percent", ALERT_MEMORY_PERCENT_DEFAULT
+    )
+    disk_percent = metrics.get("disk")
+    if disk_percent is not None and disk_percent >= disk_threshold:
+        alerts.append(
+            (
+                "disk",
+                f"⚠️ NOKK: spazio disco al {disk_percent}% "
+                f"(soglia {disk_threshold}%). Libera spazio."
+            )
+        )
+    memory_percent = metrics.get("memory")
+    if memory_percent is not None and memory_percent >= memory_threshold:
+        alerts.append(
+            (
+                "memory",
+                f"⚠️ NOKK: memoria in uso al {memory_percent}% "
+                f"(soglia {memory_threshold}%)."
+            )
+        )
+    return alerts
+
+
+def _check_machine_alerts(now=None):
+    with config_lock:
+        active_config = config.copy()
+    if not active_config.get("alerts_enabled"):
+        return False
+    with telegram_lock:
+        bot = telegram_config.copy()
+    chats = bot.get("authorized_chats") or []
+    if not bot.get("token") or not chats:
+        return False
+    current = time.time() if now is None else now
+    with alert_last_sent_lock:
+        due = []
+        for key, message in build_machine_alerts(
+            active_config, machine_metrics()
+        ):
+            last = alert_last_sent.get(key, 0.0)
+            if current - last >= ALERT_COOLDOWN_SECONDS:
+                due.append((key, message))
+        if not due:
+            return False
+        for key, _ in due:
+            alert_last_sent[key] = current
+    delivered = False
+    for _, message in due:
+        for chat_id in chats:
+            try:
+                _send_telegram_message(bot["token"], int(chat_id), message)
+            except (RuntimeError, ValueError, OSError) as error:
+                print(f"Avviso macchina: invio non riuscito: {error}")
+                continue
+            delivered = True
+    return delivered
+
+
+weather_cache = {"city": None, "fetched_at": 0.0, "data": None}
+weather_cache_lock = threading.Lock()
+
+
+def _weather_json(url, parameters):
+    request = Request(
+        f"{url}?{urlencode(parameters)}",
+        headers={"User-Agent": "NOKK/1.0"},
+    )
+    try:
+        with urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        error.close()
+        raise RuntimeError("Il servizio meteo ha rifiutato la richiesta.") from None
+    except URLError:
+        raise RuntimeError("Impossibile raggiungere il servizio meteo.") from None
+    except (OSError, TimeoutError):
+        raise RuntimeError("Timeout del servizio meteo.") from None
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise RuntimeError("Il servizio meteo ha risposto in modo non valido.") from None
+    if not isinstance(payload, dict):
+        raise RuntimeError("Il servizio meteo ha risposto in modo non valido.")
+    return payload
+
+
+def fetch_weather(city):
+    """Current temperature and today's range for a city, cached briefly."""
+    city = " ".join(str(city or "").split())
+    if not city:
+        raise RuntimeError("Indica la città per il meteo.")
+    with weather_cache_lock:
+        cached = dict(weather_cache)
+    if (
+        cached["city"] == city
+        and cached["data"] is not None
+        and time.time() - cached["fetched_at"] < WEATHER_CACHE_SECONDS
+    ):
+        return dict(cached["data"])
+    geo = _weather_json(
+        WEATHER_GEOCODE_URL,
+        {"name": city, "count": 1, "language": "it", "format": "json"},
+    )
+    results = geo.get("results")
+    if not isinstance(results, list) or not results:
+        raise RuntimeError(f"Città non trovata: {city}.")
+    place = results[0]
+    latitude = place.get("latitude")
+    longitude = place.get("longitude")
+    if not isinstance(latitude, (int, float)) or not isinstance(
+        longitude, (int, float)
+    ):
+        raise RuntimeError("Coordinate non valide per la città richiesta.")
+    forecast = _weather_json(
+        WEATHER_FORECAST_URL,
+        {
+            "latitude": latitude,
+            "longitude": longitude,
+            "current": "temperature_2m,weather_code",
+            "daily": "temperature_2m_min,temperature_2m_max",
+            "timezone": WEATHER_TIMEZONE,
+            "forecast_days": 1,
+        },
+    )
+    current = forecast.get("current") or {}
+    daily = forecast.get("daily") or {}
+    temperature = current.get("temperature_2m")
+    code = current.get("weather_code")
+    minimums = daily.get("temperature_2m_min") or []
+    maximums = daily.get("temperature_2m_max") or []
+    data = {
+        "city": place.get("name") or city,
+        "country": place.get("country_code") or "",
+        "temperature": round(temperature) if isinstance(temperature, (int, float)) else None,
+        "minimum": round(minimums[0]) if minimums and isinstance(minimums[0], (int, float)) else None,
+        "maximum": round(maximums[0]) if maximums and isinstance(maximums[0], (int, float)) else None,
+        "description": WEATHER_DESCRIPTIONS.get(code, "condizioni variabili"),
+        "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+    }
+    with weather_cache_lock:
+        weather_cache.update({
+            "city": city, "fetched_at": time.time(), "data": dict(data),
+        })
+    return data
+
+
 def _telegram_reminder_now():
     return _local_now(TELEGRAM_REMINDER_TIMEZONE)
 
@@ -3693,6 +4087,8 @@ def _telegram_reminder_loop(stop_event):
     while not stop_event.is_set():
         try:
             _maybe_send_telegram_reminder()
+            _maybe_send_task_reminders()
+            _check_machine_alerts()
         except Exception as error:
             print(f"Telegram promemoria: {error}")
         stop_event.wait(20)
@@ -4324,7 +4720,7 @@ def execute_app_tool(name, arguments):
             if item_id is not None:
                 raise ValueError("Non specificare un id quando crei un elemento.")
             existing = (
-                {"due_date": None, "completed": False}
+                {"due_date": None, "completed": False, "remind_days_before": None}
                 if kind == "task"
                 else {"description": ""}
             )
@@ -4332,6 +4728,7 @@ def execute_app_tool(name, arguments):
             key: value for key, value in arguments.items()
             if key in {
                 "id", "title", "starts_at", "description", "due_date", "completed",
+                "remind_days_before",
             }
         })
         saved = store_planner_item({
@@ -4533,6 +4930,11 @@ class AppHandler(BaseHTTPRequestHandler):
                     "wake_phrase": config["wake_phrase"],
                     "tts_auto_play": config["tts_auto_play"],
                     "notifications_enabled": config["notifications_enabled"],
+                    "weather_enabled": config["weather_enabled"],
+                    "weather_city": config["weather_city"],
+                    "alerts_enabled": config["alerts_enabled"],
+                    "alerts_disk_percent": config["alerts_disk_percent"],
+                    "alerts_memory_percent": config["alerts_memory_percent"],
                     "workflows": list(workflows),
                 }
             self._send_json(200, public_config)
@@ -4586,6 +4988,9 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/system":
             self._send_json(200, machine_status())
+            return
+        if self.path == "/api/weather":
+            self._send_weather()
             return
         if self.path == "/api/export":
             body = json.dumps(export_snapshot(), ensure_ascii=False, indent=2)
@@ -4704,6 +5109,25 @@ class AppHandler(BaseHTTPRequestHandler):
         extracted = extract_document_text(filename, content)
         self._send_json(200, {"text": extracted})
 
+    def _send_weather(self):
+        with config_lock:
+            enabled = config["weather_enabled"]
+            city = config["weather_city"]
+        if not enabled or not city:
+            self._send_json(200, {"configured": False})
+            return
+        try:
+            weather = fetch_weather(city)
+        except RuntimeError as error:
+            self.log_error("Meteo non disponibile: %s", error)
+            self._send_json(503, {
+                "configured": True,
+                "city": city,
+                "error": "Meteo non disponibile in questo momento.",
+            })
+            return
+        self._send_json(200, {"configured": True, **weather})
+
     def _save_config(self, data):
         with config_lock:
             current_config = config.copy()
@@ -4754,6 +5178,27 @@ class AppHandler(BaseHTTPRequestHandler):
             ),
             base_url=base_url,
             models=models,
+            weather_enabled=data.get(
+                "weather_enabled", current_config.get("weather_enabled", False)
+            ),
+            weather_city=data.get(
+                "weather_city", current_config.get("weather_city", "")
+            ),
+            alerts_enabled=data.get(
+                "alerts_enabled", current_config.get("alerts_enabled", False)
+            ),
+            alerts_disk_percent=data.get(
+                "alerts_disk_percent",
+                current_config.get(
+                    "alerts_disk_percent", ALERT_DISK_PERCENT_DEFAULT
+                ),
+            ),
+            alerts_memory_percent=data.get(
+                "alerts_memory_percent",
+                current_config.get(
+                    "alerts_memory_percent", ALERT_MEMORY_PERCENT_DEFAULT
+                ),
+            ),
         )
         with config_lock:
             try:
@@ -4846,6 +5291,9 @@ class AppHandler(BaseHTTPRequestHandler):
                     "reminder_enabled": enabled,
                     "reminder_time": data.get("time"),
                     "reminder_last_sent": last_sent,
+                    "task_reminders_sent": telegram_config.get(
+                        "task_reminders_sent", {}
+                    ),
                 })
             except ValueError as error:
                 raise ValueError(str(error)) from None

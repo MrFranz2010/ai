@@ -40,6 +40,10 @@
         <time id="sidebar-clock-time" datetime="">--:--:--</time>
         <span id="sidebar-clock-date">Caricamento…</span>
       </div>
+      <div class="sidebar-weather" id="sidebar-weather" role="status" hidden>
+        <span class="sidebar-weather-temperature" id="sidebar-weather-temperature"></span>
+        <span class="sidebar-weather-detail" id="sidebar-weather-detail"></span>
+      </div>
       <div class="sidebar-bottom">
         <p><span class="system-pulse"></span> NOKK · LOCALE</p>
         <p>Le risposte AI possono contenere errori.</p>
@@ -318,6 +322,28 @@
                     <span>Avvisami per appuntamenti e attività in scadenza</span>
                   </label>
                   <p class="field-help">Le notifiche usano il browser e richiedono il permesso. Funzionano quando NOKK è aperto; su Telegram i promemoria arrivano anche dalla chat collegata.</p>
+                  <label class="toggle-label" for="alerts-enabled">
+                    <input id="alerts-enabled" name="alerts_enabled" type="checkbox">
+                    <span>Avvisami su Telegram se la macchina è sotto pressione</span>
+                  </label>
+                  <div class="alert-thresholds">
+                    <div>
+                      <label for="alerts-disk-percent">Soglia disco %</label>
+                      <input id="alerts-disk-percent" name="alerts_disk_percent" type="number" min="50" max="99" step="1" value="90">
+                    </div>
+                    <div>
+                      <label for="alerts-memory-percent">Soglia memoria %</label>
+                      <input id="alerts-memory-percent" name="alerts_memory_percent" type="number" min="50" max="99" step="1" value="92">
+                    </div>
+                  </div>
+                  <p class="field-help">Serve un bot Telegram collegato con una chat associata. Ogni avviso si ripete al massimo ogni 6 ore.</p>
+                  <label class="toggle-label" for="weather-enabled">
+                    <input id="weather-enabled" name="weather_enabled" type="checkbox">
+                    <span>Mostra il meteo sotto l’orologio</span>
+                  </label>
+                  <label for="weather-city">Città del meteo</label>
+                  <input id="weather-city" name="weather_city" type="text" maxlength="80" autocomplete="off" placeholder="Es. Roma">
+                  <p class="field-help">Il meteo arriva da Open-Meteo, che non richiede chiavi API: basta il nome della città.</p>
                   <div class="data-actions">
                     <button class="telegram-action" id="export-data" type="button">Esporta dati (JSON)</button>
                     <a class="telegram-action" href="/api/calendar.ics" download="nokk-calendario.ics">Esporta calendario (.ics)</a>

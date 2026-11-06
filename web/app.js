@@ -6,6 +6,9 @@ const sidebarBackdrop = document.querySelector("#sidebar-backdrop");
 const sidebarResizer = document.querySelector("#sidebar-resizer");
 const sidebarClockTime = document.querySelector("#sidebar-clock-time");
 const sidebarClockDate = document.querySelector("#sidebar-clock-date");
+const sidebarWeather = document.querySelector("#sidebar-weather");
+const sidebarWeatherTemperature = document.querySelector("#sidebar-weather-temperature");
+const sidebarWeatherDetail = document.querySelector("#sidebar-weather-detail");
 const mobileSidebarQuery = window.matchMedia("(max-width: 820px)");
 const tabletWindowQuery = window.matchMedia("(max-width: 1366px) and (any-pointer: coarse)");
 const welcome = document.querySelector("#welcome");
@@ -67,6 +70,11 @@ const workflowDayInputs = [...document.querySelectorAll(".workflow-day input")];
 const wakePhraseInput = document.querySelector("#wake-phrase");
 const ttsAutoPlayInput = document.querySelector("#tts-auto-play");
 const notificationsInput = document.querySelector("#notifications-enabled");
+const alertsEnabledInput = document.querySelector("#alerts-enabled");
+const alertsDiskInput = document.querySelector("#alerts-disk-percent");
+const alertsMemoryInput = document.querySelector("#alerts-memory-percent");
+const weatherEnabledInput = document.querySelector("#weather-enabled");
+const weatherCityInput = document.querySelector("#weather-city");
 const exportDataButton = document.querySelector("#export-data");
 const themeToggle = document.querySelector("#theme-toggle");
 const launcherOverlay = document.querySelector("#launcher-overlay");
@@ -630,6 +638,10 @@ function launcherCatalog() {
     { title: "Voce", hint: "Wake word e sintesi vocale", keywords: "impostazioni microfono wake word voce", app: "settings", section: "Voce" },
     { title: "Strumenti", hint: "Terminale e cartella di lavoro", keywords: "impostazioni terminale workspace", app: "settings", section: "Strumenti" },
     { title: "Tema", hint: "Alterna tema chiaro e scuro", keywords: "aspetto colori scuro chiaro", run: () => themeToggle.click() },
+    { title: "Nuova chat", hint: "Azzera la conversazione corrente", keywords: "nuova chat azzera pulisci reset", run: () => newChatButton.click() },
+    { title: "Esporta backup", hint: "Scarica tutti i dati in JSON", keywords: "backup esporta dati salva json", run: () => exportData().catch((error) => window.alert(error.message)) },
+    { title: "Esporta calendario", hint: "Scarica il file .ics", keywords: "calendario ics esporta agenda", run: () => { window.location.href = "/api/calendar.ics"; } },
+    { title: "Aggiorna meteo", hint: "Ricarica la temperatura in sidebar", keywords: "meteo temperatura aggiorna", run: () => refreshWeather() },
   ];
   for (const workflow of workflows) {
     entries.push({
@@ -2176,6 +2188,38 @@ async function exportData() {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+async function refreshWeather() {
+  try {
+    const response = await fetch("/api/weather");
+    const result = await response.json();
+    if (!response.ok || !result.configured) {
+      sidebarWeather.hidden = true;
+      return;
+    }
+    if (result.error) {
+      sidebarWeather.hidden = true;
+      return;
+    }
+    const temperature = Number.isFinite(result.temperature)
+      ? `${Math.round(result.temperature)}°`
+      : "--°";
+    const range = [];
+    if (Number.isFinite(result.maximum)) range.push(`max ${Math.round(result.maximum)}°`);
+    if (Number.isFinite(result.minimum)) range.push(`min ${Math.round(result.minimum)}°`);
+    sidebarWeatherTemperature.textContent = temperature;
+    sidebarWeatherDetail.textContent = [result.description, range.join(" · "), result.city]
+      .filter(Boolean)
+      .join(" · ");
+    sidebarWeather.hidden = false;
+  } catch {
+    sidebarWeather.hidden = true;
+  }
+}
+
+window.setInterval(() => {
+  if (!document.hidden) refreshWeather();
+}, 15 * 60 * 1000);
+
 async function loadConfig() {
   const response = await fetch("/api/config");
   if (!response.ok) throw new Error("Non riesco a leggere la configurazione.");
@@ -2186,6 +2230,12 @@ async function loadConfig() {
   wakePhraseInput.value = saved.wake_phrase || "Nok";
   ttsAutoPlayInput.checked = saved.tts_auto_play === true;
   notificationsInput.checked = saved.notifications_enabled === true;
+  alertsEnabledInput.checked = saved.alerts_enabled === true;
+  alertsDiskInput.value = String(saved.alerts_disk_percent ?? 90);
+  alertsMemoryInput.value = String(saved.alerts_memory_percent ?? 92);
+  weatherEnabledInput.checked = saved.weather_enabled === true;
+  weatherCityInput.value = saved.weather_city || "";
+  refreshWeather();
   ttsAutoPlayInput.disabled = !(
     "speechSynthesis" in window
     && "SpeechSynthesisUtterance" in window
@@ -2572,6 +2622,11 @@ settingsForm.addEventListener("submit", async (event) => {
         wake_phrase: wakePhraseInput.value.trim(),
         tts_auto_play: ttsAutoPlayInput.checked,
         notifications_enabled: notificationsInput.checked,
+        alerts_enabled: alertsEnabledInput.checked,
+        alerts_disk_percent: Number.parseInt(alertsDiskInput.value, 10) || 90,
+        alerts_memory_percent: Number.parseInt(alertsMemoryInput.value, 10) || 92,
+        weather_enabled: weatherEnabledInput.checked,
+        weather_city: weatherCityInput.value.trim(),
       }),
     });
     const result = await response.json();

@@ -1,4 +1,6 @@
 import datetime
+import io
+import json
 import unittest
 from unittest.mock import patch
 
@@ -211,6 +213,219 @@ class TelegramReminderSettingsTests(unittest.TestCase):
             self.assertTrue(app._maybe_send_telegram_reminder(now))
             send.assert_called_once()
             self.assertFalse(app._maybe_send_telegram_reminder(now))
+
+
+class _JsonResponse(io.BytesIO):
+    pass
+
+
+def _json_response(payload):
+    return _JsonResponse(json.dumps(payload).encode("utf-8"))
+
+
+class DeadlineReminderTests(unittest.TestCase):
+    def test_lead_time_is_normalized(self):
+        self.assertIsNone(app.normalize_remind_days_before(None))
+        self.assertIsNone(app.normalize_remind_days_before("  "))
+        self.assertEqual(app.normalize_remind_days_before(3), 3)
+        self.assertEqual(app.normalize_remind_days_before("2"), 2)
+        for invalid in (31, -1, True, "abc"):
+            with self.assertRaises(ValueError):
+                app.normalize_remind_days_before(invalid)
+
+    def test_reminder_is_built_on_the_lead_day_only(self):
+        now = datetime.datetime(2026, 11, 6, 7, 5)
+        tasks = [
+            {
+                "id": "a" * 32,
+                "title": "Assicurazione",
+                "due_date": "2026-11-09",
+                "remind_days_before": 3,
+                "completed": False,
+            },
+            {
+                "id": "b" * 32,
+                "title": "Bolletta",
+                "due_date": "2026-11-20",
+                "remind_days_before": 3,
+                "completed": False,
+            },
+            {
+                "id": "c" * 32,
+                "title": "Rinnovo",
+                "due_date": "2026-11-06",
+                "remind_days_before": 0,
+                "completed": True,
+            },
+        ]
+        reminders = app.build_task_reminders(now, tasks)
+        self.assertEqual(len(reminders), 1)
+        self.assertIn("Assicurazione", reminders[0]["message"])
+        self.assertIn("tra 3 giorni", reminders[0]["message"])
+        self.assertIn("9 novembre", reminders[0]["message"])
+
+    def test_same_day_lead_time_says_today(self):
+        now = datetime.datetime(2026, 11, 6, 7, 5)
+        reminders = app.build_task_reminders(now, [{
+            "id": "a" * 32,
+            "title": "Consegna",
+            "due_date": "2026-11-06",
+            "remind_days_before": 0,
+            "completed": False,
+        }])
+        self.assertEqual(len(reminders), 1)
+        self.assertIn("oggi", reminders[0]["message"])
+
+    def test_task_reminder_is_sent_once_per_day(self):
+        saved_config = app.telegram_config.copy()
+        saved_tasks = [item.copy() for item in app.planner["tasks"]]
+        self.addCleanup(self._restore, saved_config, saved_tasks)
+        with app.config_lock:
+            app.planner["tasks"][:] = [{
+                "id": "a" * 32,
+                "title": "Assicurazione",
+                "due_date": "2026-11-09",
+                "remind_days_before": 3,
+                "completed": False,
+            }]
+        with app.telegram_lock:
+            app.telegram_config.clear()
+            app.telegram_config.update({
+                "token": "123456789:abcdefghijklmnopqrstuvwxyz0123456789",
+                "bot_username": "nokk_test_bot",
+                "authorized_chats": ["42"],
+                "offset": 0,
+                "reminder_enabled": True,
+                "reminder_time": "07:00",
+                "reminder_last_sent": None,
+                "task_reminders_sent": {},
+            })
+        now = datetime.datetime(2026, 11, 6, 7, 5)
+        with patch("app._send_telegram_message") as send_message, patch(
+            "app.save_telegram_file"
+        ):
+            self.assertTrue(app._maybe_send_task_reminders(now))
+            self.assertEqual(send_message.call_count, 1)
+            self.assertFalse(app._maybe_send_task_reminders(now))
+        self.assertEqual(send_message.call_count, 1)
+        self.assertEqual(
+            app.telegram_config["task_reminders_sent"]["a" * 32 + ":2026-11-09"],
+            "2026-11-06",
+        )
+
+    def _restore(self, saved_config, saved_tasks):
+        with app.telegram_lock:
+            app.telegram_config.clear()
+            app.telegram_config.update(saved_config)
+        with app.config_lock:
+            app.planner["tasks"][:] = saved_tasks
+
+
+class MachineAlertTests(unittest.TestCase):
+    def test_thresholds_produce_alerts(self):
+        settings = {"alerts_disk_percent": 80, "alerts_memory_percent": 90}
+        disk_only = app.build_machine_alerts(settings, {"disk": 85, "memory": 40})
+        self.assertEqual([key for key, _ in disk_only], ["disk"])
+        self.assertIn("85%", disk_only[0][1])
+        memory_only = app.build_machine_alerts(settings, {"disk": 10, "memory": 95})
+        self.assertEqual([key for key, _ in memory_only], ["memory"])
+        self.assertEqual(
+            app.build_machine_alerts(settings, {"disk": 10, "memory": 10}), []
+        )
+
+    def test_alerts_respect_the_cooldown(self):
+        saved_config = app.config.copy()
+        saved_alerts = dict(app.alert_last_sent)
+        self.addCleanup(self._restore, saved_config, saved_alerts)
+        with app.config_lock:
+            app.config.update({
+                "alerts_enabled": True,
+                "alerts_disk_percent": 80,
+                "alerts_memory_percent": 99,
+            })
+        with app.telegram_lock:
+            app.telegram_config.update({
+                "token": "123456789:abcdefghijklmnopqrstuvwxyz0123456789",
+                "authorized_chats": ["42"],
+            })
+        with patch("app.machine_metrics", return_value={"disk": 95, "memory": 10}), patch(
+            "app._send_telegram_message"
+        ) as send_message:
+            start = 10_000_000.0
+            self.assertTrue(app._check_machine_alerts(start))
+            self.assertFalse(app._check_machine_alerts(start + 60))
+            self.assertTrue(
+                app._check_machine_alerts(start + app.ALERT_COOLDOWN_SECONDS)
+            )
+        self.assertEqual(send_message.call_count, 2)
+
+    def _restore(self, saved_config, saved_alerts):
+        with app.config_lock:
+            app.config.clear()
+            app.config.update(saved_config)
+        with app.alert_last_sent_lock:
+            app.alert_last_sent.clear()
+            app.alert_last_sent.update(saved_alerts)
+
+
+class WeatherTests(unittest.TestCase):
+    def setUp(self):
+        saved = dict(app.weather_cache)
+        self.addCleanup(app.weather_cache.update, saved)
+        with app.weather_cache_lock:
+            app.weather_cache.update({
+                "city": None, "fetched_at": 0.0, "data": None,
+            })
+
+    def test_weather_reads_geocoding_and_forecast(self):
+        responses = iter([
+            _json_response({
+                "results": [{
+                    "name": "Roma",
+                    "country_code": "IT",
+                    "latitude": 41.9,
+                    "longitude": 12.5,
+                }],
+            }),
+            _json_response({
+                "current": {"temperature_2m": 18.4, "weather_code": 1},
+                "daily": {
+                    "temperature_2m_min": [11.2],
+                    "temperature_2m_max": [19.6],
+                },
+            }),
+        ])
+        with patch("app.urlopen", side_effect=lambda *_a, **_k: next(responses)):
+            data = app.fetch_weather("Roma")
+        self.assertEqual(data["city"], "Roma")
+        self.assertEqual(data["temperature"], 18)
+        self.assertEqual(data["minimum"], 11)
+        self.assertEqual(data["maximum"], 20)
+        self.assertEqual(data["description"], "prevalentemente sereno")
+
+    def test_weather_is_cached_between_requests(self):
+        app.weather_cache.update({
+            "city": "Roma",
+            "fetched_at": 9_000_000.0,
+            "data": {"city": "Roma", "temperature": 20},
+        })
+        with patch("app.urlopen", side_effect=AssertionError("rete non attesa")), patch(
+            "app.time.time", return_value=9_000_001.0
+        ):
+            data = app.fetch_weather("Roma")
+        self.assertEqual(data["temperature"], 20)
+
+    def test_unknown_city_raises(self):
+        with patch(
+            "app.urlopen",
+            side_effect=lambda *_a, **_k: _json_response({"results": []}),
+        ):
+            with self.assertRaises(RuntimeError):
+                app.fetch_weather("Atlantide")
+
+    def test_missing_city_raises(self):
+        with self.assertRaises(RuntimeError):
+            app.fetch_weather("  ")
 
 
 class WorkflowScheduleTests(unittest.TestCase):

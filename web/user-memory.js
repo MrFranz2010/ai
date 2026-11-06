@@ -18,6 +18,14 @@
         <button class="user-memory-close" type="button" aria-label="Chiudi">×</button>
       </div>
       <p class="user-memory-description">Aggiungi un’informazione per riga, ad esempio preferenze o obiettivi. Puoi anche caricare un file di testo o un PDF, come l’orario scolastico: le sue righe vengono aggiunte alla memoria. NOKK userà tutto come contesto aggiuntivo nelle chat. Non inserire password, chiavi o dati molto sensibili. Queste informazioni vengono inviate al provider AI configurato quando chatti.</p>
+      <div class="user-memory-facts">
+        <p class="user-memory-facts-title">Informazioni ricordate</p>
+        <ul class="user-memory-facts-list" id="user-memory-facts"></ul>
+        <div class="user-memory-add">
+          <input id="user-memory-new" type="text" maxlength="500" placeholder="Aggiungi un’informazione">
+          <button class="user-memory-add-button" type="button">Aggiungi</button>
+        </div>
+      </div>
       <label for="user-memory-input">Informazioni da ricordare</label>
       <textarea id="user-memory-input" rows="9" maxlength="15000" placeholder="Preferisco risposte in italiano e concise.&#10;Sto imparando Python."></textarea>
       <input class="user-memory-file" type="file" accept=".txt,.md,.csv,.json,.log,.pdf,.docx" hidden>
@@ -51,11 +59,25 @@
     .user-memory-actions button { min-height: 36px; padding: 0 12px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 5px; cursor: pointer; }
     .user-memory-actions button:disabled { opacity: .55; cursor: wait; }
     .user-memory-actions .user-memory-save { color: white; background: #9e343b; }
+    .user-memory-facts { margin: 6px 0 2px; }
+    .user-memory-facts-title { margin: 0 0 6px; color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+    .user-memory-facts-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+    .user-memory-facts-list:empty::after { content: "Nessuna informazione salvata."; color: var(--muted); font-size: 12px; }
+    .user-memory-fact { display: flex; align-items: flex-start; gap: 8px; padding: 7px 9px; background: var(--page); border: 1px solid var(--border); border-radius: 6px; font-size: 12px; line-height: 1.5; }
+    .user-memory-fact span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .user-memory-fact button { flex: none; padding: 0 6px; color: var(--muted); background: transparent; border: 0; font-size: 15px; line-height: 1.2; cursor: pointer; }
+    .user-memory-fact button:hover { color: #c0575f; }
+    .user-memory-add { display: flex; gap: 8px; margin-top: 8px; }
+    .user-memory-add input { flex: 1; min-width: 0; padding: 8px 10px; color: var(--text); background: var(--page); border: 1px solid var(--border); border-radius: 6px; font: inherit; }
+    .user-memory-add button { flex: none; min-height: 34px; padding: 0 12px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 5px; cursor: pointer; }
     @media (max-width: 820px) { .user-memory-trigger { width: 100%; min-height: 38px; padding: 0 11px; overflow: visible; font-size: 11px; text-align: left; } .user-memory-trigger::after { content: none; } }
     @media (max-width: 680px) { .user-memory-overlay { padding: 0; } .user-memory-card { width: 100%; height: 100dvh; max-height: 100dvh; border-radius: 0; padding: 20px 16px calc(20px + env(safe-area-inset-bottom)); } }
   `;
   document.head.append(css);
 
+  const factsList = overlay.querySelector("#user-memory-facts");
+  const newFactInput = overlay.querySelector("#user-memory-new");
+  const addFactButton = overlay.querySelector(".user-memory-add-button");
   const textarea = overlay.querySelector("#user-memory-input");
   const status = overlay.querySelector(".user-memory-status");
   const saveButton = overlay.querySelector(".user-memory-save");
@@ -112,6 +134,45 @@
     throw new Error("Formato non supportato. Usa TXT, MD, CSV, JSON, LOG, PDF o DOCX.");
   }
 
+  function currentMemories() {
+    return textarea.value
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  function renderFacts(memories) {
+    factsList.replaceChildren();
+    (memories || []).forEach((fact, index) => {
+      const row = document.createElement("li");
+      row.className = "user-memory-fact";
+      const text = document.createElement("span");
+      text.textContent = fact;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "×";
+      remove.setAttribute("aria-label", `Elimina: ${fact.slice(0, 40)}`);
+      remove.addEventListener("click", () => {
+        const remaining = currentMemories().filter((_, position) => position !== index);
+        void saveMemory(remaining);
+      });
+      row.append(text, remove);
+      factsList.append(row);
+    });
+  }
+
+  function addFact() {
+    const fact = newFactInput.value.trim();
+    if (!fact) return;
+    const memories = currentMemories();
+    if (memories.includes(fact)) {
+      status.textContent = "Questa informazione è già in memoria.";
+      return;
+    }
+    newFactInput.value = "";
+    void saveMemory([...memories, fact]);
+  }
+
   async function loadMemory() {
     status.textContent = "Caricamento…";
     try {
@@ -119,6 +180,7 @@
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Memoria non disponibile.");
       textarea.value = (result.memories || []).join("\n");
+      renderFacts(result.memories);
       memoryLoaded = true;
       status.textContent = "";
     } catch (error) {
@@ -140,6 +202,7 @@
       const result = await response.json();
       if (!response.ok) throw new Error(memoryErrorMessage(result, "Salvataggio non riuscito."));
       textarea.value = (result.memories || []).join("\n");
+      renderFacts(result.memories);
       memoryLoaded = true;
       status.textContent = "Memoria aggiornata.";
     } catch (error) { status.textContent = error.message; }
@@ -168,6 +231,7 @@
       const result = await response.json();
       if (!response.ok) throw new Error(memoryErrorMessage(result, "Caricamento non riuscito."));
       textarea.value = (result.memories || []).join("\n");
+      renderFacts(result.memories);
       status.textContent = `File aggiunto alla memoria: ${file.name}.`;
     } catch (error) {
       status.textContent = error.message;
@@ -197,6 +261,13 @@
     if (confirm("Vuoi cancellare tutte le informazioni che NOKK ricorda su di te?")) {
       textarea.value = "";
       void saveMemory([]);
+    }
+  });
+  addFactButton.addEventListener("click", () => addFact());
+  newFactInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      addFact();
     }
   });
   uploadButton.addEventListener("click", () => fileInput.click());
