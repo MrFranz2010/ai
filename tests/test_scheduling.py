@@ -82,6 +82,17 @@ class TimetableParsingTests(unittest.TestCase):
         ])
         self.assertEqual(schedule[5][-2:], ["INGLESE", "INGLESE"])
 
+    def test_explicit_timetable_keeps_double_periods(self):
+        facts = [
+            "[orario] Venerdì: ITAL-LATINO, SCIENZE, MATEM-FISICA, "
+            "MATEM-FISICA, MATEM-FISICA"
+        ]
+        message = app.build_timetable_reminder(
+            datetime.datetime(2026, 11, 6, 7, 0), facts
+        )
+        self.assertEqual(message.count("• MATEM-FISICA"), 3)
+        self.assertEqual(message.count("• ITAL-LATINO"), 1)
+
     def test_weekly_message_contains_all_saved_days(self):
         facts = ["[orario.pdf] Lunedì: Storia", "[orario.pdf] Sabato: Inglese"]
         now = datetime.datetime(2026, 11, 6, 7, 0)

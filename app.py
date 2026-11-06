@@ -3747,13 +3747,16 @@ def _split_subjects(text):
     return subjects
 
 
-def _append_subjects(schedule, day, subjects):
+def _append_subjects(schedule, day, subjects, preserve_repeats=False):
     bucket = schedule.setdefault(day, [])
     known = {subject.casefold() for subject in bucket}
     for subject in subjects:
-        if subject and subject.casefold() not in known:
+        normalized = subject.casefold() if subject else ""
+        if subject and (
+            preserve_repeats or normalized not in known
+        ):
             bucket.append(subject)
-            known.add(subject.casefold())
+            known.add(normalized)
 
 
 def _timetable_from_flat_grid(lines):
@@ -3859,7 +3862,8 @@ def _timetable_from_line(line):
         if not rest:
             continue
         _append_subjects(
-            schedule, _weekday_index(match.group(1)), _split_subjects(rest)
+            schedule, _weekday_index(match.group(1)), _split_subjects(rest),
+            preserve_repeats=True,
         )
     return schedule
 
@@ -3887,7 +3891,7 @@ def timetable_from_memories(facts):
         if _is_timetable_header(line):
             continue
         for day, subjects in _timetable_from_line(line).items():
-            _append_subjects(schedule, day, subjects)
+            schedule.setdefault(day, []).extend(subjects)
     return schedule
 
 
@@ -4487,17 +4491,12 @@ def _timetable_tool_facts(days):
         if not isinstance(subjects, list) or len(subjects) > 12:
             raise ValueError(f"Materie non valide per {label}.")
         clean = []
-        known = set()
         for subject in subjects:
             if not isinstance(subject, str):
                 raise ValueError(f"Materia non valida per {label}.")
             subject = " ".join(subject.split()).strip()
             if not subject or len(subject) > 80:
                 raise ValueError(f"Materia non valida per {label}.")
-            normalized = subject.casefold()
-            if normalized in known:
-                continue
-            known.add(normalized)
             clean.append(subject)
         if clean:
             facts.append(f"[orario] {label.capitalize()}: {', '.join(clean)}")
