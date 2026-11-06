@@ -84,3 +84,11 @@ session. You can also provide `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and
 
 `python app.py` still runs the app on `127.0.0.1:8000` with local JSON files and
 does not use Supabase. Use `render_start.py` only for the hosted deployment.
+
+## Tests
+
+`python -m unittest discover -s tests` runs the local suite. The Supabase
+round-trip test is skipped by default because it writes to `app_state`. To run
+it, use a disposable test project and set `SUPABASE_TEST_URL`,
+`SUPABASE_TEST_SERVICE_ROLE_KEY` and `SUPABASE_TEST_ALLOW_WRITES=1`. The test
+restores the previous `memories.json` row when it finishes.

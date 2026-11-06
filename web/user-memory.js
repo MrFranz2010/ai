@@ -71,6 +71,12 @@
     return index === -1 ? "" : name.slice(index).toLowerCase();
   }
 
+  function memoryErrorMessage(result, fallback) {
+    const message = result.error || fallback;
+    if (!result.error_id) return message;
+    return `${message} Codice errore: ${result.error_id}. Se il problema continua, controlla i log del server.`;
+  }
+
   function base64FromBuffer(buffer) {
     const bytes = new Uint8Array(buffer);
     let binary = "";
@@ -132,7 +138,7 @@
         body: JSON.stringify({ action: "save", memories }),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Salvataggio non riuscito.");
+      if (!response.ok) throw new Error(memoryErrorMessage(result, "Salvataggio non riuscito."));
       textarea.value = (result.memories || []).join("\n");
       memoryLoaded = true;
       status.textContent = "Memoria aggiornata.";
@@ -160,7 +166,7 @@
         body: JSON.stringify(payload),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Caricamento non riuscito.");
+      if (!response.ok) throw new Error(memoryErrorMessage(result, "Caricamento non riuscito."));
       textarea.value = (result.memories || []).join("\n");
       status.textContent = `File aggiunto alla memoria: ${file.name}.`;
     } catch (error) {

@@ -1,6 +1,7 @@
 import json
 import re
 from pathlib import Path
+from uuid import uuid4
 
 
 MAX_MEMORY_FACTS = 30
@@ -151,8 +152,12 @@ def install(app, handler_class, load_memories, save_memories):
         except ValueError as error:
             self._send_json(400, {"error": str(error)})
         except Exception as error:
-            print(f"Unable to save user memory: {error}")
-            self._send_json(500, {"error": "Impossibile salvare la memoria."})
+            error_id = uuid4().hex[:8]
+            print(f"Unable to save user memory [{error_id}]: {error}")
+            self._send_json(500, {
+                "error": "Impossibile salvare la memoria. Riprova tra poco.",
+                "error_id": error_id,
+            })
 
     handler_class.do_GET = do_get
     handler_class.do_POST = do_post
