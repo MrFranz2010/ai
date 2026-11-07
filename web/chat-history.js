@@ -264,28 +264,6 @@
     }
   }
 
-  function removeChromeEmoji(root = document) {
-    const replacements = [
-      ["#mic-toggle", "Microfono"],
-      ["#theme-toggle span:first-child", "◐"],
-      ["#settings-toggle span:first-child", "·"],
-      ['[data-open-app="tasks"] span:first-child', "□"],
-      [".privacy-note span", "Nota"],
-    ];
-    for (const [selector, text] of replacements) {
-      root.querySelectorAll?.(selector).forEach((element) => { element.textContent = text; });
-    }
-    root.querySelectorAll?.(".message-role").forEach((element) => {
-      if (element.textContent.trim() === "✳") element.textContent = "N";
-    });
-    root.querySelectorAll?.(".speak-message").forEach((element) => { element.textContent = "Leggi"; });
-    root.querySelectorAll?.(".function-card-icon").forEach((element) => {
-      if (["☑", "⚙"].includes(element.textContent.trim())) {
-        element.textContent = element.textContent.trim() === "☑" ? "□" : "·";
-      }
-    });
-  }
-
   newChatButton.addEventListener("click", () => {
     window.setTimeout(() => { void createChat(); }, 0);
   });
@@ -320,14 +298,5 @@
     return originalFetch(resource, options);
   };
 
-  const observer = new MutationObserver((records) => {
-    for (const record of records) {
-      for (const node of record.addedNodes) {
-        if (node.nodeType === Node.ELEMENT_NODE) removeChromeEmoji(node);
-      }
-    }
-  });
-  observer.observe(document.body, { childList: true, subtree: true });
-  removeChromeEmoji();
   void initializeChats();
 })();

@@ -1855,3 +1855,23 @@ body { background: var(--page); }
   .theme-button, .settings-button { width: 44px; min-width: 44px; justify-content: center; padding: 0; }
   .theme-button span:last-child, .settings-button span:last-child { display: none; }
 }
+
+/* Interface icons: inline SVG so they render the same on every platform. */
+.icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.icon {
+  width: 1em;
+  height: 1em;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vertical-align: -0.125em;
+}
+.send-button .icon { width: 16px; height: 16px; }
+.message-role .icon { width: 15px; height: 15px; }
+.speak-message .icon { width: 14px; height: 14px; }
+.privacy-note .icon { width: 12px; height: 12px; }
+.window-control .icon { width: 13px; height: 13px; }
+.launcher-result-icon .icon { width: 15px; height: 15px; }
