@@ -224,19 +224,6 @@
     }
   }
 
-  function removeEmoji(root = document) {
-    for (const [selector, text] of [
-      ["#mic-toggle", "Microfono"], ["#theme-toggle span:first-child", "◐"],
-      ["#settings-toggle span:first-child", "·"],
-      ['[data-open-app="tasks"] span:first-child', "□"], [".privacy-note span", "Nota"],
-    ]) root.querySelectorAll?.(selector).forEach((el) => { el.textContent = text; });
-    root.querySelectorAll?.(".message-role").forEach((el) => { if (el.textContent.trim() === "✳") el.textContent = "N"; });
-    root.querySelectorAll?.(".speak-message").forEach((el) => { el.textContent = "Leggi"; });
-    root.querySelectorAll?.(".function-card-icon").forEach((el) => {
-      if (["☑", "⚙"].includes(el.textContent.trim())) el.textContent = el.textContent.trim() === "☑" ? "□" : "·";
-    });
-  }
-
   // Capture before the default new-chat handler clears the current messages.
   newChatButton.addEventListener("click", (event) => {
     event.stopImmediatePropagation();
@@ -271,12 +258,5 @@
     return originalFetch(resource, options);
   };
 
-  const observer = new MutationObserver((records) => {
-    for (const record of records) for (const node of record.addedNodes) {
-      if (node.nodeType === Node.ELEMENT_NODE) removeEmoji(node);
-    }
-  });
-  observer.observe(document.body, { childList: true, subtree: true });
-  removeEmoji();
   void initialize();
 })();

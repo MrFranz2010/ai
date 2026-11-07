@@ -371,6 +371,21 @@ function makeElement(tag, className = "", text = "") {
   return element;
 }
 
+function iconElement(name, className = "") {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", `icon${className ? ` ${className}` : ""}`);
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", `#i-${name}`);
+  svg.append(use);
+  return svg;
+}
+
+function setIcon(element, name) {
+  const use = element?.querySelector("use");
+  if (use) use.setAttribute("href", `#i-${name}`);
+}
+
 function focusApplicationWindow(windowElement) {
   if (tabletWindowQuery.matches) {
     for (const other of openWindows.values()) {
@@ -413,7 +428,7 @@ function toggleMaximized(windowElement) {
   windowElement.classList.toggle("is-maximized");
   const maximize = windowElement.querySelector('[data-window-action="maximize"]');
   const isMaximized = windowElement.classList.contains("is-maximized");
-  maximize.textContent = isMaximized ? "❐" : "□";
+  setIcon(maximize, isMaximized ? "restore" : "maximize");
   maximize.setAttribute("aria-label", isMaximized ? "Riduci finestra" : "Ingrandisci finestra");
 }
 
@@ -457,12 +472,13 @@ function createApplicationWindow(appId, title) {
   const titlebar = makeElement("header", "app-window-titlebar");
   const heading = makeElement("h2", "", title);
   const controls = makeElement("div", "app-window-controls");
-  for (const [action, glyph, label] of [
-    ["minimize", "−", "Riduci a icona"],
-    ["maximize", "□", "Ingrandisci finestra"],
-    ["close", "×", "Chiudi finestra"],
+  for (const [action, icon, label] of [
+    ["minimize", "minus", "Riduci a icona"],
+    ["maximize", "maximize", "Ingrandisci finestra"],
+    ["close", "close", "Chiudi finestra"],
   ]) {
-    const control = makeElement("button", `window-control window-${action}`, glyph);
+    const control = makeElement("button", `window-control window-${action}`);
+    control.append(iconElement(icon));
     control.type = "button";
     control.dataset.windowAction = action;
     control.setAttribute("aria-label", label);
@@ -556,18 +572,20 @@ function renderFunctionsWindow(container) {
   );
   const grid = makeElement("div", "function-grid");
   const functions = [
-    ["Chat", "Conversazione, voce e allegati", "chat", "◦"],
-    ["Calendario", "Appuntamenti e date", "calendar", "▦"],
-    ["Attività", "Elenco cose da fare", "tasks", "☑"],
-    ["Procedure", "Istruzioni riutilizzabili", "workflows", "≡"],
-    ["Stato macchina", "Memoria e risorse locali", "machine", "▤"],
-    ["Impostazioni", "Connessione e preferenze", "settings", "⚙"],
+    ["Chat", "Conversazione, voce e allegati", "chat", "chat"],
+    ["Calendario", "Appuntamenti e date", "calendar", "calendar"],
+    ["Attività", "Elenco cose da fare", "tasks", "tasks"],
+    ["Procedure", "Istruzioni riutilizzabili", "workflows", "workflows"],
+    ["Stato macchina", "Memoria e risorse locali", "machine", "machine"],
+    ["Impostazioni", "Connessione e preferenze", "settings", "settings"],
   ];
   for (const [title, description, appId, icon] of functions) {
     const launch = makeElement("button", "function-card");
     launch.type = "button";
+    const cardIcon = makeElement("span", "function-card-icon");
+    cardIcon.append(iconElement(icon));
     launch.append(
-      makeElement("span", "function-card-icon", icon),
+      cardIcon,
       makeElement("strong", "", title),
       makeElement("small", "", description),
     );
@@ -576,8 +594,10 @@ function renderFunctionsWindow(container) {
   }
   const voice = makeElement("button", "function-card");
   voice.type = "button";
+  const voiceIcon = makeElement("span", "function-card-icon");
+  voiceIcon.append(iconElement("wake"));
   voice.append(
-    makeElement("span", "function-card-icon", "◉"),
+    voiceIcon,
     makeElement("strong", "", "Voce"),
     makeElement("small", "", "Wake word e sintesi vocale"),
   );
@@ -585,8 +605,10 @@ function renderFunctionsWindow(container) {
   grid.append(voice);
   const attachments = makeElement("button", "function-card");
   attachments.type = "button";
+  const attachIcon = makeElement("span", "function-card-icon");
+  attachIcon.append(iconElement("plus"));
   attachments.append(
-    makeElement("span", "function-card-icon", "＋"),
+    attachIcon,
     makeElement("strong", "", "Allega file"),
     makeElement("small", "", "Aggiungi documenti e immagini"),
   );
@@ -618,6 +640,16 @@ function closeLauncher() {
   launcherInput.value = "";
 }
 
+const appIconNames = {
+  chat: "chat",
+  calendar: "calendar",
+  tasks: "tasks",
+  workflows: "workflows",
+  machine: "machine",
+  settings: "settings",
+  functions: "sparkle",
+};
+
 function launcherCatalog() {
   const entries = [
     { title: "Funzioni", hint: "Esplora applicazioni e strumenti", keywords: "applicazioni apps strumenti", app: "functions" },
@@ -637,6 +669,13 @@ function launcherCatalog() {
     { title: "Personalità", hint: "Istruzioni permanenti", keywords: "impostazioni prompt personalità", app: "settings", section: "Personalità" },
     { title: "Voce", hint: "Wake word e sintesi vocale", keywords: "impostazioni microfono wake word voce", app: "settings", section: "Voce" },
     { title: "Strumenti", hint: "Terminale e cartella di lavoro", keywords: "impostazioni terminale workspace", app: "settings", section: "Strumenti" },
+    { title: "Telegram", hint: "Bot, promemoria e comandi", keywords: "telegram bot promemoria orario chat notifiche collegamento", app: "settings", section: "Telegram", icon: "chat" },
+    { title: "Dati e notifiche", hint: "Meteo, avvisi macchina e notifiche", keywords: "dati notifiche meteo città avvisi disco memoria soglie", app: "settings", section: "Dati e notifiche", icon: "weather" },
+    { title: "Google Calendar", hint: "Collega gli appuntamenti", keywords: "google calendar agenda sincronizza appuntamenti", app: "settings", section: "Google Calendar", icon: "calendar" },
+    { title: "Promemoria", hint: "Orario di materie e scadenze su Telegram", keywords: "promemoria orario materie scadenze anticipo telegram", app: "settings", section: "Telegram", icon: "calendar" },
+    { title: "Meteo in sidebar", hint: "Attiva il meteo e scegli la città", keywords: "meteo temperatura città previsioni sidebar orologio", app: "settings", section: "Dati e notifiche", icon: "weather" },
+    { title: "Avvisi macchina", hint: "Soglie di disco e memoria su Telegram", keywords: "avvisi macchina disco memoria soglie telegram notifiche", app: "settings", section: "Dati e notifiche", icon: "machine" },
+    { title: "Profilo e memoria", hint: "Le informazioni che NOKK ricorda", keywords: "memoria profilo per nokk ricordi informazioni personali contesto", icon: "memory", run: () => window.nokkOpenMemory?.() },
     { title: "Tema", hint: "Alterna tema chiaro e scuro", keywords: "aspetto colori scuro chiaro", run: () => themeToggle.click() },
     { title: "Nuova chat", hint: "Azzera la conversazione corrente", keywords: "nuova chat azzera pulisci reset", run: () => newChatButton.click() },
     { title: "Esporta backup", hint: "Scarica tutti i dati in JSON", keywords: "backup esporta dati salva json", run: () => exportData().catch((error) => window.alert(error.message)) },
@@ -659,14 +698,25 @@ function launcherCatalog() {
   return entries;
 }
 
+function launcherMatches(item, terms) {
+  const words = `${item.title} ${item.hint} ${item.keywords}`
+    .toLocaleLowerCase("it")
+    .split(/[^a-zà-ÿ0-9]+/)
+    .filter(Boolean);
+  return terms.every((term) => words.some((word) => word.startsWith(term)));
+}
+
+function launcherScore(item, terms) {
+  const title = item.title.toLocaleLowerCase("it");
+  return terms.filter((term) => !title.includes(term)).length;
+}
+
 function renderLauncherResults() {
   const query = launcherInput.value.trim().toLocaleLowerCase("it");
   const terms = query.split(/\s+/).filter(Boolean);
   visibleLauncherItems = launcherCatalog()
-    .filter((item) => {
-      const searchable = `${item.title} ${item.hint} ${item.keywords}`.toLocaleLowerCase("it");
-      return terms.every((term) => searchable.includes(term));
-    })
+    .filter((item) => launcherMatches(item, terms))
+    .sort((left, right) => launcherScore(left, terms) - launcherScore(right, terms))
     .slice(0, 12);
   launcherSelection = Math.min(launcherSelection, Math.max(0, visibleLauncherItems.length - 1));
   launcherResults.replaceChildren();
@@ -677,7 +727,9 @@ function renderLauncherResults() {
     result.setAttribute("aria-selected", String(index === launcherSelection));
     const text = makeElement("span", "launcher-result-copy");
     text.append(makeElement("strong", "", item.title), makeElement("small", "", item.hint));
-    result.append(makeElement("span", "launcher-result-icon", item.app ? "↗" : "◦"), text);
+    const entryIcon = makeElement("span", "launcher-result-icon");
+    entryIcon.append(iconElement(item.icon || appIconNames[item.app] || (item.run ? "sparkle" : "arrow-right")));
+    result.append(entryIcon, text);
     result.addEventListener("click", () => runLauncherItem(item));
     result.addEventListener("pointermove", () => {
       launcherSelection = index;
@@ -1179,6 +1231,7 @@ function setTheme(theme) {
   const isDark = theme !== "light";
   document.documentElement.dataset.theme = isDark ? "dark" : "light";
   themeToggle.querySelector("span:last-child").textContent = isDark ? "Tema scuro" : "Tema chiaro";
+  setIcon(themeToggle.querySelector("span:first-child"), isDark ? "moon" : "sun");
   themeToggle.setAttribute("aria-label", isDark ? "Attiva tema chiaro" : "Attiva tema scuro");
   themeToggle.title = isDark ? "Attiva tema chiaro" : "Attiva tema scuro";
   document.querySelector('meta[name="theme-color"]').content = isDark ? "#191817" : "#f4f8fa";
@@ -1210,14 +1263,14 @@ function renderPendingAttachments() {
     chip.className = "attachment-chip";
     const icon = document.createElement("span");
     icon.className = "attachment-icon";
-    icon.textContent = attachment.kind === "image" ? "▧" : "▤";
+    icon.append(iconElement(attachment.kind === "image" ? "image" : "file"));
     const name = document.createElement("span");
     name.className = "attachment-name";
     name.textContent = attachment.name;
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "remove-attachment";
-    remove.textContent = "×";
+    remove.append(iconElement("close"));
     remove.setAttribute("aria-label", `Rimuovi ${attachment.name}`);
     remove.addEventListener("click", () => {
       pendingAttachments.splice(index, 1);
@@ -1952,7 +2005,7 @@ function appendAttachmentPreviews(parent, attachments) {
       item.append(image);
     } else {
       const icon = document.createElement("span");
-      icon.textContent = "▤";
+      icon.append(iconElement("file"));
       item.append(icon);
     }
     const name = document.createElement("span");
@@ -1966,9 +2019,10 @@ function appendAttachmentPreviews(parent, attachments) {
 function addMessage(role, text, extraClass = "", attachments = []) {
   const row = document.createElement("article");
   row.className = `message ${role} ${extraClass}`.trim();
-  const icon = document.createElement("span");
-  icon.className = "message-role";
-  icon.textContent = role === "user" ? "Tu" : "✳";
+  const roleIcon = document.createElement("span");
+  roleIcon.className = "message-role";
+  if (role === "user") roleIcon.textContent = "Tu";
+  else roleIcon.append(iconElement("sparkle"));
   const body = document.createElement("div");
   body.className = "message-body";
   if (role === "user") appendAttachmentPreviews(body, attachments);
@@ -1979,7 +2033,7 @@ function addMessage(role, text, extraClass = "", attachments = []) {
     speakButton.className = "speak-message";
     speakButton.setAttribute("aria-label", "Leggi questa risposta");
     speakButton.title = "Leggi questa risposta";
-    speakButton.textContent = "🔊";
+    speakButton.append(iconElement("volume"));
     speakButton.addEventListener("click", () => speakText(text));
     body.append(speakButton);
   } else {
@@ -1987,7 +2041,7 @@ function addMessage(role, text, extraClass = "", attachments = []) {
     paragraph.textContent = text;
     body.append(paragraph);
   }
-  row.append(icon, body);
+  row.append(roleIcon, body);
   conversation.append(row);
   conversation.scrollTo({ top: conversation.scrollHeight, behavior: "smooth" });
   return row;
@@ -1996,9 +2050,9 @@ function addMessage(role, text, extraClass = "", attachments = []) {
 function addToolEvent(event) {
   const row = document.createElement("article");
   row.className = "message tool-event";
-  const icon = document.createElement("span");
-  icon.className = "message-role";
-  icon.textContent = "⌘";
+  const roleIcon = document.createElement("span");
+  roleIcon.className = "message-role";
+  roleIcon.append(iconElement("terminal"));
   const body = document.createElement("div");
   body.className = "message-body";
   const label = document.createElement("p");
@@ -2016,7 +2070,7 @@ function addToolEvent(event) {
   outputCode.textContent = `${event.output}\n\nCodice di uscita: ${event.exit_code}`;
   output.append(outputCode);
   body.append(label, command, output);
-  row.append(icon, body);
+  row.append(roleIcon, body);
   conversation.append(row);
   conversation.scrollTo({ top: conversation.scrollHeight, behavior: "smooth" });
 }

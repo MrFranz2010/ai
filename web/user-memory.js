@@ -243,11 +243,15 @@
     }
   }
 
-  openButton.addEventListener("click", () => {
+  function openMemory() {
     overlay.hidden = false;
     void loadMemory();
     textarea.focus();
-  });
+  }
+
+  // The command palette (app.js) opens the same panel.
+  window.nokkOpenMemory = openMemory;
+  openButton.addEventListener("click", openMemory);
   overlay.querySelector(".user-memory-close").addEventListener("click", () => { overlay.hidden = true; });
   overlay.addEventListener("click", (event) => { if (event.target === overlay) overlay.hidden = true; });
   document.addEventListener("keydown", (event) => {

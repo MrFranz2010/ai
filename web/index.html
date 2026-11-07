@@ -9,26 +9,55 @@
   <script src="/app.js" defer></script>
 </head>
 <body>
+  <svg class="icon-sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8z"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/></symbol>
+    <symbol id="i-tasks" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></symbol>
+    <symbol id="i-workflows" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+    <symbol id="i-machine" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 11v1a7 7 0 0 1-14 0v-1"/><path d="M12 19v3M8 22h8"/></symbol>
+    <symbol id="i-wake" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-maximize" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1.5"/></symbol>
+    <symbol id="i-restore" viewBox="0 0 24 24"><path d="M9 9h10v10H9z"/><path d="M5 15V5h10"/></symbol>
+    <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/></symbol>
+    <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><path d="M4 17l6-5-6-5M12 19h8"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></symbol>
+    <symbol id="i-memory" viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="i-weather" viewBox="0 0 24 24"><path d="M18 10h-1.3A5 5 0 0 0 7 9a4 4 0 0 0 0 8h11a3 3 0 0 0 0-6z"/></symbol>
+  </svg>
   <div class="layout">
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-resizer" id="sidebar-resizer" role="separator"
         aria-orientation="vertical" aria-label="Ridimensiona il menu"
         aria-valuemin="220" aria-valuemax="460" aria-valuenow="252" tabindex="0"></div>
-      <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Chiudi il menu">×</button>
+      <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Chiudi il menu"><svg class="icon" aria-hidden="true"><use href="#i-close"></use></svg></button>
       <a class="brand" href="/" aria-label="NOKK, home">
         <span class="brand-icon">N</span>
         <span class="brand-copy"><strong>NOKK</strong><small>PERSONAL AI</small></span>
       </a>
-      <button class="new-chat" id="new-chat" type="button"><span aria-hidden="true">＋</span><span>Nuova chat</span></button>
+      <button class="new-chat" id="new-chat" type="button"><span aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg></span><span>Nuova chat</span></button>
       <div class="sidebar-section-label">APPLICAZIONI</div>
       <nav class="app-menu" aria-label="Applicazioni">
-        <button class="app-menu-item" type="button" data-open-app="calendar"><span aria-hidden="true">▦</span><span>Calendario</span></button>
-        <button class="app-menu-item" type="button" data-open-app="tasks"><span aria-hidden="true">☑</span><span>Attività</span></button>
+        <button class="app-menu-item" type="button" data-open-app="calendar"><span aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-calendar"></use></svg></span><span>Calendario</span></button>
+        <button class="app-menu-item" type="button" data-open-app="tasks"><span aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-tasks"></use></svg></span><span>Attività</span></button>
         <button class="app-menu-item" id="workflows-toggle" type="button" data-open-app="workflows"
           aria-label="Procedure" aria-controls="workflow-panel" aria-expanded="false">
-          <span aria-hidden="true">≡</span><span>Procedure</span>
+          <span aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-workflows"></use></svg></span><span>Procedure</span>
         </button>
-        <button class="app-menu-item" type="button" data-open-app="machine"><span aria-hidden="true">▤</span><span>Stato macchina</span></button>
+        <button class="app-menu-item" type="button" data-open-app="machine"><span aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-machine"></use></svg></span><span>Stato macchina</span></button>
       </nav>
       <div class="sidebar-section-label">STATO</div>
       <div class="sidebar-note">
@@ -54,7 +83,7 @@
       <header class="topbar">
         <div class="topbar-heading">
           <button class="mobile-menu-button" id="sidebar-toggle" type="button"
-            aria-controls="sidebar" aria-expanded="false" aria-label="Apri il menu">☰</button>
+            aria-controls="sidebar" aria-expanded="false" aria-label="Apri il menu"><svg class="icon" aria-hidden="true"><use href="#i-menu"></use></svg></button>
           <div>
             <div class="eyebrow">NOKK <span>·</span> IL TUO ASSISTENTE</div>
             <h1 id="page-title">Una nuova conversazione</h1>
@@ -62,13 +91,13 @@
         </div>
         <div class="topbar-actions">
           <button class="launcher-trigger" id="launcher-open" type="button" aria-label="Cerca applicazioni e impostazioni">
-            <span aria-hidden="true">⌕</span><span>Cerca in NOKK...</span><kbd>Ctrl K</kbd>
+            <span aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg></span><span>Cerca in NOKK...</span><kbd>Ctrl K</kbd>
           </button>
           <button class="theme-button" id="theme-toggle" type="button" aria-label="Attiva tema chiaro" title="Attiva tema chiaro">
-            <span aria-hidden="true">☼</span><span>Tema scuro</span>
+            <span aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-moon"></use></svg></span><span>Tema scuro</span>
           </button>
           <button class="settings-button" id="settings-toggle" type="button" data-open-app="settings" aria-label="Impostazioni">
-            <span aria-hidden="true">⚙</span><span>Impostazioni</span>
+            <span aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg></span><span>Impostazioni</span>
           </button>
         </div>
       </header>
@@ -81,7 +110,7 @@
         <div class="launcher-card" role="dialog" aria-modal="true" aria-labelledby="launcher-label">
           <label class="sr-only" id="launcher-label" for="launcher-input">Cerca in NOKK</label>
           <div class="launcher-input-row">
-            <span aria-hidden="true">⌕</span>
+            <span aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg></span>
             <input id="launcher-input" type="search" autocomplete="off" placeholder="Cerca impostazioni, calendario, attività...">
             <kbd>ESC</kbd>
           </div>
@@ -112,7 +141,7 @@
           <div class="welcome-capabilities" aria-label="Funzioni disponibili">
             <span>CONVERSAZIONE</span><span>VOCE</span><span>FILE</span>
           </div>
-          <button class="welcome-setup" id="welcome-setup" type="button">Configura connessione <span>→</span></button>
+          <button class="welcome-setup" id="welcome-setup" type="button">Configura connessione <span><svg class="icon" aria-hidden="true"><use href="#i-arrow-right"></use></svg></span></button>
         </div>
       </section>
 
@@ -174,13 +203,13 @@
           <span id="voice-status" role="status" aria-live="polite">Microfono pronto · i file partono solo al tuo invio</span>
           <div class="composer-actions">
             <button class="attach-button" id="attach-button" type="button" aria-label="Allega file" title="Allega file" disabled>
-              <span aria-hidden="true">＋</span><span>Allega</span>
+              <span aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg></span><span>Allega</span>
             </button>
             <button class="voice-button" id="mic-toggle" type="button" disabled
-              aria-label="Detta un messaggio" title="Detta un messaggio">🎙</button>
+              aria-label="Detta un messaggio" title="Detta un messaggio"><svg class="icon" aria-hidden="true"><use href="#i-mic"></use></svg></button>
             <button class="voice-button" id="wake-toggle" type="button"
-              aria-label="Attiva wake word Nok" title="Attiva wake word Nok">◉</button>
-            <button class="send-button" id="send-button" type="submit" disabled aria-label="Invia messaggio">↑</button>
+              aria-label="Attiva wake word Nok" title="Attiva wake word Nok"><svg class="icon" aria-hidden="true"><use href="#i-wake"></use></svg></button>
+            <button class="send-button" id="send-button" type="submit" disabled aria-label="Invia messaggio"><svg class="icon" aria-hidden="true"><use href="#i-send"></use></svg></button>
           </div>
         </div>
       </form>
@@ -260,7 +289,7 @@
                     <p class="voice-settings-title">Voce</p>
                     <label for="wake-phrase">Wake word</label>
                     <input id="wake-phrase" name="wake_phrase" maxlength="40" value="Nok" required>
-                    <p class="field-help">Premi il pulsante ◉ nella chat per attivarla. Resta in ascolto e prova a riprendere anche se cambi scheda o il browser interrompe la sessione. Non parte da sola all’apertura e non invia messaggi senza il tuo invio.</p>
+                    <p class="field-help">Premi il pulsante di ascolto nella chat per attivarla. Resta in ascolto e prova a riprendere anche se cambi scheda o il browser interrompe la sessione. Non parte da sola all’apertura e non invia messaggi senza il tuo invio.</p>
                     <label class="toggle-label" for="tts-auto-play">
                       <input id="tts-auto-play" name="tts_auto_play" type="checkbox">
                       <span>Leggi automaticamente le risposte</span>
@@ -377,7 +406,7 @@
               <button class="save-button" id="settings-save" type="submit">Salva e collega</button>
             </div>
           </form>
-          <p class="privacy-note"><span>🔒</span> La chiave viene salvata in chiaro nel file locale con accesso limitato al tuo utente. I comandi approvati vengono eseguiti sul computer con i tuoi permessi. Non condividere il file di configurazione.</p>
+          <p class="privacy-note"><span><svg class="icon" aria-hidden="true"><use href="#i-lock"></use></svg></span> La chiave viene salvata in chiaro nel file locale con accesso limitato al tuo utente. I comandi approvati vengono eseguiti sul computer con i tuoi permessi. Non condividere il file di configurazione.</p>
         </div>
       </section>
     </main>
