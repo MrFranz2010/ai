@@ -2192,11 +2192,13 @@ async function refreshWeather() {
   try {
     const response = await fetch("/api/weather");
     const result = await response.json();
-    if (!response.ok || !result.configured) {
-      sidebarWeather.hidden = true;
+    if (result.configured && result.error) {
+      sidebarWeatherTemperature.textContent = "--°";
+      sidebarWeatherDetail.textContent = "Meteo non disponibile";
+      sidebarWeather.hidden = false;
       return;
     }
-    if (result.error) {
+    if (!response.ok || !result.configured) {
       sidebarWeather.hidden = true;
       return;
     }
@@ -2644,6 +2646,7 @@ settingsForm.addEventListener("submit", async (event) => {
       await Notification.requestPermission();
     }
     closeSettings();
+    refreshWeather();
     welcome.hidden = true;
     input.focus();
   } catch (error) {

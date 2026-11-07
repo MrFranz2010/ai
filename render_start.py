@@ -43,6 +43,11 @@ def config_from_state(saved):
             saved.get("notifications_enabled", False),
             base_url=saved.get("base_url", ""),
             models=saved.get("models", {}),
+            weather_enabled=saved.get("weather_enabled", False),
+            weather_city=saved.get("weather_city", ""),
+            alerts_enabled=saved.get("alerts_enabled", False),
+            alerts_disk_percent=saved.get("alerts_disk_percent", 90),
+            alerts_memory_percent=saved.get("alerts_memory_percent", 92),
         )
     except ValueError as error:
         raise RuntimeError(f"Supabase configuration is invalid: {error}") from error
