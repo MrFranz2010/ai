@@ -1374,17 +1374,20 @@ class TelegramCommandTests(unittest.TestCase):
         self.assertEqual(app.telegram_conversations.get("42", []), [])
 
     def test_compiti_lists_only_open_assignments_in_date_order(self):
+        today = app._local_now().date()
+        soon = today + datetime.timedelta(days=2)
+        later = today + datetime.timedelta(days=20)
         app.planner["tasks"][:] = [
             {
                 "id": "a" * 32,
                 "title": "Verifica di matematica",
-                "due_date": "2026-11-13",
+                "due_date": later.isoformat(),
                 "completed": False,
             },
             {
                 "id": "b" * 32,
                 "title": "Interrogazione di storia",
-                "due_date": "2026-11-09",
+                "due_date": soon.isoformat(),
                 "completed": False,
             },
             {
@@ -1396,14 +1399,16 @@ class TelegramCommandTests(unittest.TestCase):
             {
                 "id": "d" * 32,
                 "title": "Relazione consegnata",
-                "due_date": "2026-11-07",
+                "due_date": today.isoformat(),
                 "completed": True,
             },
         ]
         reply = self._send("/compiti")
         lines = reply.splitlines()
-        first = lines.index("• Interrogazione di storia — lunedì")
-        second = lines.index("• Verifica di matematica — 13 novembre")
+        soon_label = app.TELEGRAM_WEEKDAYS[soon.weekday()]
+        later_label = f"{later.day} {app.TELEGRAM_MONTHS[later.month - 1]}"
+        first = lines.index(f"• Interrogazione di storia — {soon_label}")
+        second = lines.index(f"• Verifica di matematica — {later_label}")
         self.assertLess(first, second)
         self.assertIn("Senza scadenza:", lines)
         self.assertIn("• Compito di latino", lines)
