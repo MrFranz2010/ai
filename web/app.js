@@ -232,28 +232,60 @@ function normalizeWakeText(value) {
     .trim();
 }
 
-function wakeVariants(phrase) {
-  const base = normalizeWakeText(phrase);
-  if (!base) return [];
-  const variants = new Set([base]);
-  if (base.length <= 6) {
-    const queue = [base];
-    while (queue.length) {
-      const candidate = queue.shift();
-      const nexts = [
-        candidate.replace(/k/g, "c"),
-        candidate.replace(/c/g, "k"),
-        candidate.replace(/ck/g, "k"),
-        `${candidate}k`,
-      ];
-      for (const next of nexts) {
-        if (next.length > 8 || variants.has(next)) continue;
-        variants.add(next);
-        queue.push(next);
+function wakeTokenKey(value) {
+  return normalizeWakeText(value)
+    .replace(/[ck]+$/g, "k")
+    .replace(/ck/g, "k")
+    .replace(/k{2,}/g, "k")
+    .replace(/ph/g, "f")
+    .replace(/([bcdfghjklmnpqstvwxz])\1+/g, "$1")
+    .replace(/^k(?=[bcdfghjklmnpqstvwxz])/, "");
+}
+
+function wakePhraseWords(phrase) {
+  return normalizeWakeText(phrase).split(" ").filter(Boolean);
+}
+
+function wakeWordMatches(spoken, phraseWord) {
+  const heard = wakeTokenKey(spoken);
+  const target = wakeTokenKey(phraseWord);
+  if (!heard || !target) return false;
+  if (heard === target) return true;
+  // A made-up word ending in a hard sound comes back with an extra final vowel
+  // or a different c/k spelling ("Nokk" -> "nokke", "nock", "knock").
+  if (/k$/.test(target)) {
+    return wakeTokenKey(heard.replace(/[aeiou]$/, "")) === target;
+  }
+  return false;
+}
+
+function wakeMatchedWords(text, phrase) {
+  const words = normalizeWakeText(text).split(" ").filter(Boolean);
+  const phraseWords = wakePhraseWords(phrase);
+  if (!words.length || !phraseWords.length) return -1;
+  for (let start = 0; start + phraseWords.length <= words.length; start += 1) {
+    let matched = true;
+    for (let offset = 0; offset < phraseWords.length; offset += 1) {
+      if (!wakeWordMatches(words[start + offset], phraseWords[offset])) {
+        matched = false;
+        break;
       }
     }
+    if (matched) return start + phraseWords.length;
   }
-  return [...variants].filter((item) => item.length >= 2);
+  return -1;
+}
+
+function wakeCommandFrom(text, phrase) {
+  const matchedWords = wakeMatchedWords(text, phrase);
+  if (matchedWords < 0) return null;
+  return String(text || "")
+    .trim()
+    .split(/\s+/)
+    .slice(matchedWords)
+    .join(" ")
+    .replace(/^[\s,.:;!?-]+/, "")
+    .trim();
 }
 
 function voiceAvailabilityProblem() {
@@ -1638,31 +1670,6 @@ async function transcribeRecording(blob) {
   return (result.text || "").trim();
 }
 
-function wakeCommandFrom(text) {
-  const phrase = wakePhraseInput.value.trim() || "Nok";
-  const normalized = normalizeWakeText(text);
-  for (const variant of wakeVariants(phrase)) {
-    const escaped = variant.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const match = new RegExp(
-      `(^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`,
-      "iu",
-    ).exec(normalized);
-    if (!match) continue;
-    const matchedWords = normalized
-      .slice(0, match.index + match[0].length)
-      .split(" ")
-      .filter(Boolean).length;
-    return text
-      .trim()
-      .split(/\s+/)
-      .slice(matchedWords)
-      .join(" ")
-      .replace(/^[\s,.:;!?-]+/, "")
-      .trim();
-  }
-  return null;
-}
-
 async function handleRecording(blob, mode) {
   if (mode === "wake" && !wakeListeningRequested) return;
   setVoiceStatus("Trascrivo…");
@@ -1677,7 +1684,7 @@ async function handleRecording(blob, mode) {
   }
   if (mode === "wake") {
     const phrase = wakePhraseInput.value.trim() || "Nok";
-    const command = wakeCommandFrom(text);
+    const command = wakeCommandFrom(text, phrase);
     if (command === null) {
       setVoiceStatus(`In ascolto di “${phrase}”…`);
     } else if (command) {
@@ -1829,36 +1836,16 @@ function startRecognition(mode) {
       const transcript = result[0].transcript.trim();
       if (!wakeTriggered) {
         const phrase = wakePhraseInput.value.trim() || "Nok";
-        const escaped = wakeVariants(phrase)
-          .map((item) => item.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-          .join("|");
-        const wakePattern = new RegExp(
-          `(^|[^\\p{L}\\p{N}])(${escaped})(?=$|[^\\p{L}\\p{N}])`,
-          "iu",
-        );
-        const normalized = normalizeWakeText(transcript);
-        const match = wakePattern.exec(normalized);
-        if (!match) continue;
-        wakeTriggered = true;
-        const matchedWords = normalized
-          .slice(0, match.index + match[0].length)
-          .split(" ")
-          .filter(Boolean).length;
-        const command = transcript
-          .trim()
-          .split(/\s+/)
-          .slice(matchedWords)
-          .join(" ")
-          .replace(/^[\s,.:;!?-]+/, "")
-          .trim();
+        const command = wakeCommandFrom(transcript, phrase);
+        if (command === null) continue;
         if (command) {
           appendTranscript(command);
-          wakeTriggered = false;
           setVoiceStatus(
             `Testo acquisito. Wake word “${phrase}” ancora attiva; premi Invio per inviare.`,
           );
           continue;
         }
+        wakeTriggered = true;
         setVoiceStatus("Wake word riconosciuta. Parla ora.");
         continue;
       }
