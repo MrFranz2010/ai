@@ -329,6 +329,8 @@ function activateSettingsTab(name = "", { focus = false } = {}) {
     if (panel) panel.hidden = !selected;
   }
   if (settingsPanels) settingsPanels.scrollTop = 0;
+  // The tab strip can be taller than its column: keep the chosen tab in sight.
+  target.scrollIntoView({ block: "nearest", inline: "nearest" });
   if (focus) {
     const panel = document.getElementById(target.getAttribute("aria-controls"));
     const firstField = panel?.querySelector("input:not([type=hidden]), select, textarea");
