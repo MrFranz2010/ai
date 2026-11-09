@@ -336,6 +336,33 @@ class AppRouteTests(unittest.TestCase):
             time.sleep(0.01)
         self.fail("Timeout in attesa del completamento dell'attività")
 
+    def test_serves_the_kiosk_hub_page(self):
+        assets = {}
+        for path, content_type in (
+            ("/hub", "text/html"),
+            ("/hub.js", "text/javascript"),
+            ("/hub.css", "text/css"),
+        ):
+            with self.subTest(path=path), urlopen(f"{self.base_url}{path}") as response:
+                self.assertEqual(response.status, 200)
+                self.assertIn(content_type, response.headers["Content-Type"])
+                assets[path] = response.read().decode("utf-8")
+                self.assertTrue(assets[path])
+        self.assertIn('id="ptt"', assets["/hub"])
+        self.assertIn('id="rail-left"', assets["/hub"])
+        self.assertIn('id="rail-right"', assets["/hub"])
+        self.assertIn('id="widget-list"', assets["/hub"])
+        self.assertIn("/hub.js", assets["/hub"])
+        self.assertIn("/hub.css", assets["/hub"])
+        self.assertIn("function mountWidget", assets["/hub.js"])
+        self.assertIn("function startRecording", assets["/hub.js"])
+        self.assertIn("/api/transcribe", assets["/hub.js"])
+        self.assertIn("/api/jobs/", assets["/hub.js"])
+        self.assertIn("localStorage", assets["/hub.js"])
+        self.assertIn("wakeLock", assets["/hub.js"])
+        self.assertIn(".ptt", assets["/hub.css"])
+        self.assertIn("grid-template-columns", assets["/hub.css"])
+
     def test_serves_page_and_static_assets(self):
         assets = {}
         for path, content_type in (

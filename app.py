@@ -5888,6 +5888,10 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         static_files = {
             "/": (APP_DIR / "web" / "index.html", "text/html; charset=utf-8"),
+            "/hub": (APP_DIR / "web" / "hub.html", "text/html; charset=utf-8"),
+            "/hub/": (APP_DIR / "web" / "hub.html", "text/html; charset=utf-8"),
+            "/hub.js": (APP_DIR / "web" / "hub.js", "text/javascript; charset=utf-8"),
+            "/hub.css": (APP_DIR / "web" / "hub.css", "text/css; charset=utf-8"),
             "/app.js": (APP_DIR / "web" / "app.js", "text/javascript; charset=utf-8"),
             "/style.css": (APP_DIR / "web" / "style.css", "text/css; charset=utf-8"),
         }
