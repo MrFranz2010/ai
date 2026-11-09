@@ -60,6 +60,7 @@ from reminders import (
     build_due_soon_reminders as _build_due_soon_reminders,
     parse_reminder as _parse_reminder,
 )
+from search import make_document, rank_documents, tokens as search_tokens
 from api_access import (
     MAX_API_KEYS,
     RateLimiter,
@@ -4777,6 +4778,47 @@ def _telegram_reminder_now():
     return _local_now(TELEGRAM_REMINDER_TIMEZONE)
 
 
+search_extra_provider = None
+
+
+def collect_search_documents():
+    """Everything the in-app search can look at, gathered once per query."""
+    documents = []
+    with config_lock:
+        events = [dict(item) for item in planner["events"]]
+        tasks = [dict(item) for item in planner["tasks"]]
+        procedures = [dict(item) for item in workflows]
+    for kind, items in (("event", events), ("task", tasks)):
+        for item in items:
+            documents.append(make_document(
+                kind,
+                item.get("id"),
+                item.get("title", ""),
+                item.get("description", "") or "",
+                {"starts_at": item.get("starts_at"), "due_date": item.get("due_date")},
+            ))
+    for item in procedures:
+        documents.append(make_document(
+            "workflow", item.get("id"), item.get("name", ""), item.get("prompt", "")
+        ))
+    loader = user_memory_loader
+    if callable(loader):
+        try:
+            for index, fact in enumerate(loader()):
+                documents.append(make_document(
+                    "nota", f"memory-{index}", _strip_memory_file_prefix(fact), fact
+                ))
+        except Exception:  # noqa: BLE001 - search must never fail on state
+            pass
+    provider = search_extra_provider
+    if callable(provider):
+        try:
+            documents.extend(provider())
+        except Exception:  # noqa: BLE001 - search must never fail on state
+            pass
+    return documents
+
+
 def _telegram_memory_facts():
     loader = user_memory_loader
     if not callable(loader):
@@ -5675,6 +5717,9 @@ class AppHandler(BaseHTTPRequestHandler):
         if self.path.startswith(API_PREFIX):
             self._handle_api_get()
             return
+        if self.path.split("?", 1)[0] == "/api/search":
+            self._send_search_results()
+            return
         if self.path == "/api/api-keys":
             with api_lock:
                 snapshot = _public_api_keys(api_config)
@@ -5915,6 +5960,23 @@ class AppHandler(BaseHTTPRequestHandler):
             raise ValueError("Il file deve essere più piccolo di 4 MB.")
         extracted = extract_document_text(filename, content)
         self._send_json(200, {"text": extracted})
+
+    def _send_search_results(self):
+        query = (parse_qs(urlsplit(self.path).query).get("q") or [""])[0]
+        query = " ".join(query.split()) if isinstance(query, str) else ""
+        if not 2 <= len(query) <= 120:
+            self._send_json(400, {"error": "Scrivi da 2 a 120 caratteri da cercare."})
+            return
+        if not search_tokens(query):
+            self._send_json(400, {"error": "Scrivi almeno una parola da cercare."})
+            return
+        try:
+            results = rank_documents(query, collect_search_documents())
+        except Exception as error:  # noqa: BLE001 - the browser expects JSON
+            self.log_error("Ricerca non riuscita: %r", error)
+            self._send_json(500, {"error": "Ricerca non disponibile. Riprova."})
+            return
+        self._send_json(200, {"query": query, "results": results})
 
     def _send_weather(self):
         with config_lock:

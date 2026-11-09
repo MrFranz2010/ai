@@ -640,10 +640,15 @@ function dateKey(date) {
   return `${year}-${month}-${day}`;
 }
 
+let launcherNotes = [];
+let launcherNotesTimer = null;
+let launcherNotesRequest = 0;
+
 function openLauncher() {
   launcherOverlay.hidden = false;
   launcherInput.value = "";
   launcherSelection = 0;
+  launcherNotes = [];
   renderLauncherResults();
   launcherInput.focus();
 }
@@ -724,13 +729,66 @@ function launcherScore(item, terms) {
   return terms.filter((term) => !title.includes(term)).length;
 }
 
+const launcherNoteKinds = {
+  task: "Attività",
+  event: "Evento",
+  workflow: "Procedura",
+  nota: "Nota",
+  chat: "Conversazione",
+};
+
+function launcherNoteItem(note) {
+  const label = launcherNoteKinds[note.kind] || "Appunto";
+  const hint = note.snippet || note.text || "";
+  return {
+    title: note.title,
+    hint: `${label} · ${hint}`,
+    icon: "memory",
+    run: () => insertNoteInComposer(note),
+  };
+}
+
+function insertNoteInComposer(note) {
+  const body = (note.text || note.snippet || "").trim();
+  const previous = input.value.trim();
+  input.value = `${previous ? `${previous}\n\n` : ""}${note.title}${body ? `\n${body}` : ""}`;
+  resizeComposer();
+  welcome.hidden = true;
+  openApplicationWindow("chat");
+  input.focus();
+}
+
+async function refreshLauncherNotes() {
+  const query = launcherInput.value.trim();
+  if (query.length < 2) {
+    launcherNotes = [];
+    renderLauncherResults();
+    return;
+  }
+  const request = ++launcherNotesRequest;
+  try {
+    const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+    const result = await response.json();
+    if (request !== launcherNotesRequest) return;
+    launcherNotes = response.ok && Array.isArray(result.results) ? result.results : [];
+  } catch {
+    if (request !== launcherNotesRequest) return;
+    launcherNotes = [];
+  }
+  renderLauncherResults();
+}
+
 function renderLauncherResults() {
   const query = launcherInput.value.trim().toLocaleLowerCase("it");
   const terms = query.split(/\s+/).filter(Boolean);
-  visibleLauncherItems = launcherCatalog()
+  const commandItems = launcherCatalog()
     .filter((item) => launcherMatches(item, terms))
     .sort((left, right) => launcherScore(left, terms) - launcherScore(right, terms))
     .slice(0, 12);
+  visibleLauncherItems = [
+    ...commandItems,
+    ...launcherNotes.map(launcherNoteItem),
+  ].slice(0, 16);
   launcherSelection = Math.min(launcherSelection, Math.max(0, visibleLauncherItems.length - 1));
   launcherResults.replaceChildren();
   visibleLauncherItems.forEach((item, index) => {
@@ -2527,6 +2585,10 @@ document.querySelector("#launcher-open").addEventListener("click", openLauncher)
 launcherInput.addEventListener("input", () => {
   launcherSelection = 0;
   renderLauncherResults();
+  window.clearTimeout(launcherNotesTimer);
+  launcherNotesTimer = window.setTimeout(() => {
+    void refreshLauncherNotes();
+  }, 220);
 });
 launcherInput.addEventListener("keydown", handleLauncherKeys);
 launcherOverlay.addEventListener("click", (event) => {
