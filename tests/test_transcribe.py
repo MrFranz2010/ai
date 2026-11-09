@@ -147,6 +147,59 @@ class TranscriptionTests(unittest.TestCase):
                     provider_call.call_args.args[0].data,
                 )
 
+    def test_a_missing_audio_route_falls_back_to_a_saved_provider(self):
+        with app.config_lock:
+            app.config.update({
+                "provider": "custom",
+                "model": "gpt-4o-mini",
+                "base_url": "https://gateway.example/v1",
+                "api_key": "sk-gateway",
+                "api_keys": {"openai": "sk-openai"},
+            })
+        missing_route = HTTPError(
+            "https://gateway.example/v1/audio/transcriptions", 404,
+            "Not Found", {}, io.BytesIO(b'{"error":"route not found"}'),
+        )
+        with patch(
+            "app.urlopen",
+            side_effect=[missing_route, FakeTranscriptionResponse({"text": "Ciao"})],
+        ) as provider_call:
+            status, payload = self.post({
+                "audio": base64.b64encode(b"RIFF....WAVE").decode("ascii"),
+                "mime_type": "audio/webm",
+            })
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["text"], "Ciao")
+        self.assertEqual(provider_call.call_count, 2)
+        fallback = provider_call.call_args_list[1].args[0]
+        self.assertEqual(
+            fallback.full_url, "https://api.openai.com/v1/audio/transcriptions",
+        )
+        self.assertIn(b"whisper-1", fallback.data)
+        self.assertIn(b"voce.webm", fallback.data)
+
+    def test_a_missing_route_without_fallback_names_the_endpoint(self):
+        with app.config_lock:
+            app.config.update({
+                "provider": "custom",
+                "model": "gpt-4o-mini",
+                "base_url": "https://gateway.example/v1",
+                "api_key": "sk-gateway",
+                "api_keys": {},
+            })
+        missing_route = HTTPError(
+            "https://gateway.example/v1/audio/transcriptions", 404,
+            "Not Found", {}, io.BytesIO(b"route not found"),
+        )
+        with patch("app.urlopen", side_effect=missing_route):
+            status, payload = self.post({
+                "audio": base64.b64encode(b"RIFF....WAVE").decode("ascii"),
+                "mime_type": "audio/wav",
+            })
+        self.assertEqual(status, 400)
+        self.assertIn("HTTP 404", payload["error"])
+        self.assertIn("gateway.example/v1/audio/transcriptions", payload["error"])
+
     def test_a_refusal_reports_the_provider_status(self):
         error = HTTPError(
             "https://example.test/audio/transcriptions", 400,
