@@ -225,6 +225,34 @@ def save_memories(memories):
     return validated
 
 
+def validate_chat_artifacts(artifacts):
+    if not isinstance(artifacts, list) or len(artifacts) > 10:
+        raise ValueError("Allegati conversazione non validi.")
+    safe = []
+    for artifact in artifacts:
+        if (
+            not isinstance(artifact, dict)
+            or not isinstance(artifact.get("filename"), str)
+            or not artifact["filename"]
+            or len(artifact["filename"]) > 200
+            or not isinstance(artifact.get("mime_type"), str)
+            or len(artifact["mime_type"]) > 100
+            or not isinstance(artifact.get("bytes"), int)
+            or isinstance(artifact.get("bytes"), bool)
+            or artifact["bytes"] < 0
+            or not isinstance(artifact.get("url"), str)
+            or not re.fullmatch(r"/api/exports/[a-f0-9]{32}", artifact["url"])
+        ):
+            raise ValueError("Allegato conversazione non valido.")
+        safe.append({
+            "filename": artifact["filename"],
+            "mime_type": artifact["mime_type"],
+            "bytes": artifact["bytes"],
+            "url": artifact["url"],
+        })
+    return safe
+
+
 def validate_chats(chats):
     if not isinstance(chats, list) or len(chats) > 100:
         raise ValueError("Puoi conservare al massimo 100 conversazioni.")
@@ -256,7 +284,11 @@ def validate_chats(chats):
                 or len(message["content"]) > 12000
             ):
                 raise ValueError("Messaggio conversazione non valido.")
-            safe_messages.append({"role": message["role"], "content": message["content"]})
+            safe_message = {"role": message["role"], "content": message["content"]}
+            artifacts = message.get("artifacts")
+            if artifacts is not None:
+                safe_message["artifacts"] = validate_chat_artifacts(artifacts)
+            safe_messages.append(safe_message)
         seen_ids.add(chat_id)
         validated.append({
             "id": chat_id, "title": title, "updated_at": updated_at,

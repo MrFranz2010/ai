@@ -548,8 +548,9 @@ APP_TOOLS = [
     {
         "name": "export_file",
         "description": (
-            "Crea un file di testo con il contenuto indicato e lo invia "
-            "all'utente su Telegram come documento. Usalo quando l'utente "
+            "Crea un file di testo con il contenuto indicato, lo allega alla "
+            "chat web e, se Telegram è collegato, lo invia anche lì come "
+            "documento. Usalo quando l'utente "
             "chiede di esportare, scaricare o ricevere un file: un elenco, un "
             "riassunto, una tabella, un piano, un itinerario. Scrivi nel "
             "parametro content il contenuto completo del file, non un "
@@ -2360,21 +2361,58 @@ def _telegram_send_document(token, chat_id, filename, content, mime_type, captio
     _telegram_api_result(request, 30)
 
 
-def export_file_to_telegram(arguments):
+exports = {}
+exports_lock = threading.Lock()
+EXPORT_TTL_SECONDS = 24 * 60 * 60
+MAX_STORED_EXPORTS = 100
+
+
+def store_export(filename, content, mime_type):
+    """Keep an exported file downloadable from the web chat for a day."""
+    export_id = uuid.uuid4().hex
+    now = time.time()
+    with exports_lock:
+        for stale_id, item in list(exports.items()):
+            if now - item["created_at"] > EXPORT_TTL_SECONDS:
+                exports.pop(stale_id, None)
+        while len(exports) >= MAX_STORED_EXPORTS:
+            oldest_id = min(
+                exports, key=lambda key: exports[key]["created_at"],
+            )
+            exports.pop(oldest_id, None)
+        exports[export_id] = {
+            "filename": filename,
+            "mime_type": mime_type,
+            "content": content,
+            "created_at": now,
+        }
+    return {
+        "id": export_id,
+        "filename": filename,
+        "mime_type": mime_type,
+        "bytes": len(content),
+        "url": f"/api/exports/{export_id}",
+    }
+
+
+def read_export(export_id):
+    with exports_lock:
+        artifact = exports.get(export_id)
+        if artifact is None:
+            return None
+        if time.time() - artifact["created_at"] > EXPORT_TTL_SECONDS:
+            exports.pop(export_id, None)
+            return None
+        return artifact
+
+
+def export_file(arguments):
     content = arguments.get("content")
     if not isinstance(content, str) or not content.strip():
-        raise ValueError("Il file da inviare è vuoto.")
+        raise ValueError("Il file da esportare è vuoto.")
     if len(content) > MAX_EXPORT_CHARS:
         raise ValueError(
             "Il file è troppo grande: riduci il contenuto a 200.000 caratteri."
-        )
-    with telegram_lock:
-        token = telegram_config["token"]
-        chats = list(telegram_config["authorized_chats"])
-    if not token or not chats:
-        raise ValueError(
-            "Telegram non è collegato: collega il bot dalle impostazioni di "
-            "NOKK per ricevere il file."
         )
     filename = export_filename(arguments.get("filename"))
     mime_type = EXPORT_MIME_TYPES[os.path.splitext(filename)[1]]
@@ -2385,15 +2423,27 @@ def export_file_to_telegram(arguments):
         else ""
     )
     payload = content.encode("utf-8")
-    for chat_id in chats:
-        _telegram_send_document(
-            token, int(chat_id), filename, payload, mime_type, caption,
-        )
+    artifact = store_export(filename, payload, mime_type)
+    with telegram_lock:
+        token = telegram_config["token"]
+        chats = list(telegram_config["authorized_chats"])
+    telegram = "not_connected"
+    if token and chats:
+        try:
+            for chat_id in chats:
+                _telegram_send_document(
+                    token, int(chat_id), filename, payload, mime_type, caption,
+                )
+            telegram = "sent"
+        except (RuntimeError, OSError, ValueError) as error:
+            telegram = f"failed: {error}"
     return {
         "ok": True,
         "filename": filename,
         "bytes": len(payload),
-        "delivered_to": len(chats),
+        "download_url": artifact["url"],
+        "telegram": telegram,
+        "artifact": artifact,
     }
 
 
@@ -3800,6 +3850,16 @@ def run_chat_job(job_id, messages, active_config, mode=None):
                 ):
                     try:
                         app_result = execute_app_tool(call["name"], arguments)
+                        if (
+                            isinstance(app_result, dict)
+                            and isinstance(app_result.get("artifact"), dict)
+                        ):
+                            with chat_jobs_lock:
+                                job = chat_jobs.get(job_id)
+                                if job is not None:
+                                    job.setdefault("artifacts", []).append(
+                                        app_result["artifact"]
+                                    )
                         tool_result = {"exit_code": 0, "output": json.dumps(
                             app_result, ensure_ascii=False,
                         ), "executed": True}
@@ -5553,7 +5613,7 @@ def execute_app_tool(name, arguments):
             "workflow": next(item for item in updated if item["id"] == saved_id),
         }
     if name == "export_file":
-        return export_file_to_telegram(arguments)
+        return export_file(arguments)
     raise ValueError("Strumento NOKK non supportato.")
 
 
@@ -5776,6 +5836,27 @@ class AppHandler(BaseHTTPRequestHandler):
                 "nokk-calendario.ics",
             )
             return
+        export_match = re.fullmatch(r"/api/exports/([a-f0-9]{32})", self.path)
+        if export_match:
+            artifact = read_export(export_match.group(1))
+            if artifact is None:
+                self._send_json(404, {"error": "File non disponibile o scaduto."})
+                return
+            content_type = artifact["mime_type"]
+            if content_type.startswith("text/"):
+                content_type = f"{content_type}; charset=utf-8"
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(artifact["content"])))
+            self.send_header(
+                "Content-Disposition",
+                f'attachment; filename="{artifact["filename"]}"',
+            )
+            self.send_header("Cache-Control", "private, no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(artifact["content"])
+            return
         job_match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})", self.path)
         if job_match:
             with chat_jobs_lock:
@@ -5799,7 +5880,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     key: job[key]
                     for key in (
                         "status", "action", "reply", "tool_events", "error",
-                        "details", "hint",
+                        "details", "hint", "artifacts",
                     )
                     if key in job
                 }
@@ -6333,7 +6414,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     key: job[key]
                     for key in (
                         "status", "action", "reply", "tool_events", "error",
-                        "details", "hint",
+                        "details", "hint", "artifacts",
                     )
                     if key in job
                 }

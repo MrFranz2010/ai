@@ -2525,6 +2525,26 @@ function appendAttachmentPreviews(parent, attachments) {
   parent.append(group);
 }
 
+function appendExportLinks(parent, artifacts) {
+  if (!artifacts?.length) return;
+  const group = document.createElement("div");
+  group.className = "message-attachments";
+  for (const artifact of artifacts) {
+    const link = document.createElement("a");
+    link.className = "message-attachment";
+    link.href = artifact.url;
+    link.download = artifact.filename || "";
+    link.title = `Scarica ${artifact.filename || "il file esportato"}`;
+    const icon = document.createElement("span");
+    icon.append(iconElement("file"));
+    const name = document.createElement("span");
+    name.textContent = artifact.filename || "File esportato";
+    link.append(icon, name);
+    group.append(link);
+  }
+  parent.append(group);
+}
+
 async function copyTextToClipboard(text) {
   try {
     await navigator.clipboard.writeText(text);
@@ -2593,6 +2613,7 @@ function addMessage(role, text, extraClass = "", attachments = []) {
     speakButton.addEventListener("click", () => speakText(text));
     body.append(speakButton);
     addCopyButton(body, text);
+    appendExportLinks(body, attachments);
   } else {
     const paragraph = document.createElement("p");
     paragraph.textContent = text;
@@ -2750,7 +2771,7 @@ async function waitForChatJob(jobId) {
     if (job.status === "complete") {
       finishApprovalCards(jobId);
       if (toolEvents.length > 0) await refreshNokkData();
-      return job.reply;
+      return job;
     }
     if (Date.now() > deadline) {
       finishApprovalCards(jobId);
@@ -3547,10 +3568,12 @@ async function sendChatMessage(messageText, attachments = [], mode = null) {
     });
     const result = await readJsonResponse(response, "La richiesta non è riuscita.");
     if (!response.ok) throw new Error(result.error || "La richiesta non è riuscita.");
-    const reply = await waitForChatJob(result.job_id);
+    const job = await waitForChatJob(result.job_id);
+    const reply = job.reply || "";
+    const artifacts = Array.isArray(job.artifacts) ? job.artifacts : [];
     pending.remove();
-    messages.push({ role: "assistant", content: reply });
-    addMessage("assistant", reply);
+    messages.push({ role: "assistant", content: reply, artifacts });
+    addMessage("assistant", reply, "", artifacts);
     const firstUserMessage = messages.find((message) => message.role === "user");
     if (firstUserMessage && isGenericChatTitle(pageTitle.textContent)) {
       pageTitle.textContent = summarizeChatTitle(firstUserMessage.content, reply);
