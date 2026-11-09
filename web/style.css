@@ -585,6 +585,7 @@ body { background: var(--page); }
 }
 .voice-button:hover:not(:disabled), .speak-message:hover { background: #f1f3f5; }
 .voice-button.voice-active { color: #fff; background: #b42318; border-color: #b42318; }
+.voice-button.voice-muted { color: #8a9299; background: #f0f2f4; border-color: #dfe3e6; }
 .voice-button:disabled { opacity: .45; cursor: not-allowed; }
 .speak-message { min-width: 28px; min-height: 27px; margin: 8px 0 0 3px; padding: 0 6px; vertical-align: middle; font-size: 11px; }
 .voice-settings {
@@ -796,6 +797,7 @@ body { background: var(--page); }
 :root[data-theme="dark"] .attach-button:hover:not(:disabled),
 :root[data-theme="dark"] .theme-button:hover { background: #17343d; }
 :root[data-theme="dark"] .voice-button.voice-active { color: #fff; background: #b42318; border-color: #b42318; }
+:root[data-theme="dark"] .voice-button.voice-muted { color: #7d979e; background: #0a1a21; border-color: #223c45; }
 :root[data-theme="dark"] .voice-settings-title { color: #d5e6e6; }
 :root[data-theme="dark"] .voice-privacy { color: #9ab2b8; }
 

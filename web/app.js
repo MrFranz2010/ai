@@ -203,6 +203,7 @@ const attachButton = document.querySelector("#attach-button");
 const attachmentList = document.querySelector("#attachment-list");
 const voiceStatus = document.querySelector("#voice-status");
 const micToggle = document.querySelector("#mic-toggle");
+const muteToggle = document.querySelector("#mute-toggle");
 const wakeToggle = document.querySelector("#wake-toggle");
 const SpeechRecognitionAPI = window.SpeechRecognition
   || window.webkitSpeechRecognition
@@ -214,6 +215,8 @@ let workflows = [];
 let editingWorkflowId = null;
 let voiceRecognition = null;
 let voiceMode = null;
+let aiMuted = false;
+const AI_MUTED_KEY = "nokk-ai-muted";
 const voiceInIframe = (() => {
   try {
     return window.self !== window.top;
@@ -1533,6 +1536,27 @@ function setVoiceStatus(text) {
   voiceStatus.textContent = text;
 }
 
+function setAiMuted(muted, announce = true) {
+  aiMuted = muted;
+  muteToggle.setAttribute("aria-pressed", String(muted));
+  muteToggle.classList.toggle("voice-muted", muted);
+  const label = muted ? "Riattiva la voce AI" : "Zittisci l'AI";
+  muteToggle.setAttribute("aria-label", label);
+  muteToggle.title = label;
+  setIcon(muteToggle, muted ? "volume-off" : "volume");
+  if (muted && "speechSynthesis" in window) window.speechSynthesis.cancel();
+  try {
+    localStorage.setItem(AI_MUTED_KEY, muted ? "1" : "0");
+  } catch (error) {
+    console.warn("Preferenza voce non salvata:", error);
+  }
+  if (announce) {
+    setVoiceStatus(muted
+      ? "Voce AI silenziata: le risposte restano solo in chat."
+      : "Voce AI riattivata.");
+  }
+}
+
 function setTheme(theme) {
   const isDark = theme !== "light";
   document.documentElement.dataset.theme = isDark ? "dark" : "light";
@@ -1997,6 +2021,7 @@ function toggleWakeWord() {
 }
 
 function speakText(text) {
+  if (aiMuted) return;
   if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
     setVoiceStatus("Sintesi vocale non supportata da questo browser.");
     return;
@@ -2610,7 +2635,10 @@ function addMessage(role, text, extraClass = "", attachments = []) {
     speakButton.setAttribute("aria-label", "Leggi questa risposta");
     speakButton.title = "Leggi questa risposta";
     speakButton.append(iconElement("volume"));
-    speakButton.addEventListener("click", () => speakText(text));
+    speakButton.addEventListener("click", () => {
+      if (aiMuted) setAiMuted(false);
+      speakText(text);
+    });
     body.append(speakButton);
     addCopyButton(body, text);
     appendExportLinks(body, attachments);
@@ -3007,6 +3035,13 @@ try {
 } catch (error) {
   console.warn("Preferenza tema non disponibile:", error);
   setTheme("dark");
+}
+muteToggle.addEventListener("click", () => setAiMuted(!aiMuted));
+try {
+  setAiMuted(localStorage.getItem(AI_MUTED_KEY) === "1", false);
+} catch (error) {
+  console.warn("Preferenza voce non disponibile:", error);
+  setAiMuted(false, false);
 }
 attachButton.addEventListener("click", () => fileInput.click());
 fileInput.addEventListener("change", () => addFiles(fileInput.files));
