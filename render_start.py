@@ -39,6 +39,8 @@ def config_from_state(saved):
             saved.get("terminal_enabled", False),
             saved.get("approval_mode", "manual"), workspace,
             saved.get("system_prompt", ""), saved.get("wake_phrase", "Nok"),
+            saved.get("transcribe_model", ""),
+            saved.get("wake_window_seconds", app.WAKE_WINDOW_DEFAULT),
             saved.get("tts_auto_play", False),
             saved.get("api_keys", {}),
             saved.get("notifications_enabled", False),

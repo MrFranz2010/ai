@@ -181,6 +181,8 @@ const workflowScheduleEnabled = document.querySelector("#workflow-schedule-enabl
 const workflowScheduleTime = document.querySelector("#workflow-schedule-time");
 const workflowDayInputs = [...document.querySelectorAll(".workflow-day input")];
 const wakePhraseInput = document.querySelector("#wake-phrase");
+const transcribeModelInput = document.querySelector("#transcribe-model");
+const wakeWindowInput = document.querySelector("#wake-window");
 const ttsAutoPlayInput = document.querySelector("#tts-auto-play");
 const notificationsInput = document.querySelector("#notifications-enabled");
 const alertsEnabledInput = document.querySelector("#alerts-enabled");
@@ -1606,6 +1608,12 @@ function updateVoiceButtons() {
   }
 }
 
+function wakeWindowSeconds() {
+  const value = Number(wakeWindowInput ? wakeWindowInput.value : 5);
+  if (!Number.isFinite(value)) return 5;
+  return Math.min(15, Math.max(2, Math.round(value)));
+}
+
 function preferredAudioMimeType() {
   if (!MediaRecorderAPI || typeof MediaRecorderAPI.isTypeSupported !== "function") {
     return "";
@@ -1724,13 +1732,13 @@ async function startAudioRecording(mode) {
   recorder.start();
   setVoiceStatus(
     mode === "wake"
-      ? `In ascolto di “${wakePhraseInput.value.trim() || "Nok"}”…`
+      ? `In ascolto di “${wakePhraseInput.value.trim() || "Nok"}” ogni ${wakeWindowSeconds()} s…`
       : "Sto registrando: tocca il microfono per fermarmi.",
   );
   if (mode === "wake") {
     window.setTimeout(() => {
       if (audioRecorder === recorder && recorder.state === "recording") recorder.stop();
-    }, 5000);
+    }, wakeWindowSeconds() * 1000);
   }
 }
 
@@ -2855,6 +2863,8 @@ async function loadConfig() {
   configuredProviders = new Set(saved.configured_providers || []);
   if (saved.configured && saved.provider) configuredProviders.add(saved.provider);
   wakePhraseInput.value = saved.wake_phrase || "Nok";
+  transcribeModelInput.value = saved.transcribe_model || "";
+  wakeWindowInput.value = saved.wake_window_seconds || 5;
   ttsAutoPlayInput.checked = saved.tts_auto_play === true;
   notificationsInput.checked = saved.notifications_enabled === true;
   alertsEnabledInput.checked = saved.alerts_enabled === true;
@@ -3291,6 +3301,8 @@ settingsForm.addEventListener("submit", async (event) => {
         workspace: workspaceInput.value.trim(),
         system_prompt: systemPromptInput.value,
         wake_phrase: wakePhraseInput.value.trim(),
+        transcribe_model: transcribeModelInput.value.trim(),
+        wake_window_seconds: wakeWindowSeconds(),
         tts_auto_play: ttsAutoPlayInput.checked,
         notifications_enabled: notificationsInput.checked,
         alerts_enabled: alertsEnabledInput.checked,

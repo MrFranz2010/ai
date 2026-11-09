@@ -112,6 +112,10 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 MAX_SYSTEM_PROMPT_LENGTH = 10000
 MAX_WAKE_PHRASE_LENGTH = 40
+MAX_TRANSCRIBE_MODEL_LENGTH = 120
+WAKE_WINDOW_MIN = 2
+WAKE_WINDOW_MAX = 15
+WAKE_WINDOW_DEFAULT = 5
 MAX_WORKFLOWS = 30
 MAX_WORKFLOW_NAME_LENGTH = 80
 MAX_WORKFLOW_PROMPT_LENGTH = 4000
@@ -1854,6 +1858,8 @@ def validate_config(
     workspace=None,
     system_prompt="",
     wake_phrase="Nok",
+    transcribe_model="",
+    wake_window_seconds=WAKE_WINDOW_DEFAULT,
     tts_auto_play=False,
     api_keys=None,
     notifications_enabled=False,
@@ -1905,6 +1911,25 @@ def validate_config(
         raise ValueError(
             f"La wake word deve avere da 1 a {MAX_WAKE_PHRASE_LENGTH} caratteri."
         )
+    transcribe_model = (
+        transcribe_model.strip() if isinstance(transcribe_model, str) else None
+    )
+    if (
+        transcribe_model is None
+        or len(transcribe_model) > MAX_TRANSCRIBE_MODEL_LENGTH
+        or (transcribe_model and not MODEL_PATTERN.fullmatch(transcribe_model))
+    ):
+        raise ValueError("Il modello di trascrizione non è valido.")
+    if (
+        not isinstance(wake_window_seconds, int)
+        or isinstance(wake_window_seconds, bool)
+        or not WAKE_WINDOW_MIN <= wake_window_seconds <= WAKE_WINDOW_MAX
+    ):
+        raise ValueError(
+            "La finestra della wake word deve stare tra "
+            f"{WAKE_WINDOW_MIN} e {WAKE_WINDOW_MAX} secondi."
+        )
+
     if not isinstance(tts_auto_play, bool):
         raise ValueError("Impostazione di lettura vocale non valida.")
     if not isinstance(notifications_enabled, bool):
@@ -1950,6 +1975,8 @@ def validate_config(
         "workspace": str(workspace_path.resolve()),
         "system_prompt": system_prompt.strip(),
         "wake_phrase": wake_phrase.strip(),
+        "transcribe_model": transcribe_model,
+        "wake_window_seconds": wake_window_seconds,
         "tts_auto_play": tts_auto_play,
         "notifications_enabled": notifications_enabled,
         "weather_enabled": weather_enabled,
@@ -1973,6 +2000,8 @@ def default_config():
         "workspace": str(APP_DIR),
         "system_prompt": "",
         "wake_phrase": "Nok",
+        "transcribe_model": "",
+        "wake_window_seconds": WAKE_WINDOW_DEFAULT,
         "tts_auto_play": False,
         "notifications_enabled": False,
         "weather_enabled": False,
@@ -2007,6 +2036,8 @@ def load_config_file():
             saved.get("workspace", str(APP_DIR)),
             saved.get("system_prompt", ""),
             saved.get("wake_phrase", "Nok"),
+            saved.get("transcribe_model", ""),
+            saved.get("wake_window_seconds", WAKE_WINDOW_DEFAULT),
             saved.get("tts_auto_play", False),
             saved.get("api_keys", {}),
             saved.get("notifications_enabled", False),
@@ -2846,7 +2877,12 @@ def transcribe_audio(active_config, audio, mime_type):
         )
     if not isinstance(api_key, str) or not api_key:
         raise ValueError("Configura una chiave API per trascrivere la voce.")
-    model = TRANSCRIBE_MODELS.get(provider, "whisper-1")
+    configured_model = active_config.get("transcribe_model")
+    model = (
+        configured_model.strip()
+        if isinstance(configured_model, str) and configured_model.strip()
+        else TRANSCRIBE_MODELS.get(provider, "whisper-1")
+    )
     extension = mime_type in {"audio/mp4", "audio/m4a", "audio/x-m4a"} and "m4a" or "webm"
     body, content_type = _multipart_audio_body(
         {"model": model, "language": "it"},
@@ -5221,7 +5257,7 @@ def execute_app_tool(name, arguments):
                     key: config[key]
                     for key in (
                         "provider", "model", "base_url", "terminal_enabled",
-                        "approval_mode", "wake_phrase", "tts_auto_play",
+                        "approval_mode", "wake_phrase", "transcribe_model", "wake_window_seconds", "tts_auto_play",
                         "notifications_enabled",
                     )
                 }
@@ -5400,6 +5436,8 @@ def export_snapshot():
             "workspace": config["workspace"],
             "system_prompt": config["system_prompt"],
             "wake_phrase": config["wake_phrase"],
+            "transcribe_model": config["transcribe_model"],
+            "wake_window_seconds": config["wake_window_seconds"],
             "tts_auto_play": config["tts_auto_play"],
             "notifications_enabled": config["notifications_enabled"],
             "workflows": [item.copy() for item in workflows],
@@ -5520,6 +5558,8 @@ class AppHandler(BaseHTTPRequestHandler):
                     "workspace": config["workspace"],
                     "system_prompt": config["system_prompt"],
                     "wake_phrase": config["wake_phrase"],
+                    "transcribe_model": config["transcribe_model"],
+                    "wake_window_seconds": config["wake_window_seconds"],
                     "tts_auto_play": config["tts_auto_play"],
                     "notifications_enabled": config["notifications_enabled"],
                     "weather_enabled": config["weather_enabled"],
@@ -5806,6 +5846,13 @@ class AppHandler(BaseHTTPRequestHandler):
             data.get("workspace", current_config["workspace"]),
             data.get("system_prompt", current_config["system_prompt"]),
             data.get("wake_phrase", current_config["wake_phrase"]),
+            data.get(
+                "transcribe_model", current_config.get("transcribe_model", "")
+            ),
+            data.get(
+                "wake_window_seconds",
+                current_config.get("wake_window_seconds", WAKE_WINDOW_DEFAULT),
+            ),
             data.get("tts_auto_play", current_config["tts_auto_play"]),
             api_keys,
             data.get(

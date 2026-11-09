@@ -905,6 +905,8 @@ class AppRouteTests(unittest.TestCase):
             "api_key": "test-secret",
             "system_prompt": "Rispondi in italiano e sii conciso.",
             "wake_phrase": "Nok",
+            "transcribe_model": "",
+            "wake_window_seconds": 5,
             "tts_auto_play": True,
         })
         with urlopen(f"{self.base_url}/api/config") as response:
@@ -932,6 +934,8 @@ class AppRouteTests(unittest.TestCase):
             "workspace": str(Path(app.APP_DIR).resolve()),
             "system_prompt": "Rispondi in italiano e sii conciso.",
             "wake_phrase": "Nok",
+            "transcribe_model": "",
+            "wake_window_seconds": 5,
             "tts_auto_play": True,
             "notifications_enabled": False,
             "weather_enabled": False,
