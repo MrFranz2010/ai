@@ -119,6 +119,35 @@ class AppRouteTests(unittest.TestCase):
         with urlopen(request) as response:
             return json.loads(response.read())
 
+    def test_reminder_endpoint_saves_the_deadline(self):
+        payload = self.request_json(
+            "/api/reminders", {"text": "Riunione con cliente domani alle 10"}
+        )
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["label"], "domani alle 10:00")
+        self.assertEqual(payload["item"]["title"], "Riunione con cliente")
+        self.assertTrue(payload["item"]["starts_at"].endswith("10:00"))
+        with app.config_lock:
+            titles = [item["title"] for item in app.planner["tasks"]]
+        self.assertIn("Riunione con cliente", titles)
+
+    def test_reminder_endpoint_needs_a_deadline(self):
+        with self.assertRaises(HTTPError) as raised:
+            self.request_json("/api/reminders", {"text": "Compito di storia"})
+        payload = json.loads(raised.exception.read())
+        self.assertEqual(raised.exception.code, 400)
+        self.assertIn("Indica quando", payload["error"])
+
+    def test_chat_rejects_an_unknown_mode(self):
+        with app.config_lock:
+            app.config["api_key"] = "test-key"
+        with self.assertRaises(HTTPError) as raised:
+            self.request_json(
+                "/api/chat",
+                {"messages": [{"role": "user", "content": "ciao"}], "mode": "hacker"},
+            )
+        self.assertEqual(raised.exception.code, 400)
+
     def test_weather_endpoint_is_disabled_by_default(self):
         with urlopen(f"{self.base_url}/api/weather") as response:
             self.assertEqual(response.status, 200)

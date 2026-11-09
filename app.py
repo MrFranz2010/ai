@@ -56,6 +56,10 @@ from search_parsing import (
     yahoo_results as _yahoo_results,
     yahoo_target as _yahoo_target,
 )
+from reminders import (
+    build_due_soon_reminders as _build_due_soon_reminders,
+    parse_reminder as _parse_reminder,
+)
 from telegram_text import (
     markdown_to_telegram_html,
     telegram_chunks as _telegram_chunks,
@@ -118,6 +122,26 @@ TELEGRAM_REMINDER_DEFAULT_TIME = "07:00"
 TELEGRAM_REMINDER_WINDOW_SECONDS = 15 * 60
 TELEGRAM_REMINDER_TIMEZONE = "Europe/Rome"
 TELEGRAM_REMINDER_TIME_PATTERN = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+CHAT_MODES = {
+    "codice": (
+        "The user picked the senior developer mode. Answer like an experienced "
+        "software engineer: read the relevant code before suggesting changes, "
+        "point out risks and trade-offs, and prefer small, verifiable steps. "
+        "Use terminal tools only when they are enabled and the user asks for a "
+        "change or an inspection."
+    ),
+    "studio": (
+        "The user picked the study mode. Explain clearly and step by step, at "
+        "the level of a student, with short examples. When the question concerns "
+        "school subjects, use the saved timetable and planner data to stay "
+        "consistent with the user's schedule."
+    ),
+    "analista": (
+        "The user picked the analyst mode. Work on numbers, tables and data: "
+        "state the assumptions, show the calculation, and point out what the "
+        "data cannot tell."
+    ),
+}
 TELEGRAM_BOT_COMMANDS = (
     {"command": "oggi", "description": "Materie di oggi"},
     {"command": "orario", "description": "Orario settimanale completo"},
@@ -944,7 +968,13 @@ def validate_planner(planner):
                 completed = item.get("completed")
                 if not isinstance(completed, bool):
                     raise ValueError("Stato attività non valido.")
+                starts_at = item.get("starts_at")
                 clean_item.update({
+                    "starts_at": (
+                        normalize_event_starts_at(starts_at)
+                        if isinstance(starts_at, str) and starts_at.strip()
+                        else None
+                    ),
                     "due_date": due_date,
                     "completed": completed,
                     "remind_days_before": normalize_remind_days_before(
@@ -3201,12 +3231,13 @@ def _wait_for_approval(job_id, command):
     return result
 
 
-def run_chat_job(job_id, messages, active_config):
+def run_chat_job(job_id, messages, active_config, mode=None):
     tool_events = []
     system_prompt = "\n\n".join(
         prompt for prompt in (
             DEFAULT_SYSTEM_PROMPT,
             active_config["system_prompt"],
+            CHAT_MODES.get(mode, ""),
         ) if prompt
     )
     if active_config["terminal_enabled"]:
@@ -3879,6 +3910,55 @@ def _maybe_send_task_reminders(now=None):
     return True
 
 
+def _maybe_send_due_soon_reminders(now=None):
+    """Warn half an hour before a task that has a start time."""
+    with telegram_lock:
+        bot = telegram_config.copy()
+    if not bot.get("token"):
+        return False
+    chats = bot.get("authorized_chats") or []
+    if not chats:
+        return False
+    now = now or _telegram_reminder_now()
+    today = now.strftime("%Y-%m-%d")
+    sent = bot.get("task_reminders_sent") or {}
+    pending = [
+        reminder
+        for reminder in _build_due_soon_reminders(now, _telegram_planner_tasks())
+        if sent.get(reminder["key"]) != today
+    ]
+    if not pending:
+        return False
+    updated_sent = {
+        key: value for key, value in sent.items() if value == today
+    }
+    delivered = False
+    for reminder in pending:
+        for chat_id in chats:
+            try:
+                _send_telegram_message(
+                    bot["token"], int(chat_id), reminder["message"],
+                )
+            except (RuntimeError, ValueError, OSError) as error:
+                print(f"Telegram promemoria in scadenza: invio non riuscito: {error}")
+                continue
+            delivered = True
+            updated_sent[reminder["key"]] = today
+    if not delivered:
+        return False
+    with telegram_lock:
+        if telegram_config.get("token") != bot.get("token"):
+            return True
+        updated = telegram_config.copy()
+        updated["task_reminders_sent"] = updated_sent
+        try:
+            save_telegram_file(updated)
+        except Exception as error:
+            print(f"Telegram promemoria in scadenza: stato non salvato: {error}")
+        telegram_config.update(updated)
+    return True
+
+
 alert_last_sent = {}
 alert_last_sent_lock = threading.Lock()
 
@@ -4249,6 +4329,7 @@ def _telegram_reminder_loop(stop_event):
         try:
             _maybe_send_telegram_reminder()
             _maybe_send_task_reminders()
+            _maybe_send_due_soon_reminders()
             _check_machine_alerts()
         except Exception as error:
             print(f"Telegram promemoria: {error}")
@@ -4881,7 +4962,12 @@ def execute_app_tool(name, arguments):
             if item_id is not None:
                 raise ValueError("Non specificare un id quando crei un elemento.")
             existing = (
-                {"due_date": None, "completed": False, "remind_days_before": None}
+                {
+                    "starts_at": None,
+                    "due_date": None,
+                    "completed": False,
+                    "remind_days_before": None,
+                }
                 if kind == "task"
                 else {"description": ""}
             )
@@ -5218,7 +5304,8 @@ class AppHandler(BaseHTTPRequestHandler):
         )
         if self.path not in {
             "/api/config", "/api/chat", "/api/workflows", "/api/extract",
-            "/api/planner", "/api/telegram", "/api/google-calendar",
+            "/api/planner", "/api/reminders", "/api/telegram",
+            "/api/google-calendar",
         } and not approval_match:
             self._send_json(404, {"error": "Endpoint non trovato."})
             return
@@ -5236,6 +5323,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 self._save_workflow(data)
             elif self.path == "/api/extract":
                 self._extract_document(data)
+            elif self.path == "/api/reminders":
+                self._save_reminder(data)
             elif self.path == "/api/planner":
                 self._save_planner(data)
             elif self.path == "/api/google-calendar":
@@ -5576,8 +5665,46 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         self._send_json(200, public_planner)
 
+    def _save_reminder(self, data):
+        text = data.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError(
+                "Scrivi il promemoria, per esempio «Riunione domani alle 10»."
+            )
+        if len(text) > 500:
+            raise ValueError("Il promemoria è troppo lungo.")
+        try:
+            draft = _parse_reminder(
+                text, _local_now(TELEGRAM_REMINDER_TIMEZONE)
+            )
+        except ValueError as error:
+            self._send_json(400, {"error": str(error)})
+            return
+        try:
+            saved = store_planner_item({
+                "kind": "task",
+                "action": "save",
+                "title": draft["title"],
+                "starts_at": draft["starts_at"],
+                "due_date": draft["due_date"],
+                "completed": False,
+                "remind_days_before": None,
+            })
+        except (ValueError, OSError) as error:
+            self._send_json(400, {"error": str(error)})
+            return
+        tasks = saved.get("tasks") or []
+        self._send_json(200, {
+            "ok": True,
+            "label": draft["label"],
+            "item": tasks[-1] if tasks else None,
+        })
+
     def _start_chat(self, data):
         messages = data.get("messages")
+        mode = data.get("mode")
+        if mode is not None and mode not in CHAT_MODES:
+            raise ValueError("Modalità di risposta non supportata.")
         with config_lock:
             active_config = config.copy()
         if not active_config["api_key"]:
@@ -5675,7 +5802,7 @@ class AppHandler(BaseHTTPRequestHandler):
             }
         worker = threading.Thread(
             target=run_chat_job,
-            args=(job_id, messages, active_config),
+            args=(job_id, messages, active_config, mode),
             daemon=True,
         )
         worker.start()
