@@ -163,7 +163,7 @@ def install(app, handler_class, load_memories, save_memories):
     if not getattr(app, "_user_memory_chat_installed", False):
         original_run_chat_job = app.run_chat_job
 
-        def run_chat_job_with_memory(job_id, messages, active_config):
+        def run_chat_job_with_memory(job_id, messages, active_config, mode=None):
             request_config = active_config.copy()
             try:
                 facts = validate_memories(load_memories())
@@ -183,7 +183,7 @@ def install(app, handler_class, load_memories, save_memories):
                         request_config.get("system_prompt", ""), memory_context,
                     ) if part
                 )
-            return original_run_chat_job(job_id, messages, request_config)
+            return original_run_chat_job(job_id, messages, request_config, mode)
 
         app.run_chat_job = run_chat_job_with_memory
         app._user_memory_chat_installed = True

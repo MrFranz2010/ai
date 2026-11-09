@@ -44,6 +44,43 @@ class UserMemoryErrorTests(unittest.TestCase):
         self.assertIn("Impossibile salvare la memoria", handler.payload["error"])
         self.assertRegex(handler.payload["error_id"], re.compile(r"^[a-f0-9]{8}$"))
 
+class ChatJobModeTests(unittest.TestCase):
+    def test_the_memory_wrapper_forwards_the_chat_mode(self):
+        calls = []
+
+        class Recorder:
+            def run_chat_job(self, *args, **kwargs):
+                calls.append((args, kwargs))
+                return "ok"
+
+        class Handler(FakeHandler):
+            _user_memory_installed = False
+
+        recorder = Recorder()
+        user_memory.install(
+            recorder,
+            Handler,
+            lambda: ["Preferisco risposte brevi."],
+            lambda _memories: None,
+        )
+        config = {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "api_key": "chiave-di-prova",
+            "base_url": "",
+            "system_prompt": "",
+        }
+        result = recorder.run_chat_job(
+            "job-id",
+            [{"role": "user", "content": "Scrivi una funzione."}],
+            config,
+            "code",
+        )
+        self.assertEqual(result, "ok")
+        args, kwargs = calls[0]
+        forwarded = kwargs.get("mode", args[3] if len(args) > 3 else None)
+        self.assertEqual(forwarded, "code")
+
 
 if __name__ == "__main__":
     unittest.main()
