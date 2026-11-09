@@ -128,6 +128,15 @@ function currentRotation() {
   return ROTATIONS.includes(saved) ? saved : 0;
 }
 
+function storedRotation() {
+  try {
+    const stored = Number(localStorage.getItem(ROTATION_KEY));
+    return ROTATIONS.includes(stored) ? stored : 0;
+  } catch {
+    return 0;
+  }
+}
+
 function applyRotation(degrees) {
   const rotation = ROTATIONS.includes(degrees) ? degrees : 0;
   if (rotation === 0) delete document.documentElement.dataset.rotation;
@@ -763,7 +772,7 @@ els.rotateButton.addEventListener("click", () => {
   applyRotation(next);
   els.connection.textContent = next === 0 ? "pronto" : `schermo ruotato di ${next}°`;
 });
-applyRotation(currentRotation());
+applyRotation(storedRotation());
 
 els.settingsButton.addEventListener("click", openSettings);
 els.settingsClose.addEventListener("click", closeSettings);
