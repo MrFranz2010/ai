@@ -5526,13 +5526,12 @@ class AppHandler(BaseHTTPRequestHandler):
             weather = fetch_weather(city)
         except RuntimeError as error:
             self.log_error("Meteo non disponibile: %s", error)
-            message = str(error)
-            if not message.startswith(("Città non trovata", "Indica la città")):
-                message = "Meteo non disponibile in questo momento."
+            # The reason is written for the sidebar: hiding it left the reader
+            # with a card that never said whether the city or the network failed.
             self._send_json(503, {
                 "configured": True,
                 "city": city,
-                "error": message,
+                "error": str(error),
             })
             return
         self._send_json(200, {"configured": True, **weather})
