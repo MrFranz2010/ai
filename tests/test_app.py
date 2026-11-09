@@ -371,7 +371,7 @@ class AppRouteTests(unittest.TestCase):
         self.assertIn('id="rotate-button"', assets["/hub"])
         self.assertIn("function applyRotation", assets["/hub.js"])
         self.assertIn("nokk-hub-rotation", assets["/hub.js"])
-        self.assertIn("nokk-hub-rotation", assets["/hub"])
+        self.assertIn("function storedRotation", assets["/hub.js"])
         self.assertIn('html[data-rotation="90"] body', assets["/hub.css"])
         self.assertIn("rotate(180deg)", assets["/hub.css"])
         self.assertIn("rotate(-90deg)", assets["/hub.css"])

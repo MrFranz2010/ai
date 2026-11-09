@@ -12,10 +12,6 @@
         localStorage.getItem("nokk-theme") === "light" ? "light" : "dark";
       document.querySelector('meta[name="theme-color"]').content =
         document.documentElement.dataset.theme === "light" ? "#f4f8fa" : "#191817";
-      const rotation = localStorage.getItem("nokk-hub-rotation");
-      if (["0", "90", "180", "270"].includes(rotation) && rotation !== "0") {
-        document.documentElement.dataset.rotation = rotation;
-      }
     } catch (error) {
       document.documentElement.dataset.theme = "dark";
     }
