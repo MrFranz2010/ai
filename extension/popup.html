@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>NOKK</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <header class="head">
+      <h1>NOKK</h1>
+      <button id="settings-toggle" type="button" aria-expanded="false">Impostazioni</button>
+    </header>
+
+    <form id="settings" class="settings" hidden>
+      <label for="base-url">Indirizzo di NOKK</label>
+      <input id="base-url" type="url" autocomplete="off" placeholder="https://ai-49bx.onrender.com">
+      <label for="api-key">Chiave API</label>
+      <input id="api-key" type="password" autocomplete="off" placeholder="nokk_…">
+      <p class="help">Crea la chiave in NOKK → Impostazioni → API. Resta solo su questo browser.</p>
+      <div class="row">
+        <button id="save-settings" type="submit">Salva</button>
+        <button id="test-connection" type="button">Verifica</button>
+      </div>
+      <p class="status" id="settings-status" role="status"></p>
+    </form>
+
+    <form id="ask">
+      <textarea id="question" rows="4" placeholder="Scrivi a NOKK…" required></textarea>
+      <div class="row">
+        <select id="mode" aria-label="Modalità">
+          <option value="">Risposta normale</option>
+          <option value="codice">Codice</option>
+          <option value="studio">Studio</option>
+          <option value="analista">Analista</option>
+        </select>
+        <button id="send" type="submit">Chiedi</button>
+      </div>
+      <p class="status" id="ask-status" role="status"></p>
+    </form>
+
+    <section class="reply" id="reply" hidden>
+      <h2 id="reply-title">Risposta</h2>
+      <pre id="reply-text"></pre>
+      <button id="copy-reply" type="button">Copia risposta</button>
+    </section>
+
+    <script src="popup.js" type="module"></script>
+  </body>
+</html>
