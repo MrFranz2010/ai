@@ -3,9 +3,20 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-  <meta name="theme-color" content="#10131b">
+  <meta name="theme-color" content="#191817">
   <meta name="mobile-web-app-capable" content="yes">
   <title>NOKK · Hub</title>
+  <script>
+    try {
+      document.documentElement.dataset.theme =
+        localStorage.getItem("nokk-theme") === "light" ? "light" : "dark";
+      document.querySelector('meta[name="theme-color"]').content =
+        document.documentElement.dataset.theme === "light" ? "#f4f8fa" : "#191817";
+    } catch (error) {
+      document.documentElement.dataset.theme = "dark";
+    }
+  </script>
+  <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/hub.css">
   <script src="/hub.js" defer></script>
 </head>
@@ -41,40 +52,47 @@
 
   <audio id="player" preload="none"></audio>
 
-  <div class="settings-backdrop" id="settings" hidden>
-    <section class="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-      <header class="settings-header">
+  <div class="hub-settings-backdrop" id="settings" hidden>
+    <section class="hub-settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <header class="hub-settings-header">
         <h2 id="settings-title">Impostazioni hub</h2>
         <button class="hub-icon-button" id="settings-close" type="button" aria-label="Chiudi impostazioni">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
         </button>
       </header>
 
-      <div class="settings-section">
+      <div class="hub-settings-section">
         <h3>Widget</h3>
-        <p class="settings-note">Scegli cosa mostrare, su quale lato e in che ordine.</p>
+        <p class="hub-settings-note">Scegli cosa mostrare, su quale lato e in che ordine.</p>
         <div class="widget-list" id="widget-list"></div>
       </div>
 
-      <div class="settings-section">
+      <div class="hub-settings-section">
         <h3>In riproduzione</h3>
-        <p class="settings-note">Un flusso audio diretto (radio o Music Assistant) riprodotto dal telefono.</p>
-        <label class="settings-field">Indirizzo del flusso
+        <p class="hub-settings-note">Un flusso audio diretto (radio o Music Assistant) riprodotto dal telefono.</p>
+        <label class="hub-settings-field">Indirizzo del flusso
           <input id="stream-url" type="url" inputmode="url" placeholder="https://…" autocomplete="off">
         </label>
-        <label class="settings-field">Nome del flusso
+        <label class="hub-settings-field">Nome del flusso
           <input id="stream-name" type="text" maxlength="60" placeholder="Radio o Music Assistant" autocomplete="off">
         </label>
       </div>
 
-      <div class="settings-section">
-        <label class="settings-toggle">
+      <div class="hub-settings-section">
+        <h3>Aspetto</h3>
+        <label class="hub-settings-field">Tema
+          <select id="theme-select">
+            <option value="dark">Scuro</option>
+            <option value="light">Chiaro</option>
+          </select>
+        </label>
+        <label class="hub-settings-toggle">
           <input id="speak-replies" type="checkbox">
           Leggi le risposte ad alta voce
         </label>
       </div>
 
-      <p class="settings-note">Le impostazioni restano su questo dispositivo.</p>
+      <p class="hub-settings-note">Le impostazioni restano su questo dispositivo.</p>
     </section>
   </div>
 </body>
