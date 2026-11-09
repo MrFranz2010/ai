@@ -881,6 +881,8 @@ body { background: var(--page); }
 .message-attachment { display: flex; align-items: center; gap: 7px; max-width: 100%; padding: 6px 9px; color: var(--muted); background: var(--panel); border: 1px solid var(--border); border-radius: 7px; font-size: 10px; }
 .message-attachment > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .message-attachment img { width: 44px; height: 36px; border-radius: 4px; object-fit: cover; }
+a.message-attachment { color: var(--text); text-decoration: none; cursor: pointer; }
+a.message-attachment:hover { border-color: var(--text); }
 .settings-card.settings-window { display: flex; flex-direction: column; width: min(100%, 900px); max-height: min(88dvh, 820px); padding: 22px; overflow: hidden; }
 .settings-description { margin-bottom: 15px; }
 .settings-window #settings-form { display: flex; flex: 1; flex-direction: column; gap: 8px; min-height: 0; }
@@ -1970,6 +1972,7 @@ body { background: var(--page); }
   border-color: #4a2a22;
 }
 :root[data-theme="dark"] .mode-chip:hover { background: #3a1f18; }
+
 .api-settings { display: grid; gap: 9px; }
 .api-settings > label { color: var(--text); font-size: 12px; }
 .api-settings input[type="text"] {

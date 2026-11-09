@@ -125,7 +125,11 @@
     if (!chat) return;
     chat.messages = state().messages
       .filter((message) => ["user", "assistant"].includes(message.role))
-      .map((message) => ({ role: message.role, content: message.content }));
+      .map((message) => ({
+        role: message.role,
+        content: message.content,
+        ...(message.artifacts?.length ? { artifacts: message.artifacts } : {}),
+      }));
     chat.updated_at = Date.now();
     const firstUser = chat.messages.find((message) => message.role === "user");
     const firstReply = chat.messages.find((message) => message.role === "assistant");
@@ -166,9 +170,11 @@
   function showChat(chat) {
     isLoadingChat = true;
     const current = state();
-    current.messages.splice(0, current.messages.length, ...chat.messages.map((item) => ({ role: item.role, content: item.content })));
+    current.messages.splice(0, current.messages.length, ...chat.messages.map((item) => ({ role: item.role, content: item.content, artifacts: item.artifacts || [] })));
     current.conversation.replaceChildren(current.welcome);
-    for (const message of current.messages) current.addMessage(message.role, message.content);
+    for (const message of current.messages) {
+      current.addMessage(message.role, message.content, "", message.artifacts || []);
+    }
     current.welcome.hidden = current.messages.length > 0;
     current.input.value = "";
     current.resizeComposer();

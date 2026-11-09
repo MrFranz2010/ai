@@ -92,6 +92,8 @@ class AppRouteTests(unittest.TestCase):
             app.api_config.clear()
             app.api_config.update(app.default_api_config())
         app.api_rate_limiter.reset()
+        with app.exports_lock:
+            app.exports.clear()
         with app.google_calendar_lock:
             app.google_calendar_config.clear()
             app.google_calendar_config.update(app.default_google_calendar())
@@ -549,6 +551,66 @@ class AppRouteTests(unittest.TestCase):
         self.assertEqual(job["reply"], "Attività creata.")
         self.assertEqual(app.planner["tasks"][0]["title"], "Task da chat")
         self.assertEqual(len(job["tool_events"]), 1)
+
+    def test_chat_job_exposes_the_exported_file(self):
+        with app.config_lock:
+            app.config.update({
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "api_key": "test-key-not-sent",
+                "terminal_enabled": False,
+                "approval_mode": "manual",
+                "workspace": str(Path(app.__file__).resolve().parent),
+                "system_prompt": "",
+            })
+        tool_response = {
+            "choices": [{
+                "message": {
+                    "content": None,
+                    "tool_calls": [{
+                        "id": "call-export",
+                        "type": "function",
+                        "function": {
+                            "name": "export_file",
+                            "arguments": json.dumps({
+                                "filename": "piano.md",
+                                "content": "# Piano",
+                            }),
+                        },
+                    }],
+                },
+            }],
+        }
+        responses = iter([
+            FakeResponse(tool_response),
+            FakeResponse({"choices": [{"message": {"content": "File pronto."}}]}),
+        ])
+        with patch(
+            "app.urlopen", side_effect=lambda *_args, **_kwargs: next(responses),
+        ):
+            job = self.run_chat([{"role": "user", "content": "Esporta il piano."}])
+        self.assertEqual(job["reply"], "File pronto.")
+        self.assertEqual(len(job["artifacts"]), 1)
+        self.assertEqual(job["artifacts"][0]["filename"], "piano.md")
+
+    def test_exported_file_is_downloadable_from_the_web_chat(self):
+        artifact = app.store_export(
+            "riassunto.md", "# Ciao".encode("utf-8"), "text/markdown",
+        )
+        with urlopen(f"{self.base_url}{artifact['url']}") as response:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(
+                response.headers["Content-Type"],
+                "text/markdown; charset=utf-8",
+            )
+            self.assertIn(
+                'filename="riassunto.md"',
+                response.headers["Content-Disposition"],
+            )
+            self.assertEqual(response.read(), "# Ciao".encode("utf-8"))
+        with self.assertRaises(HTTPError) as error:
+            urlopen(f"{self.base_url}/api/exports/{'0' * 32}")
+        self.assertEqual(error.exception.code, 404)
 
     def test_telegram_token_stays_local_and_pairing_is_private(self):
         token = "123456789:abcdefghijklmnopqrstuvwxyz0123456789"
@@ -1592,6 +1654,97 @@ class ExportFileToolTests(unittest.TestCase):
                 "export_file", {"filename": "a.txt", "content": "ciao"},
             )
         self.assertIn("Telegram", str(error.exception))
+
+    def test_export_rejects_empty_and_oversized_content(self):
+        with self.assertRaises(ValueError):
+            app.execute_app_tool(
+                "export_file", {"filename": "a.txt", "content": "   "},
+            )
+        with patch("app.MAX_EXPORT_CHARS", 10):
+            with self.assertRaises(ValueError):
+                app.execute_app_tool(
+                    "export_file", {"filename": "a.txt", "content": "x" * 11},
+                )
+
+    def test_export_keeps_a_safe_filename_and_default_extension(self):
+        self.assertEqual(app.export_filename("../../x/passw d.MD"), "passw-d.md")
+        self.assertEqual(app.export_filename(""), "nokk-export.txt")
+        self.assertEqual(app.export_filename("report.pdf"), "report.pdf.txt")
+
+    def test_document_upload_uses_multipart(self):
+        response = FakeResponse({"ok": True, "result": {}})
+        with patch("app.urlopen", return_value=response) as urlopen_call:
+            app._telegram_send_document(
+                "token", 42, "riassunto.md", b"# Ciao", "text/markdown", "Ecco",
+            )
+        request = urlopen_call.call_args.args[0]
+        self.assertIn("sendDocument", request.full_url)
+        content_type = request.get_header("Content-type")
+        self.assertTrue(content_type.startswith("multipart/form-data; boundary="))
+        self.assertIn(b'name="document"; filename="riassunto.md"', request.data)
+        self.assertIn(b"# Ciao", request.data)
+        self.assertIn(b'name="caption"', request.data)
+        self.assertIn(b'name="chat_id"', request.data)
+
+
+class ExportFileToolTests(unittest.TestCase):
+    def setUp(self):
+        self.saved_config = app.telegram_config.copy()
+        with app.telegram_lock:
+            app.telegram_config.clear()
+            app.telegram_config.update({
+                "token": "123456789:abcdefghijklmnopqrstuvwxyz0123456789",
+                "bot_username": "nokk_test_bot",
+                "authorized_chats": ["42"],
+                "offset": 0,
+            })
+
+    def tearDown(self):
+        with app.telegram_lock:
+            app.telegram_config.clear()
+            app.telegram_config.update(self.saved_config)
+
+    def test_tool_is_offered_to_the_assistant(self):
+        self.assertIn(
+            "export_file", {tool["name"] for tool in app.APP_TOOLS},
+        )
+
+    def test_export_sends_a_document_to_every_authorized_chat(self):
+        with app.telegram_lock:
+            app.telegram_config["authorized_chats"] = ["42", "-100"]
+        with patch("app._telegram_send_document") as send_document:
+            result = app.execute_app_tool("export_file", {
+                "filename": "../../Compiti di oggi.md",
+                "content": "# Compiti\n\n- matematica",
+                "caption": "Ecco il file",
+            })
+        self.assertEqual(result["filename"], "Compiti-di-oggi.md")
+        self.assertEqual(result["telegram"], "sent")
+        self.assertRegex(result["download_url"], r"^/api/exports/[a-f0-9]{32}$")
+        self.assertEqual(result["artifact"]["url"], result["download_url"])
+        self.assertEqual(
+            result["bytes"], len("# Compiti\n\n- matematica".encode("utf-8")),
+        )
+        self.assertEqual(send_document.call_count, 2)
+        first = send_document.call_args_list[0]
+        self.assertEqual(first.args[1], 42)
+        self.assertEqual(first.args[2], "Compiti-di-oggi.md")
+        self.assertEqual(first.args[3], b"# Compiti\n\n- matematica")
+        self.assertEqual(first.args[4], "text/markdown")
+        self.assertEqual(first.args[5], "Ecco il file")
+
+    def test_export_reaches_the_web_chat_without_telegram(self):
+        with app.telegram_lock:
+            app.telegram_config["authorized_chats"] = []
+        result = app.execute_app_tool(
+            "export_file", {"filename": "compiti.md", "content": "# Compiti"},
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["telegram"], "not_connected")
+        export_id = result["download_url"].rsplit("/", 1)[-1]
+        artifact = app.read_export(export_id)
+        self.assertEqual(artifact["content"], "# Compiti".encode("utf-8"))
+        self.assertEqual(artifact["filename"], "compiti.md")
 
     def test_export_rejects_empty_and_oversized_content(self):
         with self.assertRaises(ValueError):
