@@ -80,10 +80,12 @@ from telegram_text import (
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("PORT", "8000"))
-MAX_BODY_SIZE = 12 * 1024 * 1024
+MAX_BODY_SIZE = 36 * 1024 * 1024
 MAX_UPLOAD_SIZE = 4 * 1024 * 1024
+MAX_IMAGE_BYTES_PER_MESSAGE = 24 * 1024 * 1024
 MAX_ATTACHMENT_TEXT_LENGTH = 150_000
-MAX_ATTACHMENTS_PER_MESSAGE = 5
+MAX_ATTACHMENTS_PER_MESSAGE = 12
+MAX_IMAGES_PER_MESSAGE = 10
 MAX_PDF_PAGES = 100
 MAX_PDF_TEXT_LENGTH = MAX_ATTACHMENT_TEXT_LENGTH
 DEFAULT_SYSTEM_PROMPT = (
@@ -6550,6 +6552,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 or (attachments and message["role"] != "user")
             ):
                 raise ValueError("Elenco allegati non valido.")
+            images_in_message = 0
             for attachment in attachments:
                 if (
                     not isinstance(attachment, dict)
@@ -6590,10 +6593,16 @@ class AppHandler(BaseHTTPRequestHandler):
                         raise ValueError("Ogni immagine deve essere più piccola di 4 MB.")
                     if not image_matches_mime_type(image, mime_type):
                         raise ValueError("Il contenuto dell’immagine non corrisponde al formato.")
+                    images_in_message += 1
+                    if images_in_message > MAX_IMAGES_PER_MESSAGE:
+                        raise ValueError(
+                            "Puoi allegare al massimo "
+                            f"{MAX_IMAGES_PER_MESSAGE} immagini per messaggio."
+                        )
                     total_image_bytes += len(image)
                 else:
                     raise ValueError("Tipo di allegato non supportato.")
-        if total_attachment_text > 500_000 or total_image_bytes > 8 * MAX_UPLOAD_SIZE:
+        if total_attachment_text > 500_000 or total_image_bytes > MAX_IMAGE_BYTES_PER_MESSAGE:
             raise ValueError("Gli allegati della conversazione superano il limite.")
         if any(message["role"] == "system" for message in messages):
             raise ValueError("Istruzioni di sistema non accettate dal browser.")
