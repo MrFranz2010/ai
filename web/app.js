@@ -2016,6 +2016,53 @@ function appendAttachmentPreviews(parent, attachments) {
   parent.append(group);
 }
 
+async function copyTextToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // Plain http and older browsers need the selection based fallback.
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.top = "-1000px";
+  area.style.opacity = "0";
+  document.body.append(area);
+  area.select();
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } catch {
+    copied = false;
+  }
+  area.remove();
+  return copied;
+}
+
+function addCopyButton(body, text) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "copy-message";
+  button.setAttribute("aria-label", "Copia questo messaggio");
+  button.title = "Copia questo messaggio";
+  button.append(iconElement("copy"));
+  button.addEventListener("click", async () => {
+    const copied = await copyTextToClipboard(text);
+    setIcon(button, copied ? "check" : "close");
+    button.title = copied ? "Copiato" : "Copia non riuscita";
+    button.classList.toggle("copied", copied);
+    clearTimeout(button.copyTimer);
+    button.copyTimer = window.setTimeout(() => {
+      setIcon(button, "copy");
+      button.title = "Copia questo messaggio";
+      button.classList.remove("copied");
+    }, 1600);
+  });
+  body.append(button);
+}
+
 function addMessage(role, text, extraClass = "", attachments = []) {
   const row = document.createElement("article");
   row.className = `message ${role} ${extraClass}`.trim();
@@ -2036,10 +2083,12 @@ function addMessage(role, text, extraClass = "", attachments = []) {
     speakButton.append(iconElement("volume"));
     speakButton.addEventListener("click", () => speakText(text));
     body.append(speakButton);
+    addCopyButton(body, text);
   } else {
     const paragraph = document.createElement("p");
     paragraph.textContent = text;
     body.append(paragraph);
+    addCopyButton(body, text);
   }
   row.append(roleIcon, body);
   conversation.append(row);
