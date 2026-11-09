@@ -1,6 +1,8 @@
 "use strict";
 
 const STORAGE_KEY = "nokk-hub-settings-v1";
+const ROTATION_KEY = "nokk-hub-rotation";
+const ROTATIONS = [0, 90, 180, 270];
 const WEATHER_REFRESH_MS = 15 * 60 * 1000;
 const PLANNER_REFRESH_MS = 60 * 1000;
 const JOB_POLL_MS = 800;
@@ -36,6 +38,7 @@ const els = {
   transcript: document.getElementById("transcript"),
   reply: document.getElementById("reply"),
   connection: document.getElementById("connection"),
+  rotateButton: document.getElementById("rotate-button"),
   fullscreenButton: document.getElementById("fullscreen-button"),
   settingsButton: document.getElementById("settings-button"),
   settings: document.getElementById("settings"),
@@ -118,6 +121,24 @@ function sanitizeSettings(raw) {
     : clean.volume;
   clean.speakReplies = typeof raw.speakReplies === "boolean" ? raw.speakReplies : clean.speakReplies;
   return clean;
+}
+
+function currentRotation() {
+  const saved = Number(document.documentElement.dataset.rotation);
+  return ROTATIONS.includes(saved) ? saved : 0;
+}
+
+function applyRotation(degrees) {
+  const rotation = ROTATIONS.includes(degrees) ? degrees : 0;
+  if (rotation === 0) delete document.documentElement.dataset.rotation;
+  else document.documentElement.dataset.rotation = String(rotation);
+  els.rotateButton.setAttribute("aria-label", `Ruota la schermata (attuale ${rotation}°)`);
+  els.rotateButton.title = `Ruota la schermata (attuale ${rotation}°)`;
+  try {
+    localStorage.setItem(ROTATION_KEY, String(rotation));
+  } catch {
+    /* private mode: the rotation lasts for the session only */
+  }
 }
 
 function loadSettings() {
@@ -736,6 +757,13 @@ function moveWidget(index, delta) {
   [layout[index], layout[target]] = [layout[target], layout[index]];
   applySettings({ rebuildPanel: true });
 }
+
+els.rotateButton.addEventListener("click", () => {
+  const next = ROTATIONS[(ROTATIONS.indexOf(currentRotation()) + 1) % ROTATIONS.length];
+  applyRotation(next);
+  els.connection.textContent = next === 0 ? "pronto" : `schermo ruotato di ${next}°`;
+});
+applyRotation(currentRotation());
 
 els.settingsButton.addEventListener("click", openSettings);
 els.settingsClose.addEventListener("click", closeSettings);

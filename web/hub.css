@@ -18,6 +18,49 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Manual screen rotation, independent of the device orientation */
+html[data-rotation="90"] body,
+html[data-rotation="180"] body,
+html[data-rotation="270"] body {
+  position: fixed;
+  top: 0;
+  left: 0;
+  transform-origin: top left;
+  overflow: hidden;
+}
+html[data-rotation="90"] body,
+html[data-rotation="270"] body { width: 100vh; height: 100vw; }
+html[data-rotation="180"] body { width: 100vw; height: 100vh; }
+html[data-rotation="90"] body { transform: rotate(90deg) translateY(-100%); }
+html[data-rotation="180"] body { transform: rotate(180deg) translate(-100%, -100%); }
+html[data-rotation="270"] body { transform: rotate(-90deg) translateX(-100%); }
+@supports (width: 100dvh) {
+  html[data-rotation="90"] body,
+  html[data-rotation="270"] body { width: 100dvh; height: 100dvw; }
+  html[data-rotation="180"] body { width: 100dvw; height: 100dvh; }
+}
+
+/* A rotated portrait screen is wide: keep the three columns instead of stacking */
+@media (orientation: portrait) {
+  html[data-rotation="90"] .hub-grid,
+  html[data-rotation="270"] .hub-grid {
+    grid-template-columns: minmax(120px, 1fr) minmax(210px, 1.5fr) minmax(120px, 1fr);
+    grid-template-areas: "left center right";
+    gap: 10px;
+    padding: 4px 12px 12px;
+  }
+  html[data-rotation="90"] #rail-left,
+  html[data-rotation="270"] #rail-left { grid-area: left; }
+  html[data-rotation="90"] .hub-center,
+  html[data-rotation="270"] .hub-center { grid-area: center; padding: 4px 0; }
+  html[data-rotation="90"] #rail-right,
+  html[data-rotation="270"] #rail-right { grid-area: right; }
+  html[data-rotation="90"] .ptt,
+  html[data-rotation="270"] .ptt { width: clamp(96px, 22vh, 132px); height: clamp(96px, 22vh, 132px); }
+  html[data-rotation="90"] .hub-reply,
+  html[data-rotation="270"] .hub-reply { max-height: 30vh; }
+}
+
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 svg {
