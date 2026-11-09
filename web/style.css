@@ -327,6 +327,7 @@ body.sidebar-resizing { cursor: col-resize; user-select: none; }
 .message.error .message-body { color: #f5a6a6; }
 
 .composer {
+  position: relative;
   width: min(calc(100% - 50px), 740px);
   margin: 0 auto 28px;
   padding: 13px 14px 10px 17px;
@@ -1905,3 +1906,64 @@ body { background: var(--page); }
   background: #102b1d;
   border-color: #2f5c3f;
 }
+
+/* Chat commands */
+.command-menu {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(100% - 6px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  padding: 6px;
+  overflow-y: auto;
+  background: var(--panel, #fff);
+  border: 1px solid var(--border, #dfe3e6);
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(15, 23, 32, .16);
+  z-index: 20;
+}
+.command-menu[hidden] { display: none; }
+.command-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 10px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  text-align: left;
+  cursor: pointer;
+}
+.command-item strong { font-size: 13px; color: #b42318; }
+.command-item span { font-size: 11px; color: var(--muted, #626b73); }
+.command-item:hover, .command-item.active { background: var(--panel-hover, #f1f3f5); }
+:root[data-theme="dark"] .command-item strong { color: #ff9a8a; }
+:root[data-theme="dark"] .command-menu { box-shadow: 0 12px 28px rgba(0, 0, 0, .5); }
+.mode-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 8px;
+  padding: 3px 7px 3px 9px;
+  color: #7a2b1c;
+  background: #fdf2ee;
+  border: 1px solid #f0cfc4;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.mode-chip[hidden] { display: none; }
+.mode-chip .icon { width: 11px; height: 11px; }
+.mode-chip:hover { background: #fbe4db; }
+:root[data-theme="dark"] .mode-chip {
+  color: #ffb3a1;
+  background: #2a1713;
+  border-color: #4a2a22;
+}
+:root[data-theme="dark"] .mode-chip:hover { background: #3a1f18; }
