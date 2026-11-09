@@ -1,4 +1,5 @@
 import base64
+import io
 import json
 import tempfile
 import threading
@@ -98,6 +99,67 @@ class TranscriptionTests(unittest.TestCase):
         self.assertTrue(request.full_url.endswith("/audio/transcriptions"))
         self.assertIn(b"whisper-1", request.data)
         self.assertIn(b"audio/mp4", request.data)
+
+    def test_openrouter_gets_the_json_audio_payload_it_expects(self):
+        with app.config_lock:
+            app.config.update({
+                "provider": "openrouter",
+                "model": "openrouter/free",
+                "api_key": "sk-or-di-prova",
+            })
+        audio = b"RIFF....WAVE"
+        with patch(
+            "app.urlopen",
+            return_value=FakeTranscriptionResponse({"text": "Ciao"}),
+        ) as provider_call:
+            status, payload = self.post({
+                "audio": base64.b64encode(audio).decode("ascii"),
+                "mime_type": "audio/mp4",
+            })
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["text"], "Ciao")
+        request = provider_call.call_args.args[0]
+        self.assertEqual(request.get_header("Content-type"), "application/json")
+        body = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(body["model"], "openai/whisper-large-v3")
+        self.assertEqual(body["input_audio"]["format"], "m4a")
+        self.assertEqual(body["input_audio"]["data"], base64.b64encode(audio).decode("ascii"))
+        self.assertNotIn(b"multipart/form-data", request.data)
+
+    def test_audio_formats_map_to_the_right_file_extension(self):
+        for mime_type, extension in (
+            ("audio/wav", "wav"),
+            ("audio/ogg", "ogg"),
+            ("audio/mpeg", "mp3"),
+            ("audio/webm", "webm"),
+        ):
+            with self.subTest(mime_type=mime_type), patch(
+                "app.urlopen",
+                return_value=FakeTranscriptionResponse({"text": "Ciao"}),
+            ) as provider_call:
+                status, _payload = self.post({
+                    "audio": base64.b64encode(b"RIFF....WAVE").decode("ascii"),
+                    "mime_type": mime_type,
+                })
+                self.assertEqual(status, 200)
+                self.assertIn(
+                    f'filename="voce.{extension}"'.encode("utf-8"),
+                    provider_call.call_args.args[0].data,
+                )
+
+    def test_a_refusal_reports_the_provider_status(self):
+        error = HTTPError(
+            "https://example.test/audio/transcriptions", 400,
+            "Bad Request", {}, io.BytesIO(b'{"error":"bad audio"}'),
+        )
+        with patch("app.urlopen", side_effect=error):
+            status, payload = self.post({
+                "audio": base64.b64encode(b"RIFF....WAVE").decode("ascii"),
+                "mime_type": "audio/wav",
+            })
+        self.assertEqual(status, 400)
+        self.assertIn("HTTP 400", payload["error"])
+        self.assertIn("bad audio", payload["error"])
 
     def test_an_unsupported_format_is_refused(self):
         status, payload = self.post({

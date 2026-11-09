@@ -91,6 +91,15 @@ AUDIO_MIME_TYPES = {
     "audio/webm", "audio/mp4", "audio/mpeg", "audio/wav", "audio/ogg",
     "audio/m4a", "audio/x-m4a",
 }
+AUDIO_FORMATS = {
+    "audio/webm": "webm",
+    "audio/mp4": "m4a",
+    "audio/m4a": "m4a",
+    "audio/x-m4a": "m4a",
+    "audio/mpeg": "mp3",
+    "audio/wav": "wav",
+    "audio/ogg": "ogg",
+}
 TRANSCRIBE_MODELS = {
     "openai": "whisper-1",
     "groq": "whisper-large-v3",
@@ -3435,13 +3444,26 @@ def transcribe_audio(active_config, audio, mime_type):
         if isinstance(configured_model, str) and configured_model.strip()
         else TRANSCRIBE_MODELS.get(provider, "whisper-1")
     )
-    extension = mime_type in {"audio/mp4", "audio/m4a", "audio/x-m4a"} and "m4a" or "webm"
-    body, content_type = _multipart_audio_body(
-        {"model": model, "language": "it"},
-        f"voce.{extension}",
-        mime_type,
-        audio,
-    )
+    audio_format = AUDIO_FORMATS.get(mime_type, "webm")
+    if provider == "openrouter":
+        # OpenRouter's speech-to-text endpoint is JSON with base64 audio, not
+        # the OpenAI multipart upload, so a multipart body gets refused.
+        body = json.dumps({
+            "model": model,
+            "input_audio": {
+                "data": base64.b64encode(audio).decode("ascii"),
+                "format": audio_format,
+            },
+            "language": "it",
+        }).encode("utf-8")
+        content_type = "application/json"
+    else:
+        body, content_type = _multipart_audio_body(
+            {"model": model, "language": "it"},
+            f"voce.{audio_format}",
+            mime_type,
+            audio,
+        )
     request = Request(
         endpoint,
         data=body,
@@ -3460,8 +3482,10 @@ def transcribe_audio(active_config, audio, mime_type):
             error.close()
         except Exception:  # noqa: BLE001 - closing must never hide the error
             pass
-        suffix = f" {details[:200]}" if details else ""
-        raise ValueError(f"Il provider ha rifiutato la trascrizione.{suffix}") from None
+        suffix = f" (HTTP {error.code})" if getattr(error, "code", None) else ""
+        if details:
+            suffix = f"{suffix} {details[:200]}"
+        raise ValueError(f"Il provider ha rifiutato la trascrizione{suffix}.") from None
     except (TimeoutError, OSError):
         raise ValueError(
             "Il servizio di trascrizione non ha risposto in tempo. Riprova."
