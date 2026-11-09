@@ -2140,5 +2140,20 @@ class SupabaseConfigLoaderTests(unittest.TestCase):
         self.assertEqual(loaded["alerts_memory_percent"], 90)
 
 
+class DeploymentPackagingTests(unittest.TestCase):
+    def test_dockerfile_ships_every_module(self):
+        root = Path(__file__).resolve().parent.parent
+        dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
+        copies = " ".join(
+            line for line in dockerfile.splitlines() if line.strip().upper().startswith("COPY ")
+        )
+        modules = sorted(path.name for path in root.glob("*.py"))
+        self.assertIn("reminders.py", modules)
+        if "*.py" in copies:
+            return
+        missing = [name for name in modules if name not in copies]
+        self.assertEqual(missing, [], f"Dockerfile does not copy {missing}")
+
+
 if __name__ == "__main__":
     unittest.main()
