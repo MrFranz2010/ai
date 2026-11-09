@@ -148,6 +148,10 @@ WEATHER_CACHE_SECONDS = 15 * 60
 WEATHER_TIMEZONE = "Europe/Rome"
 WEATHER_GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 WEATHER_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+WEATHER_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+WEATHER_RETRY_SECONDS = 2.0
+
+
 WEATHER_DESCRIPTIONS = {
     0: "sereno",
     1: "prevalentemente sereno",
@@ -4318,22 +4322,36 @@ weather_cache_lock = threading.Lock()
 
 
 def _weather_json(url, parameters):
+    """One Open-Meteo call, retried once while the service is busy."""
     request = Request(
         f"{url}?{urlencode(parameters)}",
         headers={"User-Agent": "NOKK/1.0"},
     )
-    try:
-        with urlopen(request, timeout=10) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except HTTPError as error:
-        error.close()
-        raise RuntimeError("Il servizio meteo ha rifiutato la richiesta.") from None
-    except URLError:
-        raise RuntimeError("Impossibile raggiungere il servizio meteo.") from None
-    except (OSError, TimeoutError):
-        raise RuntimeError("Timeout del servizio meteo.") from None
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        raise RuntimeError("Il servizio meteo ha risposto in modo non valido.") from None
+    for attempt in (0, 1):
+        try:
+            with urlopen(request, timeout=10) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            break
+        except HTTPError as error:
+            status = error.code
+            error.close()
+            if attempt == 0 and status in WEATHER_RETRY_STATUSES:
+                time.sleep(WEATHER_RETRY_SECONDS)
+                continue
+            if status == 429:
+                raise RuntimeError(
+                    "Il servizio meteo \u00e8 sovraccarico (HTTP 429). "
+                    "Riprova tra qualche minuto."
+                ) from None
+            raise RuntimeError(
+                f"Il servizio meteo ha rifiutato la richiesta (HTTP {status})."
+            ) from None
+        except URLError:
+            raise RuntimeError("Impossibile raggiungere il servizio meteo.") from None
+        except (OSError, TimeoutError):
+            raise RuntimeError("Timeout del servizio meteo.") from None
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise RuntimeError("Il servizio meteo ha risposto in modo non valido.") from None
     if not isinstance(payload, dict):
         raise RuntimeError("Il servizio meteo ha risposto in modo non valido.")
     return payload
