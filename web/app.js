@@ -350,7 +350,9 @@ const imageMimeTypes = {
   ".gif": "image/gif",
 };
 const maxUploadBytes = 4 * 1024 * 1024;
-const maxAttachmentsPerMessage = 5;
+const maxAttachmentsPerMessage = 12;
+const maxImagesPerMessage = 10;
+const maxAttachmentBytes = 24 * 1024 * 1024;
 
 const providerDefaults = {
   openai: "gpt-4o-mini",
@@ -1496,9 +1498,17 @@ async function addFiles(fileList) {
     if (pendingAttachments.some((item) => item.name === file.name)) continue;
     try {
       const attachment = await loadAttachment(file);
+      if (attachment.kind === "image") {
+        const images = pendingAttachments.filter((item) => item.kind === "image").length;
+        if (images >= maxImagesPerMessage) {
+          throw new Error(`Puoi allegare al massimo ${maxImagesPerMessage} immagini per messaggio.`);
+        }
+      }
       const existingBytes = pendingAttachments.reduce((total, item) => total + item.size, 0);
-      if (existingBytes + attachment.size > 8 * 1024 * 1024) {
-        throw new Error("Gli allegati del messaggio superano il limite di 8 MB.");
+      if (existingBytes + attachment.size > maxAttachmentBytes) {
+        throw new Error(
+          `Gli allegati del messaggio superano il limite di ${Math.round(maxAttachmentBytes / (1024 * 1024))} MB.`,
+        );
       }
       pendingAttachments.push(attachment);
       renderPendingAttachments();

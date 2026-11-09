@@ -789,6 +789,64 @@ class AppRouteTests(unittest.TestCase):
             "NOKK PDF text",
         )
 
+    def test_a_message_can_carry_ten_images(self):
+        self.request_json("/api/config", {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "api_key": "test-secret",
+        })
+        pixel = (
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8"
+            "/x8AAwMCAO6RZioAAAAASUVORK5CYII="
+        )
+        attachments = [
+            {
+                "kind": "image",
+                "name": f"pixel-{index}.png",
+                "mime_type": "image/png",
+                "data": pixel,
+            }
+            for index in range(app.MAX_IMAGES_PER_MESSAGE)
+        ]
+        with patch("app.urlopen", return_value=FakeResponse()):
+            job = self.run_chat([{
+                "role": "user",
+                "content": "Guarda queste immagini.",
+                "attachments": attachments,
+            }])
+        self.assertEqual(job["reply"], "Ciao dal modello.")
+
+    def test_too_many_images_are_refused(self):
+        self.request_json("/api/config", {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "api_key": "test-secret",
+        })
+        pixel = (
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8"
+            "/x8AAwMCAO6RZioAAAAASUVORK5CYII="
+        )
+        attachments = [
+            {
+                "kind": "image",
+                "name": f"pixel-{index}.png",
+                "mime_type": "image/png",
+                "data": pixel,
+            }
+            for index in range(app.MAX_IMAGES_PER_MESSAGE + 1)
+        ]
+        with self.assertRaises(HTTPError) as raised:
+            self.request_json("/api/chat", {
+                "messages": [{
+                    "role": "user",
+                    "content": "Guarda queste immagini.",
+                    "attachments": attachments,
+                }],
+            })
+        payload = json.loads(raised.exception.read())
+        self.assertEqual(raised.exception.code, 400)
+        self.assertIn("immagini", payload["error"])
+
     def test_chat_sends_attachments_to_the_selected_provider(self):
         self.request_json("/api/config", {
             "provider": "openai",
