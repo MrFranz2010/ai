@@ -2681,7 +2681,34 @@ TOOL_LIMIT_REPLY = (
 )
 
 
-def _final_answer_without_tools(active_config, messages, system_prompt):
+def _read_http_body(error):
+    try:
+        return error.read(4096)
+    except (OSError, ValueError):
+        return b""
+
+
+def _rejects_system_role(body):
+    """True when a gateway error says the system role is not supported."""
+    text = body.decode("utf-8", errors="replace").lower()
+    return "system" in text and any(
+        token in text
+        for token in (
+            "role", "unsupported", "not support", "invalid", "unknown",
+        )
+    )
+
+
+def _replayed_http_error(error, body):
+    error.close()
+    return HTTPError(
+        error.url, error.code, error.msg, error.hdrs, io.BytesIO(body or b"")
+    )
+
+
+def _final_answer_without_tools(
+    active_config, messages, system_prompt, merge_system_prompt=False
+):
     """Ask for a final answer once the tool rounds are exhausted."""
     messages = list(messages)
     messages.append({
@@ -2703,6 +2730,7 @@ def _final_answer_without_tools(active_config, messages, system_prompt):
             enable_tools=False,
             enable_app_tools=False,
             base_url=active_config.get("base_url", ""),
+            merge_system_prompt=merge_system_prompt,
         )
         with urlopen(request, timeout=60) as response:
             result = json.loads(response.read().decode("utf-8"))
@@ -2735,9 +2763,29 @@ def _clean_provider_message(message):
     return cleaned
 
 
+def merge_instructions_into_messages(chat_messages, system_prompt):
+    """Fold the system instructions into the first user turn.
+
+    Some OpenAI-compatible gateways reject ``role: system``; when that happens
+    the instructions must still reach the model, so they become part of the
+    first user message instead of a separate role.
+    """
+    merged = [
+        dict(message) for message in chat_messages
+        if message.get("role") != "system"
+    ]
+    if not merged:
+        return [{"role": "user", "content": system_prompt}]
+    first = merged[0]
+    if first.get("role") == "user" and isinstance(first.get("content"), str):
+        first["content"] = f"{system_prompt}\n\n{first['content']}"
+        return merged
+    return [{"role": "user", "content": system_prompt}] + merged
+
+
 def build_provider_request(
     provider, model, api_key, messages, system_prompt=None, enable_tools=False,
-    enable_app_tools=False, base_url=None,
+    enable_app_tools=False, base_url=None, merge_system_prompt=False,
 ):
     tool_definitions = []
     if enable_tools:
@@ -2830,11 +2878,19 @@ def build_provider_request(
     if provider == "openai":
         url = "https://api.openai.com/v1/chat/completions"
         headers["Authorization"] = f"Bearer {api_key}"
-        openai_messages = [
-            message for message in messages if message["role"] == "system"
-        ] + tool_messages
-        if system_prompt:
-            openai_messages.insert(0, {"role": "system", "content": system_prompt})
+        openai_messages = []
+        if merge_system_prompt:
+            openai_messages = merge_instructions_into_messages(
+                tool_messages, system_prompt or ""
+            )
+        else:
+            openai_messages = [
+                message for message in messages if message["role"] == "system"
+            ] + tool_messages
+            if system_prompt:
+                openai_messages.insert(
+                    0, {"role": "system", "content": system_prompt}
+                )
         payload = {"model": model, "messages": openai_messages}
         if tool_definitions:
             payload["tools"] = [
@@ -2907,13 +2963,19 @@ def build_provider_request(
         headers["Authorization"] = f"Bearer {api_key}"
         headers["HTTP-Referer"] = f"http://127.0.0.1:{PORT}"
         headers["X-OpenRouter-Title"] = "Assistente AI locale"
-        openrouter_messages = [
-            message for message in messages if message["role"] == "system"
-        ] + tool_messages
-        if system_prompt:
-            openrouter_messages.insert(
-                0, {"role": "system", "content": system_prompt}
+        openrouter_messages = []
+        if merge_system_prompt:
+            openrouter_messages = merge_instructions_into_messages(
+                tool_messages, system_prompt or ""
             )
+        else:
+            openrouter_messages = [
+                message for message in messages if message["role"] == "system"
+            ] + tool_messages
+            if system_prompt:
+                openrouter_messages.insert(
+                    0, {"role": "system", "content": system_prompt}
+                )
         payload = {
             "model": OPENROUTER_FREE_MODEL,
             "messages": openrouter_messages,
@@ -2930,13 +2992,18 @@ def build_provider_request(
             else OPENAI_COMPATIBLE_ENDPOINTS[provider]
         )
         headers["Authorization"] = f"Bearer {api_key}"
-        compatible_messages = [
-            message for message in messages if message["role"] == "system"
-        ] + tool_messages
-        if system_prompt:
-            compatible_messages.insert(
-                0, {"role": "system", "content": system_prompt}
+        if merge_system_prompt:
+            compatible_messages = merge_instructions_into_messages(
+                tool_messages, system_prompt or ""
             )
+        else:
+            compatible_messages = [
+                message for message in messages if message["role"] == "system"
+            ] + tool_messages
+            if system_prompt:
+                compatible_messages.insert(
+                    0, {"role": "system", "content": system_prompt}
+                )
         payload = {"model": model, "messages": compatible_messages}
         if tool_definitions:
             payload["tools"] = [
@@ -3355,6 +3422,7 @@ def run_chat_job(job_id, messages, active_config, mode=None):
     )
     try:
         round_index = 0
+        merge_system_prompt = False
         while round_index <= MAX_TOOL_ROUNDS:
             request = build_provider_request(
                 active_config["provider"],
@@ -3365,9 +3433,26 @@ def run_chat_job(job_id, messages, active_config, mode=None):
                 enable_tools=active_config["terminal_enabled"],
                 enable_app_tools=active_config.get("app_tools_enabled", True),
                 base_url=active_config.get("base_url", ""),
+                merge_system_prompt=merge_system_prompt,
             )
-            with urlopen(request, timeout=60) as response:
-                result = json.loads(response.read().decode("utf-8"))
+            try:
+                with urlopen(request, timeout=60) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+            except HTTPError as error:
+                body = _read_http_body(error)
+                if (
+                    not merge_system_prompt
+                    and system_prompt
+                    and error.code in {400, 415, 422}
+                    and active_config["provider"] in OPENAI_COMPATIBLE_PROVIDERS
+                    and _rejects_system_role(body)
+                ):
+                    # Some OpenAI-compatible gateways refuse role=system: the
+                    # instructions are then folded into the first user turn.
+                    error.close()
+                    merge_system_prompt = True
+                    continue
+                raise _replayed_http_error(error, body)
             assistant_message, tool_calls = parse_tool_response(
                 active_config["provider"], result
             )
@@ -3493,7 +3578,7 @@ def run_chat_job(job_id, messages, active_config, mode=None):
             job_id,
             "complete",
             reply=_final_answer_without_tools(
-                active_config, messages, system_prompt
+                active_config, messages, system_prompt, merge_system_prompt
             ),
             tool_events=tool_events,
         )

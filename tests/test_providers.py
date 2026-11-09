@@ -141,6 +141,28 @@ class ProviderTests(unittest.TestCase):
                 self.assertIn("Rispondi in italiano.", system)
                 self.assertIn("Sei conciso.", system)
 
+    def test_instructions_can_travel_inside_the_first_user_message(self):
+        for provider, model, extra in PROVIDER_CASES:
+            if provider not in OPENAI_COMPATIBLE:
+                continue
+            with self.subTest(provider=provider):
+                request = build_provider_request(
+                    provider,
+                    model,
+                    "secret",
+                    self.messages,
+                    system_prompt="Rispondi in italiano.",
+                    merge_system_prompt=True,
+                    **extra,
+                )
+                payload = json.loads(request.data)
+                roles = [message["role"] for message in payload["messages"]]
+                self.assertNotIn("system", roles)
+                self.assertEqual(roles[0], "user")
+                first = payload["messages"][0]["content"]
+                self.assertTrue(first.startswith("Rispondi in italiano."))
+                self.assertIn("Ciao", first)
+
     def test_text_and_image_attachments_use_provider_specific_formats(self):
         attachments = [
             {

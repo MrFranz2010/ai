@@ -1,8 +1,9 @@
 import json
 import tempfile
+import time
 import threading
 import unittest
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -237,6 +238,76 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 400)
         self.assertIn("Modalità", data["error"])
+
+    def test_a_gateway_without_system_role_still_gets_the_instructions(self):
+        received = []
+
+        class Gateway(BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", 0))
+                received.append(json.loads(self.rfile.read(length)))
+                if len(received) == 1:
+                    payload = {
+                        "error": {
+                            "message": (
+                                "role 'system' is not supported by this model"
+                            ),
+                        },
+                    }
+                    status = 400
+                else:
+                    payload = {
+                        "choices": [
+                            {"message": {"role": "assistant", "content": "Ciao"}},
+                        ],
+                    }
+                    status = 200
+                body = json.dumps(payload).encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        gateway = ThreadingHTTPServer(("127.0.0.1", 0), Gateway)
+        threading.Thread(target=gateway.serve_forever, daemon=True).start()
+        try:
+            with app.config_lock:
+                app.config.update(app.validate_config(
+                    "custom",
+                    "my-model",
+                    "secret",
+                    workspace=str(app.APP_DIR),
+                    system_prompt="Chiamami Franz.",
+                    base_url=f"http://127.0.0.1:{gateway.server_port}/v1",
+                ))
+            key = self.create_key()
+            status, started, _ = self.send(
+                "/api/v1/chat",
+                {"messages": [{"role": "user", "content": "Ciao"}]},
+                key=key,
+            )
+            self.assertEqual(status, 202)
+            job = None
+            for _ in range(60):
+                time.sleep(0.2)
+                _, job, _ = self.send(
+                    f"/api/v1/jobs/{started['job_id']}", method="GET", key=key
+                )
+                if job["status"] in {"complete", "failed"}:
+                    break
+            self.assertEqual(job["status"], "complete", job)
+            self.assertEqual(len(received), 2)
+            retried = received[1]["messages"]
+            self.assertNotIn("system", [message["role"] for message in retried])
+            self.assertIn("Chiamami Franz.", retried[0]["content"])
+            self.assertIn("Ciao", retried[0]["content"])
+        finally:
+            gateway.shutdown()
+            gateway.server_close()
 
     def test_an_unknown_job_is_reported(self):
         key = self.create_key()
