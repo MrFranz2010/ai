@@ -107,7 +107,7 @@ class ProviderTests(unittest.TestCase):
                 self.assertEqual(names, [
                     "get_app_data", "manage_planner_item", "manage_workflow",
                     "save_timetable", "web_search", "fetch_url",
-                    "google_calendar", "home_assistant",
+                    "google_calendar", "home_assistant", "export_file",
                 ])
                 if provider == "google":
                     task_tool = payload["tools"][0]["functionDeclarations"][1]

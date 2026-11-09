@@ -151,6 +151,7 @@ COMMAND_TIMEOUT_SECONDS = 30
 MAX_COMMAND_OUTPUT = 20000
 MAX_TELEGRAM_MESSAGE_LENGTH = 12000
 MAX_TELEGRAM_REPLY_LENGTH = 4000
+MAX_TELEGRAM_CAPTION = 1024
 TELEGRAM_PAIRING_TTL_SECONDS = 600
 TELEGRAM_REMINDER_DEFAULT_TIME = "07:00"
 TELEGRAM_REMINDER_WINDOW_SECONDS = 15 * 60
@@ -543,7 +544,41 @@ APP_TOOLS = [
             "required": ["action"],
             "additionalProperties": False
         }
-    }
+    },
+    {
+        "name": "export_file",
+        "description": (
+            "Crea un file di testo con il contenuto indicato e lo invia "
+            "all'utente su Telegram come documento. Usalo quando l'utente "
+            "chiede di esportare, scaricare o ricevere un file: un elenco, un "
+            "riassunto, una tabella, un piano, un itinerario. Scrivi nel "
+            "parametro content il contenuto completo del file, non un "
+            "riassunto. Se Telegram non è collegato, spiega che va collegato "
+            "dalle impostazioni di NOKK."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": (
+                        "Nome del file con estensione .md, .txt, .csv, "
+                        ".json o .html, per esempio riassunto.md."
+                    ),
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Contenuto completo del file, in testo.",
+                },
+                "caption": {
+                    "type": "string",
+                    "description": "Didascalia breve e facoltativa.",
+                },
+            },
+            "required": ["filename", "content"],
+            "additionalProperties": False,
+        },
+    },
 ]
 SERPER_API_KEY = os.environ.get("SERPER_API_KEY", "").strip()
 SERPER_SEARCH_URL = os.environ.get(
@@ -2237,13 +2272,7 @@ def save_api_file(new_config):
     save_json_file(API_FILE, new_config)
 
 
-def telegram_api_call(token, method, parameters, timeout=15):
-    request = Request(
-        f"https://api.telegram.org/bot{token}/{method}",
-        data=json.dumps(parameters).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+def _telegram_api_result(request, timeout):
     try:
         with urlopen(request, timeout=timeout) as response:
             result = json.loads(response.read().decode("utf-8"))
@@ -2259,6 +2288,113 @@ def telegram_api_call(token, method, parameters, timeout=15):
     if not isinstance(result, dict) or result.get("ok") is not True:
         raise RuntimeError("Telegram non ha completato la richiesta API.")
     return result.get("result")
+
+
+def telegram_api_call(token, method, parameters, timeout=15):
+    request = Request(
+        f"https://api.telegram.org/bot{token}/{method}",
+        data=json.dumps(parameters).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    return _telegram_api_result(request, timeout)
+
+
+EXPORT_MIME_TYPES = {
+    ".md": "text/markdown",
+    ".txt": "text/plain",
+    ".csv": "text/csv",
+    ".json": "application/json",
+    ".html": "text/html",
+    ".ics": "text/calendar",
+    ".xml": "application/xml",
+    ".yaml": "application/yaml",
+    ".yml": "application/yaml",
+}
+MAX_EXPORT_CHARS = 200_000
+_EXPORT_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def export_filename(value):
+    """Return a safe file name for a document sent through Telegram."""
+    raw = str(value or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    cleaned = _EXPORT_FILENAME_PATTERN.sub("-", raw).strip(".-_")
+    stem, extension = os.path.splitext(cleaned or "nokk-export")
+    extension = extension.lower()
+    if extension not in EXPORT_MIME_TYPES:
+        stem = f"{stem}{extension}"
+        extension = ".txt"
+    return f"{stem or 'nokk-export'}{extension}"
+
+
+def _telegram_send_document(token, chat_id, filename, content, mime_type, caption=""):
+    boundary = "----NOKK" + uuid.uuid4().hex
+    parts = []
+    for name, value in (("chat_id", str(chat_id)), ("caption", caption)):
+        if not value:
+            continue
+        parts.append(
+            (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+                f"{value}\r\n"
+            ).encode("utf-8")
+        )
+    parts.append(
+        (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="document"; '
+            f'filename="{filename}"\r\n'
+            f"Content-Type: {mime_type}\r\n\r\n"
+        ).encode("utf-8")
+        + content
+        + b"\r\n"
+    )
+    parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+    request = Request(
+        f"https://api.telegram.org/bot{token}/sendDocument",
+        data=b"".join(parts),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        method="POST",
+    )
+    _telegram_api_result(request, 30)
+
+
+def export_file_to_telegram(arguments):
+    content = arguments.get("content")
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("Il file da inviare è vuoto.")
+    if len(content) > MAX_EXPORT_CHARS:
+        raise ValueError(
+            "Il file è troppo grande: riduci il contenuto a 200.000 caratteri."
+        )
+    with telegram_lock:
+        token = telegram_config["token"]
+        chats = list(telegram_config["authorized_chats"])
+    if not token or not chats:
+        raise ValueError(
+            "Telegram non è collegato: collega il bot dalle impostazioni di "
+            "NOKK per ricevere il file."
+        )
+    filename = export_filename(arguments.get("filename"))
+    mime_type = EXPORT_MIME_TYPES[os.path.splitext(filename)[1]]
+    caption = arguments.get("caption")
+    caption = (
+        " ".join(str(caption).split())[:MAX_TELEGRAM_CAPTION]
+        if isinstance(caption, str) and caption.strip()
+        else ""
+    )
+    payload = content.encode("utf-8")
+    for chat_id in chats:
+        _telegram_send_document(
+            token, int(chat_id), filename, payload, mime_type, caption,
+        )
+    return {
+        "ok": True,
+        "filename": filename,
+        "bytes": len(payload),
+        "delivered_to": len(chats),
+    }
 
 
 def default_google_calendar():
@@ -5416,6 +5552,8 @@ def execute_app_tool(name, arguments):
             "ok": True,
             "workflow": next(item for item in updated if item["id"] == saved_id),
         }
+    if name == "export_file":
+        return export_file_to_telegram(arguments)
     raise ValueError("Strumento NOKK non supportato.")
 
 
