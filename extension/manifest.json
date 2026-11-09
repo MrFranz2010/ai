@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "NOKK",
+  "version": "1.0.0",
+  "description": "Chiedi a NOKK dal browser: testo selezionato, promemoria e modalità di risposta.",
+  "permissions": ["storage", "contextMenus", "notifications"],
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://*/*"
+  ],
+  "action": {
+    "default_title": "NOKK",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "icons": {
+    "128": "icon-128.png"
+  }
+}
