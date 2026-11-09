@@ -3,3 +3,7 @@ workflows.json
 __pycache__/
 *.py[cod]
 .venv/
+api.json
+telegram.json
+google_calendar.json
+planner.json

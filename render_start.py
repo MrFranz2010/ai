@@ -99,6 +99,15 @@ def _configure_supabase_storage():
         except ValueError as error:
             raise RuntimeError(f"Supabase planner data is invalid: {error}") from error
 
+    def load_api():
+        saved = load_json(app.API_FILE)
+        if saved is MISSING:
+            return app.default_api_config()
+        try:
+            return app.validate_api_config(saved)
+        except ValueError as error:
+            raise RuntimeError(f"Supabase api.json is invalid: {error}") from error
+
     def load_google_calendar():
         saved = load_json(app.GOOGLE_CALENDAR_FILE)
         if saved is MISSING:
@@ -175,12 +184,15 @@ def _configure_supabase_storage():
     app.telegram_config.update(load_telegram())
     app.google_calendar_config.clear()
     app.google_calendar_config.update(load_google_calendar())
+    app.api_config.clear()
+    app.api_config.update(load_api())
     app.save_json_file = save_json
     app.save_config_file = lambda data: save_json(app.CONFIG_FILE, data)
     app.save_telegram_file = lambda data: save_json(app.TELEGRAM_FILE, data)
     app.save_google_calendar_file = lambda data: save_json(
         app.GOOGLE_CALENDAR_FILE, data
     )
+    app.save_api_file = lambda data: save_json(app.API_FILE, data)
     return storage
 
 
@@ -366,7 +378,11 @@ class AuthenticatedAppHandler(app.AppHandler):
     def do_GET(self):
         # Google redirects the browser here without Basic credentials; the
         # single-use OAuth state ties the callback to an authenticated start.
-        if self.path.split("?", 1)[0] != "/oauth/google/callback":
+        path = self.path.split("?", 1)[0]
+        if path != "/oauth/google/callback" and not path.startswith(
+            app.API_PREFIX
+        ):
+            # /api/v1/* carries its own key instead of the browser password.
             if not self._require_authentication():
                 return
         if self.path == "/":
@@ -390,8 +406,9 @@ class AuthenticatedAppHandler(app.AppHandler):
         super().do_GET()
 
     def do_POST(self):
-        if not self._require_authentication():
-            return
+        if not self.path.startswith(app.API_PREFIX):
+            if not self._require_authentication():
+                return
         if self.path != "/api/chats":
             super().do_POST()
             return

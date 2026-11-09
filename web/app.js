@@ -41,6 +41,14 @@ const googleCalendarSaveButton = document.querySelector("#google-calendar-save")
 const googleCalendarConnectButton = document.querySelector("#google-calendar-connect");
 const googleCalendarDisconnectButton = document.querySelector("#google-calendar-disconnect");
 const googleCalendarRedirectHelp = document.querySelector("#google-redirect-help");
+const apiStatus = document.querySelector("#api-status");
+const apiEnabledInput = document.querySelector("#api-enabled");
+const apiKeyNameInput = document.querySelector("#api-key-name");
+const apiKeyCreateButton = document.querySelector("#api-key-create");
+const apiKeySecret = document.querySelector("#api-key-secret");
+const apiKeyValue = document.querySelector("#api-key-value");
+const apiKeyCopyButton = document.querySelector("#api-key-copy");
+const apiKeyList = document.querySelector("#api-key-list");
 const providerSelect = document.querySelector("#provider");
 const modelInput = document.querySelector("#model");
 const modelHelp = document.querySelector("#model-help");
@@ -1692,6 +1700,77 @@ async function sendTelegramAction(payload) {
   return result;
 }
 
+async function loadApiKeys() {
+  const response = await fetch("/api/api-keys");
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || "Stato API non disponibile.");
+  apiEnabledInput.checked = Boolean(result.enabled);
+  renderApiStatus(result);
+  renderApiKeys(result.keys || []);
+  return result;
+}
+
+function renderApiStatus(state) {
+  if (!state.enabled) {
+    apiStatus.textContent = "API disattivata";
+    return;
+  }
+  const count = state.keys.length;
+  apiStatus.textContent = count
+    ? `API attiva · ${count} ${count === 1 ? "chiave" : "chiavi"}`
+    : "API attiva · nessuna chiave";
+}
+
+function renderApiKeys(keys) {
+  apiKeyList.innerHTML = "";
+  if (!keys.length) {
+    const empty = document.createElement("li");
+    empty.className = "api-key-empty";
+    empty.textContent = "Nessuna chiave: creane una per collegare uno script o l’estensione.";
+    apiKeyList.append(empty);
+    return;
+  }
+  keys.forEach((key) => {
+    const item = document.createElement("li");
+    item.className = "api-key-item";
+    const label = document.createElement("span");
+    const name = document.createElement("strong");
+    name.textContent = key.name;
+    const meta = document.createElement("small");
+    const created = (key.created_at || "").slice(0, 10);
+    meta.textContent = `…${key.hint}${created ? ` · creata il ${created}` : ""}`;
+    label.append(name, meta);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "telegram-action telegram-disconnect";
+    remove.textContent = "Revoca";
+    remove.addEventListener("click", async () => {
+      remove.disabled = true;
+      try {
+        await sendApiAction({ action: "revoke", id: key.id });
+        await loadApiKeys();
+      } catch (error) {
+        apiStatus.textContent = error.message;
+      } finally {
+        remove.disabled = false;
+      }
+    });
+    item.append(label, remove);
+    apiKeyList.append(item);
+  });
+}
+
+async function sendApiAction(payload) {
+  const response = await fetch("/api/api-keys", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || "Operazione API non riuscita.");
+  return result;
+}
+
 async function loadGoogleCalendarStatus() {
   const response = await fetch("/api/google-calendar");
   const result = await response.json();
@@ -2576,6 +2655,46 @@ telegramReminderSave.addEventListener("click", async () => {
   }
 });
 
+apiEnabledInput.addEventListener("change", async () => {
+  try {
+    await sendApiAction({ action: "set_enabled", enabled: apiEnabledInput.checked });
+    await loadApiKeys();
+  } catch (error) {
+    apiStatus.textContent = error.message;
+    apiEnabledInput.checked = !apiEnabledInput.checked;
+  }
+});
+
+apiKeyCreateButton.addEventListener("click", async () => {
+  apiKeyCreateButton.disabled = true;
+  try {
+    const result = await sendApiAction({
+      action: "create",
+      name: apiKeyNameInput.value.trim() || "Chiave API",
+    });
+    apiKeyValue.textContent = result.key;
+    apiKeySecret.hidden = false;
+    apiKeyNameInput.value = "";
+    await loadApiKeys();
+  } catch (error) {
+    apiStatus.textContent = error.message;
+  } finally {
+    apiKeyCreateButton.disabled = false;
+  }
+});
+
+apiKeyCopyButton.addEventListener("click", async () => {
+  try {
+    await copyTextToClipboard(apiKeyValue.textContent);
+    apiKeyCopyButton.textContent = "Copiata";
+    window.setTimeout(() => {
+      apiKeyCopyButton.textContent = "Copia chiave";
+    }, 2000);
+  } catch (error) {
+    apiStatus.textContent = error.message;
+  }
+});
+
 telegramPairButton.addEventListener("click", async () => {
   telegramPairButton.disabled = true;
   telegramStatus.textContent = "Generazione del codice…";
@@ -3073,6 +3192,9 @@ loadConfig().catch((error) => {
 });
 loadTelegramStatus().catch((error) => {
   telegramStatus.textContent = `Errore: ${error.message}`;
+});
+loadApiKeys().catch((error) => {
+  apiStatus.textContent = `Errore: ${error.message}`;
 });
 loadGoogleCalendarStatus().catch((error) => {
   googleCalendarStatus.textContent = `Errore: ${error.message}`;
