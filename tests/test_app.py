@@ -1540,6 +1540,91 @@ class TelegramFormattingTests(unittest.TestCase):
             )
 
 
+class ExportFileToolTests(unittest.TestCase):
+    def setUp(self):
+        self.saved_config = app.telegram_config.copy()
+        with app.telegram_lock:
+            app.telegram_config.clear()
+            app.telegram_config.update({
+                "token": "123456789:abcdefghijklmnopqrstuvwxyz0123456789",
+                "bot_username": "nokk_test_bot",
+                "authorized_chats": ["42"],
+                "offset": 0,
+            })
+
+    def tearDown(self):
+        with app.telegram_lock:
+            app.telegram_config.clear()
+            app.telegram_config.update(self.saved_config)
+
+    def test_tool_is_offered_to_the_assistant(self):
+        self.assertIn(
+            "export_file", {tool["name"] for tool in app.APP_TOOLS},
+        )
+
+    def test_export_sends_a_document_to_every_authorized_chat(self):
+        with app.telegram_lock:
+            app.telegram_config["authorized_chats"] = ["42", "-100"]
+        with patch("app._telegram_send_document") as send_document:
+            result = app.execute_app_tool("export_file", {
+                "filename": "../../Compiti di oggi.md",
+                "content": "# Compiti\n\n- matematica",
+                "caption": "Ecco il file",
+            })
+        self.assertEqual(result["filename"], "Compiti-di-oggi.md")
+        self.assertEqual(result["delivered_to"], 2)
+        self.assertEqual(
+            result["bytes"], len("# Compiti\n\n- matematica".encode("utf-8")),
+        )
+        self.assertEqual(send_document.call_count, 2)
+        first = send_document.call_args_list[0]
+        self.assertEqual(first.args[1], 42)
+        self.assertEqual(first.args[2], "Compiti-di-oggi.md")
+        self.assertEqual(first.args[3], b"# Compiti\n\n- matematica")
+        self.assertEqual(first.args[4], "text/markdown")
+        self.assertEqual(first.args[5], "Ecco il file")
+
+    def test_export_requires_a_connected_telegram_chat(self):
+        with app.telegram_lock:
+            app.telegram_config["authorized_chats"] = []
+        with self.assertRaises(ValueError) as error:
+            app.execute_app_tool(
+                "export_file", {"filename": "a.txt", "content": "ciao"},
+            )
+        self.assertIn("Telegram", str(error.exception))
+
+    def test_export_rejects_empty_and_oversized_content(self):
+        with self.assertRaises(ValueError):
+            app.execute_app_tool(
+                "export_file", {"filename": "a.txt", "content": "   "},
+            )
+        with patch("app.MAX_EXPORT_CHARS", 10):
+            with self.assertRaises(ValueError):
+                app.execute_app_tool(
+                    "export_file", {"filename": "a.txt", "content": "x" * 11},
+                )
+
+    def test_export_keeps_a_safe_filename_and_default_extension(self):
+        self.assertEqual(app.export_filename("../../x/passw d.MD"), "passw-d.md")
+        self.assertEqual(app.export_filename(""), "nokk-export.txt")
+        self.assertEqual(app.export_filename("report.pdf"), "report.pdf.txt")
+
+    def test_document_upload_uses_multipart(self):
+        response = FakeResponse({"ok": True, "result": {}})
+        with patch("app.urlopen", return_value=response) as urlopen_call:
+            app._telegram_send_document(
+                "token", 42, "riassunto.md", b"# Ciao", "text/markdown", "Ecco",
+            )
+        request = urlopen_call.call_args.args[0]
+        self.assertIn("sendDocument", request.full_url)
+        content_type = request.get_header("Content-type")
+        self.assertTrue(content_type.startswith("multipart/form-data; boundary="))
+        self.assertIn(b'name="document"; filename="riassunto.md"', request.data)
+        self.assertIn(b"# Ciao", request.data)
+        self.assertIn(b'name="caption"', request.data)
+        self.assertIn(b'name="chat_id"', request.data)
+
+
 class TelegramCommandTests(unittest.TestCase):
     def setUp(self):
         self.saved_config = app.telegram_config.copy()
