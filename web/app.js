@@ -2143,11 +2143,28 @@ function resizeComposer() {
   input.rows = Math.min(7, Math.max(1, Math.ceil(input.scrollHeight / lineHeight)));
 }
 
+// Safari reports a body that is not JSON as "The string did not match the
+// expected pattern.", so keep the real HTTP status and body in the message.
+async function readJsonResponse(response, fallbackMessage) {
+  const text = await response.text();
+  if (!text.trim()) {
+    throw new Error(`${fallbackMessage} (risposta vuota, HTTP ${response.status})`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    const body = text.replace(/\s+/g, " ").trim();
+    // A proxy page adds nothing useful for the reader of the chat.
+    const detail = body.startsWith("<") ? "" : body.slice(0, 120);
+    throw new Error(`${fallbackMessage} (HTTP ${response.status}${detail ? `: ${detail}` : ""})`);
+  }
+}
+
 async function waitForChatJob(jobId) {
   let renderedEvents = 0;
   while (true) {
     const response = await fetch(`/api/jobs/${jobId}`);
-    const job = await response.json();
+    const job = await readJsonResponse(response, "Attività non disponibile.");
     if (!response.ok) throw new Error(job.error || "Attività non disponibile.");
     if (job.action && job.status === "awaiting_approval") {
       showApproval(jobId, job.action);
@@ -2248,7 +2265,7 @@ async function refreshWeather() {
     const result = await response.json();
     if (result.configured && result.error) {
       sidebarWeatherTemperature.textContent = "--°";
-      sidebarWeatherDetail.textContent = "Meteo non disponibile";
+      sidebarWeatherDetail.textContent = result.error || "Meteo non disponibile";
       sidebarWeather.hidden = false;
       return;
     }
@@ -2736,7 +2753,7 @@ chatForm.addEventListener("submit", async (event) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages }),
     });
-    const result = await response.json();
+    const result = await readJsonResponse(response, "La richiesta non è riuscita.");
     if (!response.ok) throw new Error(result.error || "La richiesta non è riuscita.");
     const reply = await waitForChatJob(result.job_id);
     pending.remove();
