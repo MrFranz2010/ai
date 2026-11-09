@@ -172,6 +172,27 @@ class AppRouteTests(unittest.TestCase):
             payload["error"], "Impossibile raggiungere il servizio meteo."
         )
 
+    def test_weather_reports_the_service_status(self):
+        error = HTTPError(
+            "https://example.com", 403, "Forbidden", {}, io.BytesIO(b"")
+        )
+        with patch("app.urlopen", side_effect=error) as fake:
+            with self.assertRaises(RuntimeError) as raised:
+                app._weather_json("https://example.com", {"name": "Roma"})
+        self.assertEqual(fake.call_count, 1)
+        self.assertIn("HTTP 403", str(raised.exception))
+
+    def test_weather_retries_a_busy_service_once(self):
+        error = HTTPError(
+            "https://example.com", 429, "Too Many Requests", {}, io.BytesIO(b"")
+        )
+        with patch("app.urlopen", side_effect=error) as fake, patch("app.time.sleep"):
+            with self.assertRaises(RuntimeError) as raised:
+                app._weather_json("https://example.com", {"name": "Roma"})
+        self.assertEqual(fake.call_count, 2)
+        self.assertIn("sovraccarico", str(raised.exception))
+        self.assertIn("HTTP 429", str(raised.exception))
+
     def test_weather_reports_an_unknown_city_to_the_sidebar(self):
         with app.config_lock:
             app.config["weather_enabled"] = True
