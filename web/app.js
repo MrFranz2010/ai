@@ -2147,17 +2147,25 @@ function resizeComposer() {
 // expected pattern.", so keep the real HTTP status and body in the message.
 async function readJsonResponse(response, fallbackMessage) {
   const text = await response.text();
+  let parsed = null;
+  try {
+    parsed = text.trim() ? JSON.parse(text) : null;
+  } catch (error) {
+    parsed = null;
+  }
+  if (parsed !== null) return parsed;
+  if ([502, 503, 504].includes(response.status)) {
+    throw new Error(
+      `Il server non ha risposto (HTTP ${response.status}). Riprova tra poco.`,
+    );
+  }
   if (!text.trim()) {
     throw new Error(`${fallbackMessage} (risposta vuota, HTTP ${response.status})`);
   }
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    const body = text.replace(/\s+/g, " ").trim();
-    // A proxy page adds nothing useful for the reader of the chat.
-    const detail = body.startsWith("<") ? "" : body.slice(0, 120);
-    throw new Error(`${fallbackMessage} (HTTP ${response.status}${detail ? `: ${detail}` : ""})`);
-  }
+  const body = text.replace(/\s+/g, " ").trim();
+  // A proxy page tells the reader nothing useful.
+  const detail = body.startsWith("<") ? "" : body.slice(0, 120);
+  throw new Error(`${fallbackMessage} (HTTP ${response.status}${detail ? `: ${detail}` : ""})`);
 }
 
 async function waitForChatJob(jobId) {
