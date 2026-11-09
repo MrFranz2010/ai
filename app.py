@@ -86,6 +86,24 @@ MAX_IMAGE_BYTES_PER_MESSAGE = 40 * 1024 * 1024
 MAX_ATTACHMENT_TEXT_LENGTH = 150_000
 MAX_ATTACHMENTS_PER_MESSAGE = 22
 MAX_IMAGES_PER_MESSAGE = 20
+MAX_AUDIO_SIZE = 10 * 1024 * 1024
+AUDIO_MIME_TYPES = {
+    "audio/webm", "audio/mp4", "audio/mpeg", "audio/wav", "audio/ogg",
+    "audio/m4a", "audio/x-m4a",
+}
+TRANSCRIBE_MODELS = {
+    "openai": "whisper-1",
+    "groq": "whisper-large-v3",
+    "mistral": "voxtral-mini-latest",
+    "openrouter": "openai/whisper-large-v3",
+    "custom": "whisper-1",
+}
+TRANSCRIBE_ENDPOINTS = {
+    "openai": "https://api.openai.com/v1/audio/transcriptions",
+    "groq": "https://api.groq.com/openai/v1/audio/transcriptions",
+    "mistral": "https://api.mistral.ai/v1/audio/transcriptions",
+    "openrouter": "https://openrouter.ai/api/v1/audio/transcriptions",
+}
 MAX_PDF_PAGES = 100
 MAX_PDF_TEXT_LENGTH = MAX_ATTACHMENT_TEXT_LENGTH
 DEFAULT_SYSTEM_PROMPT = (
@@ -3152,6 +3170,86 @@ def merge_instructions_into_messages(chat_messages, system_prompt):
     return [{"role": "user", "content": system_prompt}] + merged
 
 
+def transcription_endpoint(provider, base_url=""):
+    if provider == "custom":
+        base = normalize_base_url(base_url)
+        return f"{base}/audio/transcriptions" if base else ""
+    return TRANSCRIBE_ENDPOINTS.get(provider, "")
+
+
+def _multipart_audio_body(fields, filename, mime_type, audio):
+    boundary = "----NOKK" + uuid.uuid4().hex
+    parts = []
+    for name, value in fields.items():
+        parts.append(
+            (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+                f"{value}\r\n"
+            ).encode("utf-8")
+        )
+    parts.append(
+        (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+            f"Content-Type: {mime_type}\r\n\r\n"
+        ).encode("utf-8")
+        + audio
+        + b"\r\n"
+    )
+    parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
+
+
+def transcribe_audio(active_config, audio, mime_type):
+    provider = active_config.get("provider")
+    api_key = active_config.get("api_key")
+    endpoint = transcription_endpoint(provider, active_config.get("base_url") or "")
+    if not endpoint:
+        raise ValueError(
+            "La trascrizione audio richiede OpenAI, Groq, Mistral, OpenRouter "
+            "o un endpoint personalizzato compatibile."
+        )
+    if not isinstance(api_key, str) or not api_key:
+        raise ValueError("Configura una chiave API per trascrivere la voce.")
+    model = TRANSCRIBE_MODELS.get(provider, "whisper-1")
+    extension = mime_type in {"audio/mp4", "audio/m4a", "audio/x-m4a"} and "m4a" or "webm"
+    body, content_type = _multipart_audio_body(
+        {"model": model, "language": "it"},
+        f"voce.{extension}",
+        mime_type,
+        audio,
+    )
+    request = Request(
+        endpoint,
+        data=body,
+        headers={
+            "Content-Type": content_type,
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=60) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        details = _read_http_body(error)
+        try:
+            error.close()
+        except Exception:  # noqa: BLE001 - closing must never hide the error
+            pass
+        suffix = f" {details[:200]}" if details else ""
+        raise ValueError(f"Il provider ha rifiutato la trascrizione.{suffix}") from None
+    except (TimeoutError, OSError):
+        raise ValueError(
+            "Il servizio di trascrizione non ha risposto in tempo. Riprova."
+        ) from None
+    text = payload.get("text") if isinstance(payload, dict) else None
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("Il provider non ha restituito una trascrizione.")
+    return text.strip()
+
+
 def build_provider_request(
     provider, model, api_key, messages, system_prompt=None, enable_tools=False,
     enable_app_tools=False, base_url=None, merge_system_prompt=False,
@@ -5962,7 +6060,7 @@ class AppHandler(BaseHTTPRequestHandler):
         if self.path not in {
             "/api/config", "/api/chat", "/api/workflows", "/api/extract",
             "/api/planner", "/api/reminders", "/api/telegram",
-            "/api/google-calendar", "/api/api-keys",
+            "/api/google-calendar", "/api/api-keys", "/api/transcribe",
         } and not approval_match:
             self._send_json(404, {"error": "Endpoint non trovato."})
             return
@@ -5970,7 +6068,9 @@ class AppHandler(BaseHTTPRequestHandler):
             data = self._read_json()
             if not isinstance(data, dict):
                 raise ValueError("Il corpo della richiesta deve essere un oggetto JSON.")
-            if self.path == "/api/config":
+            if self.path == "/api/transcribe":
+                self._transcribe_audio(data)
+            elif self.path == "/api/config":
                 self._save_config(data)
             elif self.path == "/api/telegram":
                 self._save_telegram(data)
@@ -6636,6 +6736,31 @@ class AppHandler(BaseHTTPRequestHandler):
         )
         worker.start()
         self._send_json(202, {"job_id": job_id})
+
+    def _transcribe_audio(self, data):
+        mime_type = data.get("mime_type")
+        encoded = data.get("audio")
+        if not isinstance(mime_type, str) or not mime_type.strip():
+            raise ValueError("Formato audio non supportato.")
+        base_type = mime_type.split(";")[0].strip().lower()
+        if base_type not in AUDIO_MIME_TYPES:
+            raise ValueError(
+                "Formato audio non supportato: registra in MP4, WebM, WAV o MP3."
+            )
+        if not isinstance(encoded, str) or not encoded:
+            raise ValueError("Nessuna registrazione ricevuta.")
+        if len(encoded) > ((MAX_AUDIO_SIZE + 2) // 3) * 4:
+            raise ValueError("La registrazione è troppo lunga (massimo 10 MB).")
+        try:
+            audio = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError):
+            raise ValueError("I dati audio non sono validi.") from None
+        if not audio or len(audio) > MAX_AUDIO_SIZE:
+            raise ValueError("La registrazione è troppo lunga (massimo 10 MB).")
+        with config_lock:
+            active_config = dict(config)
+        text = transcribe_audio(active_config, audio, base_type)
+        self._send_json(200, {"text": text})
 
     def _approve_action(self, job_id, data):
         action_id = data.get("action_id")

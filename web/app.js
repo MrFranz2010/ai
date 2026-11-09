@@ -255,8 +255,8 @@ function wakeVariants(phrase) {
 }
 
 function voiceAvailabilityProblem() {
-  if (!SpeechRecognitionAPI) {
-    return "Riconoscimento vocale non supportato da questo browser.";
+  if (!nativeVoiceSupported && !audioRecordingSupported) {
+    return "Questo browser non permette il microfono: usa Chrome o Safari aggiornato, in HTTPS.";
   }
   if (!window.isSecureContext) {
     return "Il microfono richiede una connessione sicura: apri NOKK in HTTPS o su localhost.";
@@ -401,6 +401,11 @@ const imageMimeTypes = {
   ".webp": "image/webp",
   ".gif": "image/gif",
 };
+const MediaRecorderAPI = window.MediaRecorder || null;
+const audioRecordingSupported = Boolean(
+  MediaRecorderAPI && navigator.mediaDevices && navigator.mediaDevices.getUserMedia,
+);
+const nativeVoiceSupported = Boolean(SpeechRecognitionAPI);
 const maxUploadBytes = 4 * 1024 * 1024;
 const maxAttachmentsPerMessage = 22;
 const maxImagesPerMessage = 20;
@@ -1601,6 +1606,139 @@ function updateVoiceButtons() {
   }
 }
 
+function preferredAudioMimeType() {
+  if (!MediaRecorderAPI || typeof MediaRecorderAPI.isTypeSupported !== "function") {
+    return "";
+  }
+  return ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"].find((type) =>
+    MediaRecorderAPI.isTypeSupported(type)
+  ) || "";
+}
+
+async function transcribeRecording(blob) {
+  const data = base64FromBuffer(await blob.arrayBuffer());
+  const response = await fetch("/api/transcribe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      audio: data,
+      mime_type: blob.type || "audio/webm",
+    }),
+  });
+  const result = await readJsonResponse(response, "Trascrizione non riuscita.");
+  if (!response.ok) throw new Error(result.error || "Trascrizione non riuscita.");
+  return (result.text || "").trim();
+}
+
+function wakeCommandFrom(text) {
+  const phrase = wakePhraseInput.value.trim() || "Nok";
+  const normalized = normalizeWakeText(text);
+  for (const variant of wakeVariants(phrase)) {
+    const escaped = variant.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = new RegExp(
+      `(^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`,
+      "iu",
+    ).exec(normalized);
+    if (!match) continue;
+    const matchedWords = normalized
+      .slice(0, match.index + match[0].length)
+      .split(" ")
+      .filter(Boolean).length;
+    return text
+      .trim()
+      .split(/\s+/)
+      .slice(matchedWords)
+      .join(" ")
+      .replace(/^[\s,.:;!?-]+/, "")
+      .trim();
+  }
+  return null;
+}
+
+async function handleRecording(blob, mode) {
+  if (mode === "wake" && !wakeListeningRequested) return;
+  setVoiceStatus("Trascrivo…");
+  let text = "";
+  try {
+    text = await transcribeRecording(blob);
+  } catch (error) {
+    setVoiceStatus(error.message);
+    if (mode === "wake") wakeListeningRequested = false;
+    updateVoiceButtons();
+    return;
+  }
+  if (mode === "wake") {
+    const phrase = wakePhraseInput.value.trim() || "Nok";
+    const command = wakeCommandFrom(text);
+    if (command === null) {
+      setVoiceStatus(`In ascolto di “${phrase}”…`);
+    } else if (command) {
+      appendTranscript(command);
+      setVoiceStatus(`Testo acquisito. Wake word “${phrase}” ancora attiva; premi Invio per inviare.`);
+    } else {
+      setVoiceStatus("Wake word riconosciuta. Parla ora.");
+    }
+    if (wakeListeningRequested) recordWakeChunk();
+    return;
+  }
+  if (text) appendTranscript(text);
+  else setVoiceStatus("Non ho sentito nulla. Riprova.");
+  voiceMode = null;
+  updateVoiceButtons();
+}
+
+async function startAudioRecording(mode) {
+  if (!audioRecordingSupported) {
+    setVoiceStatus(voiceAvailabilityProblem());
+    return;
+  }
+  try {
+    if (!audioStream) {
+      audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    }
+  } catch (error) {
+    setVoiceStatus(`Microfono non disponibile: ${error.message || "permesso negato"}.`);
+    return;
+  }
+  const mimeType = preferredAudioMimeType();
+  audioChunks = [];
+  voiceMode = mode;
+  const recorder = new MediaRecorderAPI(audioStream, mimeType ? { mimeType } : undefined);
+  audioRecorder = recorder;
+  updateVoiceButtons();
+  recorder.ondataavailable = (event) => {
+    if (event.data && event.data.size) audioChunks.push(event.data);
+  };
+  recorder.onstop = () => {
+    if (audioRecorder === recorder) {
+      audioRecorder = null;
+      voiceMode = null;
+    }
+    updateVoiceButtons();
+    const blob = new Blob(audioChunks, {
+      type: recorder.mimeType || mimeType || "audio/webm",
+    });
+    audioChunks = [];
+    void handleRecording(blob, mode);
+  };
+  recorder.start();
+  setVoiceStatus(
+    mode === "wake"
+      ? `In ascolto di “${wakePhraseInput.value.trim() || "Nok"}”…`
+      : "Sto registrando: tocca il microfono per fermarmi.",
+  );
+  if (mode === "wake") {
+    window.setTimeout(() => {
+      if (audioRecorder === recorder && recorder.state === "recording") recorder.stop();
+    }, 5000);
+  }
+}
+
+function recordWakeChunk() {
+  if (!wakeListeningRequested || audioRecorder) return;
+  void startAudioRecording("wake");
+}
+
 function appendTranscript(text) {
   const transcript = text.trim();
   if (!transcript) return;
@@ -1786,13 +1924,22 @@ function stopRecognition({ keepWakeRequested = false } = {}) {
   if (!keepWakeRequested) wakeListeningRequested = false;
   window.clearTimeout(wakeRestartTimer);
   if (voiceRecognition) voiceRecognition.stop();
+  if (audioRecorder && audioRecorder.state === "recording") audioRecorder.stop();
+  if (audioStream) {
+    for (const track of audioStream.getTracks()) track.stop();
+    audioStream = null;
+  }
   updateVoiceButtons();
 }
 
 function startDictation() {
-  if (!configured || !SpeechRecognitionAPI) return;
+  if (!configured) return;
   if (voiceMode === "dictation") {
     stopRecognition();
+    return;
+  }
+  if (!nativeVoiceSupported) {
+    void startAudioRecording("dictation");
     return;
   }
   if (voiceRecognition) {
@@ -1802,10 +1949,10 @@ function startDictation() {
   }
   startRecognition("dictation");
 }
-
 function toggleWakeWord() {
-  if (!SpeechRecognitionAPI) {
-    setVoiceStatus("Riconoscimento vocale non supportato da questo browser.");
+  const problem = voiceAvailabilityProblem();
+  if (problem) {
+    setVoiceStatus(problem);
     return;
   }
   if (wakeListeningRequested) {
@@ -1823,8 +1970,10 @@ function toggleWakeWord() {
     window.setTimeout(() => {
       if (wakeListeningRequested && !voiceRecognition) startRecognition("wake");
     }, 250);
-  } else {
+  } else if (nativeVoiceSupported) {
     startRecognition("wake");
+  } else {
+    recordWakeChunk();
   }
 }
 
