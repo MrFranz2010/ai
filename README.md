@@ -128,8 +128,8 @@ configurazione, con le stesse protezioni locali.
 - L'interfaccia NOKK usa il tema scuro per impostazione predefinita; il pulsante
   nella barra superiore alterna tema scuro e chiaro e ricorda la scelta nel
   browser.
-- Puoi allegare fino a 12 file per messaggio, con un massimo di 10 immagini,
-  4 MB per file e 24 MB in totale: testo,
+- Puoi allegare fino a 22 file per messaggio, con un massimo di 20 immagini,
+  4 MB per file e 40 MB in totale: testo,
   codice, PDF, DOCX e immagini PNG, JPEG, WEBP o GIF. Il testo dei documenti
   viene estratto localmente; i PDF scansionati richiedono OCR e non sono
   supportati. Le immagini vengono inviate al provider e richiedono un modello
