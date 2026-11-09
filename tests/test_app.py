@@ -2147,6 +2147,19 @@ class SupabaseConfigLoaderTests(unittest.TestCase):
 
 
 class DeploymentPackagingTests(unittest.TestCase):
+    def test_supabase_store_accepts_every_state_file(self):
+        import supabase_store
+
+        for path in (
+            app.CONFIG_FILE,
+            app.WORKFLOWS_FILE,
+            app.PLANNER_FILE,
+            app.TELEGRAM_FILE,
+            app.GOOGLE_CALENDAR_FILE,
+            app.API_FILE,
+        ):
+            supabase_store.SupabaseJSONStore._validate_name(path.name)
+
     def test_dockerfile_ships_every_module(self):
         root = Path(__file__).resolve().parent.parent
         dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")

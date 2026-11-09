@@ -10,6 +10,7 @@ STATE_FILES = frozenset({
     "google_calendar.json",
     "chats.json",
     "memories.json",
+    "api.json",
 })
 MISSING = object()
 
