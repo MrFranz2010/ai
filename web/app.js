@@ -2362,6 +2362,7 @@ async function readJsonResponse(response, fallbackMessage) {
 
 async function waitForChatJob(jobId) {
   let renderedEvents = 0;
+  const deadline = Date.now() + 5 * 60 * 1000;
   while (true) {
     const response = await fetch(`/api/jobs/${jobId}`);
     const job = await readJsonResponse(response, "Attività non disponibile.");
@@ -2384,6 +2385,12 @@ async function waitForChatJob(jobId) {
       finishApprovalCards(jobId);
       if (toolEvents.length > 0) await refreshNokkData();
       return job.reply;
+    }
+    if (Date.now() > deadline) {
+      finishApprovalCards(jobId);
+      throw new Error(
+        "Nessuna risposta dal provider dopo 5 minuti. Controlla il modello scelto e riprova.",
+      );
     }
     await delay(500);
   }

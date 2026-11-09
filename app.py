@@ -3996,6 +3996,52 @@ def run_chat_job(job_id, messages, active_config, mode=None):
             "failed",
             error=f"Risposta del provider non valida: {error}",
         )
+    except TimeoutError:
+        _finish_job(
+            job_id,
+            "failed",
+            error="Il provider non ha risposto in tempo. Riprova tra poco.",
+        )
+    except OSError as error:
+        _finish_job(
+            job_id,
+            "failed",
+            error=f"Connessione al provider interrotta: {error}",
+        )
+    except Exception as error:  # noqa: BLE001 - a dead thread would keep the chat pending
+        _finish_job(
+            job_id,
+            "failed",
+            error=f"Errore inatteso durante la richiesta: {error}",
+        )
+
+
+CHAT_JOB_STALE_SECONDS = 300
+
+
+def _run_chat_job_safely(job_id, messages, active_config, mode=None):
+    """Never leave a job running when the worker dies unexpectedly."""
+    try:
+        run_chat_job(job_id, messages, active_config, mode)
+    except BaseException as error:  # noqa: BLE001 - includes SystemExit
+        _finish_job(
+            job_id,
+            "failed",
+            error=f"La richiesta si è interrotta senza risposta: {error}",
+        )
+        raise
+    finally:
+        with chat_jobs_lock:
+            job = chat_jobs.get(job_id)
+            if job is not None and job.get("status") == "running":
+                job.update(
+                    status="failed",
+                    updated_at=time.time(),
+                    error=(
+                        "La richiesta non ha prodotto una risposta. "
+                        "Controlla il provider e riprova."
+                    ),
+                )
 
 
 def _send_telegram_message(token, chat_id, text):
@@ -5854,6 +5900,18 @@ class AppHandler(BaseHTTPRequestHandler):
                 if job is None:
                     self._send_json(404, {"error": "Attività non trovata o scaduta."})
                     return
+                if (
+                    job.get("status") == "running"
+                    and time.time() - job.get("updated_at", 0) > CHAT_JOB_STALE_SECONDS
+                ):
+                    job.update(
+                        status="failed",
+                        updated_at=time.time(),
+                        error=(
+                            "Il provider non ha risposto entro "
+                            f"{CHAT_JOB_STALE_SECONDS // 60} minuti. Riprova."
+                        ),
+                    )
                 public_job = {
                     key: job[key]
                     for key in (
@@ -6367,6 +6425,18 @@ class AppHandler(BaseHTTPRequestHandler):
                 if job is None:
                     self._send_json(404, {"error": "Attività non trovata o scaduta."})
                     return
+                if (
+                    job.get("status") == "running"
+                    and time.time() - job.get("updated_at", 0) > CHAT_JOB_STALE_SECONDS
+                ):
+                    job.update(
+                        status="failed",
+                        updated_at=time.time(),
+                        error=(
+                            "Il provider non ha risposto entro "
+                            f"{CHAT_JOB_STALE_SECONDS // 60} minuti. Riprova."
+                        ),
+                    )
                 public_job = {
                     key: job[key]
                     for key in (
@@ -6551,7 +6621,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 "workspace": active_config["workspace"],
             }
         worker = threading.Thread(
-            target=run_chat_job,
+            target=_run_chat_job_safely,
             args=(job_id, messages, active_config, mode),
             daemon=True,
         )
