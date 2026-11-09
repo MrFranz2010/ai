@@ -9,6 +9,7 @@ from http.server import ThreadingHTTPServer
 
 import app
 import user_memory
+from search import make_document
 from supabase_store import MISSING, SupabaseJSONStore
 
 
@@ -452,6 +453,26 @@ class AuthenticatedAppHandler(app.AppHandler):
             print(f"Unable to save chats: {error}")
             self._send_json(502, {"error": "Impossibile salvare le conversazioni."})
 
+
+def collect_chat_search_documents():
+    """Saved conversations are searchable too on the hosted branch."""
+    try:
+        with CHAT_LOCK:
+            chats = load_chats()
+    except Exception:  # noqa: BLE001 - search must not break on storage
+        return []
+    documents = []
+    for chat in chats[:100]:
+        text = "\n".join(
+            message.get("content", "") for message in chat["messages"][-12:]
+        )
+        documents.append(
+            make_document("chat", chat["id"], chat["title"], text)
+        )
+    return documents
+
+
+app.search_extra_provider = collect_chat_search_documents
 
 user_memory.install(app, AuthenticatedAppHandler, load_memories, save_memories)
 
