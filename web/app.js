@@ -288,6 +288,45 @@ function wakeCommandFrom(text, phrase) {
     .trim();
 }
 
+const WAKE_CONFIRM_WORDS = new Set([
+  "conferma", "conferme", "confermo", "confermate", "confermato",
+]);
+
+function wakeConfirmationIndex(text) {
+  const words = normalizeWakeText(text).split(" ").filter(Boolean);
+  return words.findIndex((word) => WAKE_CONFIRM_WORDS.has(word));
+}
+
+function wakeDictationText(text, phrase) {
+  const command = wakeCommandFrom(text, phrase);
+  if (!wakeDictating) {
+    if (command === null) return null;
+    wakeDictating = true;
+    return command;
+  }
+  return command === null ? String(text || "").trim() : command;
+}
+
+function wakeDictationStep(spoken) {
+  const text = String(spoken || "").trim();
+  const confirmAt = wakeConfirmationIndex(text);
+  const body = confirmAt >= 0
+    ? text.split(/\s+/).filter(Boolean).slice(0, confirmAt).join(" ")
+    : text;
+  if (body) appendTranscript(body);
+  if (confirmAt < 0) {
+    setVoiceStatus("Ti ascolto: parla e poi di’ «conferma» per inviare.");
+    return;
+  }
+  wakeDictating = false;
+  if (!input.value.trim()) {
+    setVoiceStatus("Non ho sentito nulla da inviare. Di’ di nuovo la wake word.");
+    return;
+  }
+  setVoiceStatus("Invio il messaggio…");
+  chatForm.requestSubmit();
+}
+
 function voiceAvailabilityProblem() {
   if (!nativeVoiceSupported && !audioRecordingSupported) {
     return "Questo browser non permette il microfono: usa Chrome o Safari aggiornato, in HTTPS.";
@@ -299,7 +338,7 @@ function voiceAvailabilityProblem() {
 }
 
 let wakeListeningRequested = false;
-let wakeTriggered = false;
+let wakeDictating = false;
 let wakeRestartTimer = null;
 let wakeRetryCount = 0;
 let pendingAttachments = [];
@@ -1678,20 +1717,20 @@ async function handleRecording(blob, mode) {
     text = await transcribeRecording(blob);
   } catch (error) {
     setVoiceStatus(error.message);
-    if (mode === "wake") wakeListeningRequested = false;
+    if (mode === "wake") {
+      wakeListeningRequested = false;
+      wakeDictating = false;
+    }
     updateVoiceButtons();
     return;
   }
   if (mode === "wake") {
     const phrase = wakePhraseInput.value.trim() || "Nok";
-    const command = wakeCommandFrom(text, phrase);
-    if (command === null) {
+    const heard = wakeDictationText(text, phrase);
+    if (heard === null) {
       setVoiceStatus(`In ascolto di “${phrase}”…`);
-    } else if (command) {
-      appendTranscript(command);
-      setVoiceStatus(`Testo acquisito. Wake word “${phrase}” ancora attiva; premi Invio per inviare.`);
     } else {
-      setVoiceStatus("Wake word riconosciuta. Parla ora.");
+      wakeDictationStep(heard);
     }
     if (wakeListeningRequested) recordWakeChunk();
     return;
@@ -1834,27 +1873,10 @@ function startRecognition(mode) {
       const result = event.results[index];
       if (!result.isFinal) continue;
       const transcript = result[0].transcript.trim();
-      if (!wakeTriggered) {
-        const phrase = wakePhraseInput.value.trim() || "Nok";
-        const command = wakeCommandFrom(transcript, phrase);
-        if (command === null) continue;
-        if (command) {
-          appendTranscript(command);
-          setVoiceStatus(
-            `Testo acquisito. Wake word “${phrase}” ancora attiva; premi Invio per inviare.`,
-          );
-          continue;
-        }
-        wakeTriggered = true;
-        setVoiceStatus("Wake word riconosciuta. Parla ora.");
-        continue;
-      }
-
-      appendTranscript(transcript);
-      wakeTriggered = false;
-      setVoiceStatus(
-        `Testo acquisito. Wake word “${wakePhraseInput.value.trim()}” ancora attiva; premi Invio per inviare.`,
-      );
+      const phrase = wakePhraseInput.value.trim() || "Nok";
+      const heard = wakeDictationText(transcript, phrase);
+      if (heard === null) continue;
+      wakeDictationStep(heard);
     }
   };
   recognition.onerror = (event) => {
@@ -1879,7 +1901,7 @@ function startRecognition(mode) {
       "language-not-supported",
     ].includes(event.error)) {
       wakeListeningRequested = false;
-      wakeTriggered = false;
+      wakeDictating = false;
       window.clearTimeout(wakeRestartTimer);
     } else if (wakeListeningRequested && !voiceRecognition) {
       scheduleWakeRestart();
@@ -1916,7 +1938,10 @@ function startRecognition(mode) {
 }
 
 function stopRecognition({ keepWakeRequested = false } = {}) {
-  if (!keepWakeRequested) wakeListeningRequested = false;
+  if (!keepWakeRequested) {
+    wakeListeningRequested = false;
+    wakeDictating = false;
+  }
   window.clearTimeout(wakeRestartTimer);
   if (voiceRecognition) voiceRecognition.stop();
   if (audioRecorder && audioRecorder.state === "recording") audioRecorder.stop();
@@ -1952,13 +1977,12 @@ function toggleWakeWord() {
   }
   if (wakeListeningRequested) {
     stopRecognition();
-    wakeTriggered = false;
+    wakeDictating = false;
     wakeRetryCount = 0;
     setVoiceStatus("Wake word disattivata.");
     return;
   }
   wakeListeningRequested = true;
-  wakeTriggered = false;
   wakeRetryCount = 0;
   if (voiceRecognition) {
     voiceRecognition.stop();
