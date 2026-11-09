@@ -368,6 +368,13 @@ class AppRouteTests(unittest.TestCase):
         self.assertIn("function applyTheme", assets["/hub.js"])
         self.assertIn("nokk-theme", assets["/hub.js"])
         self.assertIn("var(--accent)", assets["/hub.css"])
+        self.assertIn('id="rotate-button"', assets["/hub"])
+        self.assertIn("function applyRotation", assets["/hub.js"])
+        self.assertIn("nokk-hub-rotation", assets["/hub.js"])
+        self.assertIn("nokk-hub-rotation", assets["/hub"])
+        self.assertIn('html[data-rotation="90"] body', assets["/hub.css"])
+        self.assertIn("rotate(180deg)", assets["/hub.css"])
+        self.assertIn("rotate(-90deg)", assets["/hub.css"])
         self.assertIn(":root[data-theme=\"dark\"]", assets["/hub.css"])
         self.assertNotIn("--page:", assets["/hub.css"])
 
