@@ -3427,23 +3427,13 @@ def _multipart_audio_body(fields, filename, mime_type, audio):
     return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
 
-def transcribe_audio(active_config, audio, mime_type):
-    provider = active_config.get("provider")
-    api_key = active_config.get("api_key")
-    endpoint = transcription_endpoint(provider, active_config.get("base_url") or "")
+def _transcription_request(provider, api_key, model, audio, mime_type, base_url):
+    endpoint = transcription_endpoint(provider, base_url)
     if not endpoint:
         raise ValueError(
             "La trascrizione audio richiede OpenAI, Groq, Mistral, OpenRouter "
             "o un endpoint personalizzato compatibile."
         )
-    if not isinstance(api_key, str) or not api_key:
-        raise ValueError("Configura una chiave API per trascrivere la voce.")
-    configured_model = active_config.get("transcribe_model")
-    model = (
-        configured_model.strip()
-        if isinstance(configured_model, str) and configured_model.strip()
-        else TRANSCRIBE_MODELS.get(provider, "whisper-1")
-    )
     audio_format = AUDIO_FORMATS.get(mime_type, "webm")
     if provider == "openrouter":
         # OpenRouter's speech-to-text endpoint is JSON with base64 audio, not
@@ -3464,7 +3454,7 @@ def transcribe_audio(active_config, audio, mime_type):
             mime_type,
             audio,
         )
-    request = Request(
+    return Request(
         endpoint,
         data=body,
         headers={
@@ -3472,28 +3462,82 @@ def transcribe_audio(active_config, audio, mime_type):
             "Authorization": f"Bearer {api_key}",
         },
         method="POST",
+    ), endpoint
+
+
+def transcribe_audio(active_config, audio, mime_type):
+    provider = active_config.get("provider")
+    base_url = active_config.get("base_url") or ""
+    api_key = active_config.get("api_key")
+    configured_model = active_config.get("transcribe_model")
+    model = (
+        configured_model.strip()
+        if isinstance(configured_model, str) and configured_model.strip()
+        else TRANSCRIBE_MODELS.get(provider, "whisper-1")
     )
-    try:
-        with urlopen(request, timeout=60) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except HTTPError as error:
-        details = _read_http_body(error)
+    stored_keys = active_config.get("api_keys")
+    stored_keys = stored_keys if isinstance(stored_keys, dict) else {}
+    candidates = []
+    seen = set()
+    if (
+        (provider in TRANSCRIBE_ENDPOINTS or provider == "custom")
+        and isinstance(api_key, str)
+        and api_key
+        and transcription_endpoint(provider, base_url)
+    ):
+        candidates.append((provider, api_key, model, base_url))
+        seen.add(provider)
+    for name in TRANSCRIBE_MODELS:
+        if name in seen or name == "custom":
+            continue
+        key = stored_keys.get(name)
+        if isinstance(key, str) and key:
+            candidates.append((name, key, TRANSCRIBE_MODELS[name], ""))
+            seen.add(name)
+    if not candidates:
+        if provider not in TRANSCRIBE_ENDPOINTS and provider != "custom":
+            raise ValueError(
+                "La trascrizione audio richiede OpenAI, Groq, Mistral, "
+                "OpenRouter o un endpoint personalizzato compatibile."
+            )
+        raise ValueError("Configura una chiave API per trascrivere la voce.")
+    for index, (name, key, candidate_model, candidate_base) in enumerate(candidates):
+        request, endpoint = _transcription_request(
+            name, key, candidate_model, audio, mime_type, candidate_base,
+        )
         try:
-            error.close()
-        except Exception:  # noqa: BLE001 - closing must never hide the error
-            pass
-        suffix = f" (HTTP {error.code})" if getattr(error, "code", None) else ""
-        if details:
-            suffix = f"{suffix} {details[:200]}"
-        raise ValueError(f"Il provider ha rifiutato la trascrizione{suffix}.") from None
-    except (TimeoutError, OSError):
-        raise ValueError(
-            "Il servizio di trascrizione non ha risposto in tempo. Riprova."
-        ) from None
-    text = payload.get("text") if isinstance(payload, dict) else None
-    if not isinstance(text, str) or not text.strip():
-        raise ValueError("Il provider non ha restituito una trascrizione.")
-    return text.strip()
+            with urlopen(request, timeout=60) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except HTTPError as error:
+            details = _read_http_body(error)
+            try:
+                error.close()
+            except Exception:  # noqa: BLE001 - closing must never hide the error
+                pass
+            # A missing audio route means the endpoint cannot transcribe at
+            # all, so another saved provider is tried before giving up.
+            if error.code in {404, 405} and index + 1 < len(candidates):
+                continue
+            location = urlsplit(endpoint)
+            suffix = (
+                f" (HTTP {error.code} su {location.netloc}{location.path})"
+                if getattr(error, "code", None)
+                else ""
+            )
+            if details:
+                suffix = f"{suffix} {details[:200]}"
+            raise ValueError(
+                f"Il provider ha rifiutato la trascrizione{suffix}."
+            ) from None
+        except (TimeoutError, OSError):
+            raise ValueError(
+                "Il servizio di trascrizione non ha risposto in tempo. Riprova."
+            ) from None
+        text = payload.get("text") if isinstance(payload, dict) else None
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("Il provider non ha restituito una trascrizione.")
+        return text.strip()
+    raise ValueError("Il provider ha rifiutato la trascrizione.")
 
 
 def build_provider_request(
