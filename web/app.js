@@ -751,7 +751,8 @@ function launcherNoteItem(note) {
 function insertNoteInComposer(note) {
   const body = (note.text || note.snippet || "").trim();
   const previous = input.value.trim();
-  input.value = `${previous ? `${previous}\n\n` : ""}${note.title}${body ? `\n${body}` : ""}`;
+  const detail = body && body !== note.title ? `\n${body}` : "";
+  input.value = `${previous ? `${previous}\n\n` : ""}${note.title}${detail}`;
   resizeComposer();
   welcome.hidden = true;
   openApplicationWindow("chat");
