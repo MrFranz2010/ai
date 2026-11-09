@@ -195,6 +195,7 @@
       </section>
 
       <form class="composer" id="chat-form">
+        <div class="command-menu" id="command-menu" role="listbox" aria-label="Comandi della chat" hidden></div>
         <div class="composer-attachments" id="attachment-list" aria-live="polite" hidden></div>
         <label class="sr-only" for="message-input">Scrivi un messaggio</label>
         <textarea id="message-input" rows="1" maxlength="12000"
@@ -202,6 +203,10 @@
         <input id="file-input" type="file" multiple hidden
           accept=".txt,.md,.csv,.json,.log,.py,.js,.ts,.html,.css,.xml,.yaml,.yml,.toml,.ini,.sql,.sh,.pdf,.docx,.png,.jpg,.jpeg,.webp,.gif">
         <div class="composer-footer">
+          <button class="mode-chip" id="mode-chip" type="button" hidden>
+            <span id="mode-chip-label">Modalità</span>
+            <svg class="icon" aria-hidden="true"><use href="#i-close"></use></svg>
+          </button>
           <span id="voice-status" role="status" aria-live="polite">Microfono pronto · i file partono solo al tuo invio</span>
           <div class="composer-actions">
             <button class="attach-button" id="attach-button" type="button" aria-label="Allega file" title="Allega file" disabled>

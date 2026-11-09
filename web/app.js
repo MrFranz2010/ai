@@ -15,6 +15,9 @@ const welcome = document.querySelector("#welcome");
 const chatForm = document.querySelector("#chat-form");
 const input = document.querySelector("#message-input");
 const sendButton = document.querySelector("#send-button");
+const commandMenu = document.querySelector("#command-menu");
+const modeChip = document.querySelector("#mode-chip");
+const modeChipLabel = document.querySelector("#mode-chip-label");
 const settingsOverlay = document.querySelector("#settings-overlay");
 const settingsForm = document.querySelector("#settings-form");
 const settingsError = document.querySelector("#settings-error");
@@ -2786,20 +2789,191 @@ settingsForm.addEventListener("submit", async (event) => {
   }
 });
 
-chatForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const text = input.value.trim();
-  if ((!text && pendingAttachments.length === 0) || sending || !configured) return;
-  const attachments = pendingAttachments;
-  const messageText = text || "Analizza i file allegati.";
+const chatCommands = [
+  {
+    name: "/promemoria",
+    hint: "Salva una scadenza — es. /promemoria Riunione domani alle 10",
+  },
+  { name: "/compiti", hint: "Elenca compiti e verifiche aperte" },
+  { name: "/codice", hint: "Rispondi come sviluppatore senior" },
+  { name: "/studio", hint: "Spiegazioni passo passo per lo studio" },
+  { name: "/analista", hint: "Analizza numeri, tabelle e dati" },
+  { name: "/meteo", hint: "Aggiorna il meteo in sidebar" },
+];
+const chatModes = {
+  "/codice": "codice",
+  "/studio": "studio",
+  "/analista": "analista",
+};
+const modeLabels = { codice: "Codice", studio: "Studio", analista: "Analista" };
+let activeMode = null;
+let commandMatches = [];
+let commandIndex = 0;
+
+function renderModeChip() {
+  modeChip.hidden = !activeMode;
+  if (activeMode) modeChipLabel.textContent = `Modalità ${modeLabels[activeMode]}`;
+}
+
+function setActiveMode(mode) {
+  activeMode = mode;
+  renderModeChip();
+}
+
+modeChip.addEventListener("click", () => {
+  setActiveMode(null);
+  input.focus();
+});
+
+function updateCommandMenu() {
+  const value = input.value;
+  const typingCommand = value.startsWith("/") && !/\s/.test(value);
+  commandMatches = typingCommand
+    ? chatCommands.filter((command) => command.name.startsWith(value.toLowerCase()))
+    : [];
+  if (!commandMatches.length) {
+    commandMenu.hidden = true;
+    commandMenu.replaceChildren();
+    commandIndex = 0;
+    return;
+  }
+  commandIndex = Math.min(commandIndex, commandMatches.length - 1);
+  commandMenu.replaceChildren(
+    ...commandMatches.map((command, index) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = `command-item${index === commandIndex ? " active" : ""}`;
+      item.setAttribute("role", "option");
+      item.setAttribute("aria-selected", index === commandIndex ? "true" : "false");
+      const name = document.createElement("strong");
+      name.textContent = command.name;
+      const hint = document.createElement("span");
+      hint.textContent = command.hint;
+      item.append(name, hint);
+      item.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        completeCommand(command);
+      });
+      return item;
+    }),
+  );
+  commandMenu.hidden = false;
+}
+
+function completeCommand(command) {
+  input.value = `${command.name} `;
+  commandMenu.hidden = true;
+  resizeComposer();
+  input.focus();
+}
+
+function plannerMoment(task) {
+  const startsAt = task.starts_at;
+  if (startsAt) {
+    const moment = new Date(startsAt);
+    if (!Number.isNaN(moment.getTime())) {
+      const day = new Intl.DateTimeFormat("it-IT", {
+        day: "numeric", month: "short",
+      }).format(moment);
+      const clock = `${String(moment.getHours()).padStart(2, "0")}:${String(moment.getMinutes()).padStart(2, "0")}`;
+      return `${day} alle ${clock}`;
+    }
+    return startsAt;
+  }
+  if (task.due_date) {
+    const moment = new Date(`${task.due_date}T00:00:00`);
+    if (!Number.isNaN(moment.getTime())) {
+      return new Intl.DateTimeFormat("it-IT", {
+        day: "numeric", month: "short",
+      }).format(moment);
+    }
+    return task.due_date;
+  }
+  return "";
+}
+
+async function handleChatCommand(rawText) {
+  const [token, ...rest] = rawText.split(/\s+/);
+  const name = token.toLowerCase();
+  const argument = rest.join(" ").trim();
+  if (!chatCommands.some((command) => command.name === name)) return false;
+  welcome.hidden = true;
+  if (name === "/promemoria") {
+    addMessage("user", rawText);
+    if (!argument) {
+      addMessage(
+        "assistant",
+        "Scrivi la scadenza dopo il comando, per esempio «/promemoria Riunione domani alle 10» o «/promemoria Scade la rata il 20».",
+      );
+      return true;
+    }
+    try {
+      const response = await fetch("/api/reminders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: argument }),
+      });
+      const result = await readJsonResponse(response, "Impossibile salvare il promemoria.");
+      if (!response.ok) throw new Error(result.error || "Impossibile salvare il promemoria.");
+      const title = result.item?.title || argument;
+      addMessage(
+        "assistant",
+        `✅ Promemoria salvato: «${title}» — ${result.label}. Se Telegram è collegato ti avviso 30 minuti prima.`,
+      );
+    } catch (error) {
+      addMessage("assistant", error.message, "error");
+    }
+    return true;
+  }
+  if (name === "/compiti") {
+    addMessage("user", rawText);
+    try {
+      const response = await fetch("/api/planner");
+      const result = await readJsonResponse(response, "Impossibile leggere i compiti.");
+      if (!response.ok) throw new Error(result.error || "Impossibile leggere i compiti.");
+      const open = (result.tasks || [])
+        .filter((task) => task && !task.completed && task.title)
+        .map((task) => {
+          const moment = plannerMoment(task);
+          return `- **${task.title}**${moment ? ` — ${moment}` : ""}`;
+        });
+      addMessage(
+        "assistant",
+        open.length
+          ? `📝 Compiti e verifiche aperte:\n\n${open.join("\n")}`
+          : "✅ Nessun compito aperto. Scrivi «/promemoria …» per aggiungerne uno.",
+      );
+    } catch (error) {
+      addMessage("assistant", error.message, "error");
+    }
+    return true;
+  }
+  if (name === "/meteo") {
+    addMessage("user", rawText);
+    await refreshWeather();
+    addMessage("assistant", "Meteo aggiornato nella sidebar.");
+    return true;
+  }
+  const mode = chatModes[name];
+  if (!mode) return false;
+  setActiveMode(mode);
+  if (!argument) {
+    addMessage("user", rawText);
+    addMessage(
+      "assistant",
+      `Modalità ${modeLabels[mode]} attiva per i prossimi messaggi. Premi la crocetta nel campo di scrittura per uscirne.`,
+    );
+    return true;
+  }
+  await sendChatMessage(argument, [], mode);
+  return true;
+}
+
+async function sendChatMessage(messageText, attachments = [], mode = null) {
   welcome.hidden = true;
   if (messages.length === 0) pageTitle.textContent = messageText.slice(0, 50);
   messages.push({ role: "user", content: messageText, attachments });
   addMessage("user", messageText, "", attachments);
-  pendingAttachments = [];
-  renderPendingAttachments();
-  input.value = "";
-  resizeComposer();
   sending = true;
   sendButton.disabled = true;
   newChatButton.disabled = true;
@@ -2808,7 +2982,7 @@ chatForm.addEventListener("submit", async (event) => {
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify(mode ? { messages, mode } : { messages }),
     });
     const result = await readJsonResponse(response, "La richiesta non è riuscita.");
     if (!response.ok) throw new Error(result.error || "La richiesta non è riuscita.");
@@ -2829,13 +3003,53 @@ chatForm.addEventListener("submit", async (event) => {
     newChatButton.disabled = false;
     input.focus();
   }
+}
+
+chatForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const text = input.value.trim();
+  if ((!text && pendingAttachments.length === 0) || sending || !configured) return;
+  const attachments = pendingAttachments;
+  if (text.startsWith("/")) {
+    input.value = "";
+    resizeComposer();
+    commandMenu.hidden = true;
+    if (await handleChatCommand(text)) return;
+    input.value = text;
+  }
+  const messageText = text || "Analizza i file allegati.";
+  pendingAttachments = [];
+  renderPendingAttachments();
+  input.value = "";
+  resizeComposer();
+  await sendChatMessage(messageText, attachments, activeMode);
 });
 
 input.addEventListener("input", () => {
   resizeComposer();
+  updateCommandMenu();
 });
 
 input.addEventListener("keydown", (event) => {
+  if (!commandMenu.hidden && commandMatches.length) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      commandIndex =
+        (commandIndex + step + commandMatches.length) % commandMatches.length;
+      updateCommandMenu();
+      return;
+    }
+    if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey)) {
+      event.preventDefault();
+      completeCommand(commandMatches[commandIndex]);
+      return;
+    }
+    if (event.key === "Escape") {
+      commandMenu.hidden = true;
+      return;
+    }
+  }
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     chatForm.requestSubmit();
