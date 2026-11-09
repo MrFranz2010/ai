@@ -362,6 +362,14 @@ class AppRouteTests(unittest.TestCase):
         self.assertIn("wakeLock", assets["/hub.js"])
         self.assertIn(".ptt", assets["/hub.css"])
         self.assertIn("grid-template-columns", assets["/hub.css"])
+        self.assertIn("/style.css", assets["/hub"])
+        self.assertIn('id="theme-select"', assets["/hub"])
+        self.assertIn('localStorage.getItem("nokk-theme")', assets["/hub"])
+        self.assertIn("function applyTheme", assets["/hub.js"])
+        self.assertIn("nokk-theme", assets["/hub.js"])
+        self.assertIn("var(--accent)", assets["/hub.css"])
+        self.assertIn(":root[data-theme=\"dark\"]", assets["/hub.css"])
+        self.assertNotIn("--page:", assets["/hub.css"])
 
     def test_serves_page_and_static_assets(self):
         assets = {}

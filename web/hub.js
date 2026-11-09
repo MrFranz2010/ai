@@ -44,6 +44,7 @@ const els = {
   streamUrl: document.getElementById("stream-url"),
   streamName: document.getElementById("stream-name"),
   speakReplies: document.getElementById("speak-replies"),
+  themeSelect: document.getElementById("theme-select"),
   audio: document.getElementById("player"),
 };
 
@@ -56,8 +57,7 @@ function element(tag, className, text) {
 
 function icon(name) {
   const wrapper = document.createElement("span");
-  wrapper.className = "icon";
-  wrapper.style.display = "inline-flex";
+  wrapper.className = "hub-inline-icon";
   wrapper.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ""}</svg>`;
   return wrapper;
 }
@@ -683,7 +683,7 @@ function applySettings({ rebuildPanel = false } = {}) {
 function renderSettings() {
   els.widgetList.replaceChildren();
   settings.layout.forEach((item, index) => {
-    const row = element("div", "widget-row");
+    const row = element("div", "hub-widget-row");
     const label = document.createElement("label");
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
@@ -726,6 +726,7 @@ function renderSettings() {
   els.streamUrl.value = settings.streamUrl;
   els.streamName.value = settings.streamName;
   els.speakReplies.checked = settings.speakReplies;
+  els.themeSelect.value = currentTheme();
 }
 
 function moveWidget(index, delta) {
@@ -762,6 +763,26 @@ els.speakReplies.addEventListener("change", () => {
   settings.speakReplies = els.speakReplies.checked;
   saveSettings();
   if (!settings.speakReplies) stopSpeaking();
+});
+
+function currentTheme() {
+  return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+}
+
+function applyTheme(value) {
+  const theme = value === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = theme;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = theme === "light" ? "#f4f8fa" : "#191817";
+}
+
+els.themeSelect.addEventListener("change", () => {
+  applyTheme(els.themeSelect.value);
+  try {
+    localStorage.setItem("nokk-theme", currentTheme());
+  } catch {
+    /* private mode */
+  }
 });
 
 /* Buttons, wake lock and connectivity */
@@ -830,6 +851,7 @@ window.addEventListener("offline", updateConnection);
 
 /* Boot */
 
+applyTheme(document.documentElement.dataset.theme);
 renderRails();
 loadPlanner();
 keepAwake();
