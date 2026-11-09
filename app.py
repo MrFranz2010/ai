@@ -150,6 +150,32 @@ WEATHER_GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 WEATHER_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 WEATHER_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 WEATHER_RETRY_SECONDS = 2.0
+WEATHER_BACKUP_GEOCODE_URL = "https://nominatim.openstreetmap.org/search"
+WEATHER_BACKUP_FORECAST_URL = (
+    "https://api.met.no/weatherapi/locationforecast/2.0/compact"
+)
+WEATHER_USER_AGENT = "NOKK personal assistant (https://github.com/MrFranz2010/ai)"
+WEATHER_BACKUP_DESCRIPTIONS = {
+    "clearsky": "sereno",
+    "fair": "poco nuvoloso",
+    "partlycloudy": "parzialmente nuvoloso",
+    "cloudy": "nuvoloso",
+    "fog": "nebbia",
+    "lightrain": "pioggia debole",
+    "rain": "pioggia",
+    "heavyrain": "pioggia forte",
+    "lightrainshowers": "rovesci deboli",
+    "rainshowers": "rovesci",
+    "heavyrainshowers": "rovesci forti",
+    "lightsleet": "nevischio debole",
+    "sleet": "nevischio",
+    "lightsnow": "neve debole",
+    "snow": "neve",
+    "heavysnow": "neve forte",
+    "lightrainandthunder": "temporale debole",
+    "rainandthunder": "temporale",
+    "snowandthunder": "temporale con neve",
+}
 
 
 WEATHER_DESCRIPTIONS = {
@@ -3943,7 +3969,7 @@ def _weather_json(url, parameters):
     """One Open-Meteo call, retried once while the service is busy."""
     request = Request(
         f"{url}?{urlencode(parameters)}",
-        headers={"User-Agent": "NOKK/1.0"},
+        headers={"User-Agent": WEATHER_USER_AGENT},
     )
     for attempt in (0, 1):
         try:
@@ -3970,9 +3996,150 @@ def _weather_json(url, parameters):
             raise RuntimeError("Timeout del servizio meteo.") from None
         except (json.JSONDecodeError, UnicodeDecodeError):
             raise RuntimeError("Il servizio meteo ha risposto in modo non valido.") from None
-    if not isinstance(payload, dict):
+    if not isinstance(payload, (dict, list)):
         raise RuntimeError("Il servizio meteo ha risposto in modo non valido.")
     return payload
+
+
+def _is_weather_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _weather_place(candidates):
+    """Coordinates for the first name that resolves, backup service included."""
+    for candidate in candidates:
+        try:
+            geo = _weather_json(
+                WEATHER_GEOCODE_URL,
+                {"name": candidate, "count": 1, "language": "it", "format": "json"},
+            )
+        except RuntimeError:
+            continue
+        results = geo.get("results") if isinstance(geo, dict) else None
+        if isinstance(results, list) and results:
+            place = results[0]
+            if _is_weather_number(place.get("latitude")) and _is_weather_number(
+                place.get("longitude")
+            ):
+                return place
+    for candidate in candidates:
+        try:
+            found = _weather_json(
+                WEATHER_BACKUP_GEOCODE_URL,
+                {"q": candidate, "format": "json", "limit": 1, "accept-language": "it"},
+            )
+        except RuntimeError:
+            continue
+        if isinstance(found, list) and found and isinstance(found[0], dict):
+            entry = found[0]
+            try:
+                latitude = float(entry.get("lat"))
+                longitude = float(entry.get("lon"))
+            except (TypeError, ValueError):
+                continue
+            return {
+                "name": str(entry.get("name") or candidate),
+                "country_code": str(entry.get("country_code") or "").upper(),
+                "latitude": latitude,
+                "longitude": longitude,
+            }
+    return None
+
+
+def _open_meteo_weather(place, city):
+    latitude = place["latitude"]
+    longitude = place["longitude"]
+    forecast = _weather_json(
+        WEATHER_FORECAST_URL,
+        {
+            "latitude": latitude,
+            "longitude": longitude,
+            "current": "temperature_2m,weather_code",
+            "daily": "temperature_2m_min,temperature_2m_max",
+            "timezone": WEATHER_TIMEZONE,
+            "forecast_days": 1,
+        },
+    )
+    current = forecast.get("current") or {}
+    daily = forecast.get("daily") or {}
+    temperature = current.get("temperature_2m")
+    code = current.get("weather_code")
+    minimums = daily.get("temperature_2m_min") or []
+    maximums = daily.get("temperature_2m_max") or []
+    return {
+        "city": place.get("name") or city,
+        "country": place.get("country_code") or "",
+        "temperature": round(temperature) if _is_weather_number(temperature) else None,
+        "minimum": (
+            round(minimums[0])
+            if minimums and _is_weather_number(minimums[0])
+            else None
+        ),
+        "maximum": (
+            round(maximums[0])
+            if maximums and _is_weather_number(maximums[0])
+            else None
+        ),
+        "description": WEATHER_DESCRIPTIONS.get(code, "condizioni variabili"),
+        "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(
+            timespec="seconds"
+        ),
+    }
+
+
+def _backup_weather(place, city):
+    """met.no forecast, used when Open-Meteo refuses the request."""
+    payload = _weather_json(
+        WEATHER_BACKUP_FORECAST_URL,
+        {
+            "lat": round(float(place["latitude"]), 4),
+            "lon": round(float(place["longitude"]), 4),
+        },
+    )
+    properties = payload.get("properties") if isinstance(payload, dict) else None
+    timeseries = (properties or {}).get("timeseries") or []
+    if not timeseries or not isinstance(timeseries[0], dict):
+        raise RuntimeError("Il servizio meteo ha risposto in modo non valido.")
+    first = timeseries[0]
+    details = (((first.get("data") or {}).get("instant")) or {}).get("details") or {}
+    temperature = details.get("air_temperature")
+    symbol = str(
+        ((((first.get("data") or {}).get("next_1_hours")) or {}).get("summary") or {}).get(
+            "symbol_code"
+        )
+        or ""
+    ).split("_")[0]
+    local_now = _local_now(WEATHER_TIMEZONE)
+    offset = local_now.utcoffset() or datetime.timedelta()
+    temperatures = []
+    for entry in timeseries:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            moment = datetime.datetime.fromisoformat(
+                str(entry.get("time")).replace("Z", "+00:00")
+            )
+        except (TypeError, ValueError):
+            continue
+        if (moment.astimezone(datetime.timezone.utc) + offset).date() != local_now.date():
+            continue
+        value = (((entry.get("data") or {}).get("instant")) or {}).get("details") or {}
+        value = value.get("air_temperature")
+        if _is_weather_number(value):
+            temperatures.append(value)
+    return {
+        "city": place.get("name") or city,
+        "country": place.get("country_code") or "",
+        "temperature": round(temperature) if _is_weather_number(temperature) else None,
+        "minimum": round(min(temperatures)) if temperatures else None,
+        "maximum": round(max(temperatures)) if temperatures else None,
+        "description": WEATHER_BACKUP_DESCRIPTIONS.get(
+            symbol, "condizioni variabili"
+        ),
+        "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(
+            timespec="seconds"
+        ),
+    }
 
 
 def fetch_weather(city):
@@ -3992,50 +4159,18 @@ def fetch_weather(city):
     shortened = city.split(",")[0].strip()
     if shortened and shortened not in candidates:
         candidates.append(shortened)
-    place = None
-    for candidate in candidates:
-        geo = _weather_json(
-            WEATHER_GEOCODE_URL,
-            {"name": candidate, "count": 1, "language": "it", "format": "json"},
-        )
-        results = geo.get("results")
-        if isinstance(results, list) and results:
-            place = results[0]
-            break
+    place = _weather_place(candidates)
     if place is None:
         raise RuntimeError(f"Città non trovata: {city}.")
-    latitude = place.get("latitude")
-    longitude = place.get("longitude")
-    if not isinstance(latitude, (int, float)) or not isinstance(
-        longitude, (int, float)
-    ):
-        raise RuntimeError("Coordinate non valide per la città richiesta.")
-    forecast = _weather_json(
-        WEATHER_FORECAST_URL,
-        {
-            "latitude": latitude,
-            "longitude": longitude,
-            "current": "temperature_2m,weather_code",
-            "daily": "temperature_2m_min,temperature_2m_max",
-            "timezone": WEATHER_TIMEZONE,
-            "forecast_days": 1,
-        },
-    )
-    current = forecast.get("current") or {}
-    daily = forecast.get("daily") or {}
-    temperature = current.get("temperature_2m")
-    code = current.get("weather_code")
-    minimums = daily.get("temperature_2m_min") or []
-    maximums = daily.get("temperature_2m_max") or []
-    data = {
-        "city": place.get("name") or city,
-        "country": place.get("country_code") or "",
-        "temperature": round(temperature) if isinstance(temperature, (int, float)) else None,
-        "minimum": round(minimums[0]) if minimums and isinstance(minimums[0], (int, float)) else None,
-        "maximum": round(maximums[0]) if maximums and isinstance(maximums[0], (int, float)) else None,
-        "description": WEATHER_DESCRIPTIONS.get(code, "condizioni variabili"),
-        "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-    }
+    try:
+        data = _open_meteo_weather(place, city)
+    except RuntimeError as error:
+        # A refused Open-Meteo call should not blank the card while a second
+        # service can still answer.
+        try:
+            data = _backup_weather(place, city)
+        except RuntimeError:
+            raise error
     with weather_cache_lock:
         weather_cache.update({
             "city": city, "fetched_at": time.time(), "data": dict(data),

@@ -207,6 +207,48 @@ class AppRouteTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 503)
         self.assertEqual(payload["error"], "Città non trovata: Roma, Lazio.")
 
+    def test_fetch_weather_uses_the_backup_service_when_open_meteo_refuses(self):
+        now = app._local_now(app.WEATHER_TIMEZONE)
+        morning = now.replace(hour=10, minute=0, second=0, microsecond=0).isoformat()
+        afternoon = now.replace(hour=12, minute=0, second=0, microsecond=0).isoformat()
+
+        def fake(url, parameters):
+            if url == app.WEATHER_GEOCODE_URL:
+                raise RuntimeError("Il servizio meteo ha rifiutato la richiesta (HTTP 429).")
+            if url == app.WEATHER_BACKUP_GEOCODE_URL:
+                return [{
+                    "lat": "39.23054", "lon": "9.11917",
+                    "name": "Cagliari", "country_code": "it",
+                }]
+            if url == app.WEATHER_FORECAST_URL:
+                raise RuntimeError("Il servizio meteo ha rifiutato la richiesta (HTTP 429).")
+            if url == app.WEATHER_BACKUP_FORECAST_URL:
+                return {"properties": {"timeseries": [
+                    {
+                        "time": morning,
+                        "data": {
+                            "instant": {"details": {"air_temperature": 21.4}},
+                            "next_1_hours": {"summary": {"symbol_code": "cloudy_day"}},
+                        },
+                    },
+                    {
+                        "time": afternoon,
+                        "data": {"instant": {"details": {"air_temperature": 26.6}}},
+                    },
+                ]}}
+            raise AssertionError(url)
+
+        with app.weather_cache_lock:
+            app.weather_cache.update({"city": None, "fetched_at": 0, "data": None})
+        with patch("app._weather_json", side_effect=fake):
+            weather = app.fetch_weather("Cagliari")
+        self.assertEqual(weather["city"], "Cagliari")
+        self.assertEqual(weather["country"], "IT")
+        self.assertEqual(weather["temperature"], 21)
+        self.assertEqual(weather["minimum"], 21)
+        self.assertEqual(weather["maximum"], 27)
+        self.assertEqual(weather["description"], "nuvoloso")
+
     def test_fetch_weather_ignores_the_region_after_the_comma(self):
         def fake_json(url, parameters):
             if "latitude" in parameters:
