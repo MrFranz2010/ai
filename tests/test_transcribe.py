@@ -59,6 +59,16 @@ class TranscriptionTests(unittest.TestCase):
                 "base_url": "",
             })
 
+    def request_json(self, path, payload):
+        request = Request(
+            f"{self.base_url}{path}",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            return json.loads(response.read())
+
     def post(self, payload):
         request = Request(
             f"{self.base_url}/api/transcribe",
@@ -116,3 +126,36 @@ class TranscriptionTests(unittest.TestCase):
         })
         self.assertEqual(status, 400)
         self.assertIn("chiave API", payload["error"])
+
+    def test_the_transcription_model_can_be_configured(self):
+        with app.config_lock:
+            app.config["transcribe_model"] = "whisper-large-v3"
+        audio = base64.b64encode(b"RIFF....WAVE").decode("ascii")
+        with patch(
+            "app.urlopen",
+            return_value=FakeTranscriptionResponse({"text": "Ciao"}),
+        ) as provider_call:
+            status, _payload = self.post({"audio": audio, "mime_type": "audio/mp4"})
+        self.assertEqual(status, 200)
+        self.assertIn(b"whisper-large-v3", provider_call.call_args.args[0].data)
+
+    def test_voice_settings_are_saved_and_validated(self):
+        saved = self.request_json("/api/config", {
+            "wake_window_seconds": 7,
+            "transcribe_model": "whisper-1",
+        })
+        self.assertTrue(saved["ok"])
+        current = self.get_config()
+        self.assertEqual(current["wake_window_seconds"], 7)
+        self.assertEqual(current["transcribe_model"], "whisper-1")
+        with self.assertRaises(HTTPError) as raised:
+            self.request_json("/api/config", {"wake_window_seconds": 30})
+        self.assertEqual(raised.exception.code, 400)
+        payload = json.loads(raised.exception.read())
+        self.assertIn("secondi", payload["error"])
+        with self.assertRaises(HTTPError):
+            self.request_json("/api/config", {"transcribe_model": "modello con spazi"})
+
+    def get_config(self):
+        with urlopen(f"{self.base_url}/api/config") as response:
+            return json.loads(response.read())

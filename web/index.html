@@ -300,6 +300,14 @@
                     <label for="wake-phrase">Wake word</label>
                     <input id="wake-phrase" name="wake_phrase" maxlength="40" value="Nok" required>
                     <p class="field-help">Premi il pulsante di ascolto nella chat per attivarla. Resta in ascolto e prova a riprendere anche se cambi scheda o il browser interrompe la sessione. Non parte da sola all’apertura e non invia messaggi senza il tuo invio.</p>
+                    <label for="transcribe-model">Modello di trascrizione</label>
+                    <input id="transcribe-model" name="transcribe_model" maxlength="120"
+                      placeholder="whisper-1">
+                    <p class="field-help">Usato dalla dettatura quando il browser non ha il riconoscimento vocale (per esempio su iPad). Vuoto significa il modello predefinito del provider.</p>
+                    <label for="wake-window">Durata finestra wake word (secondi)</label>
+                    <input id="wake-window" name="wake_window_seconds" type="number"
+                      min="2" max="15" step="1" value="5">
+                    <p class="field-help">Ogni quanti secondi viene trascritta la registrazione mentre la wake word è attiva. Valori bassi reagiscono prima ma consumano più chiamate.</p>
                     <label class="toggle-label" for="tts-auto-play">
                       <input id="tts-auto-play" name="tts_auto_play" type="checkbox">
                       <span>Leggi automaticamente le risposte</span>
