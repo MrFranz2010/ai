@@ -212,6 +212,58 @@ let workflows = [];
 let editingWorkflowId = null;
 let voiceRecognition = null;
 let voiceMode = null;
+const voiceInIframe = (() => {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+})();
+
+function normalizeWakeText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("it")
+    .replace(/[^\p{L}\p{N}\s']/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function wakeVariants(phrase) {
+  const base = normalizeWakeText(phrase);
+  if (!base) return [];
+  const variants = new Set([base]);
+  if (base.length <= 6) {
+    const queue = [base];
+    while (queue.length) {
+      const candidate = queue.shift();
+      const nexts = [
+        candidate.replace(/k/g, "c"),
+        candidate.replace(/c/g, "k"),
+        candidate.replace(/ck/g, "k"),
+        `${candidate}k`,
+      ];
+      for (const next of nexts) {
+        if (next.length > 8 || variants.has(next)) continue;
+        variants.add(next);
+        queue.push(next);
+      }
+    }
+  }
+  return [...variants].filter((item) => item.length >= 2);
+}
+
+function voiceAvailabilityProblem() {
+  if (!SpeechRecognitionAPI) {
+    return "Riconoscimento vocale non supportato da questo browser.";
+  }
+  if (!window.isSecureContext) {
+    return "Il microfono richiede una connessione sicura: apri NOKK in HTTPS o su localhost.";
+  }
+  return "";
+}
+
 let wakeListeningRequested = false;
 let wakeTriggered = false;
 let wakeRestartTimer = null;
@@ -350,9 +402,9 @@ const imageMimeTypes = {
   ".gif": "image/gif",
 };
 const maxUploadBytes = 4 * 1024 * 1024;
-const maxAttachmentsPerMessage = 12;
-const maxImagesPerMessage = 10;
-const maxAttachmentBytes = 24 * 1024 * 1024;
+const maxAttachmentsPerMessage = 22;
+const maxImagesPerMessage = 20;
+const maxAttachmentBytes = 40 * 1024 * 1024;
 
 const providerDefaults = {
   openai: "gpt-4o-mini",
@@ -1521,7 +1573,8 @@ async function addFiles(fileList) {
 }
 
 function updateVoiceButtons() {
-  micToggle.disabled = !configured || !SpeechRecognitionAPI;
+  const problem = voiceAvailabilityProblem();
+  micToggle.disabled = !configured || Boolean(problem);
   attachButton.disabled = !configured;
   micToggle.classList.toggle("voice-active", voiceMode === "dictation");
   wakeToggle.classList.toggle("voice-active", wakeListeningRequested);
@@ -1535,9 +1588,9 @@ function updateVoiceButtons() {
   wakeToggle.title = wakeListeningRequested
     ? "Disattiva wake word"
     : `Attiva wake word ${wakePhraseInput.value.trim() || "Nok"}`;
-  if (!SpeechRecognitionAPI) {
-    micToggle.title = "Riconoscimento vocale non supportato da questo browser";
-    wakeToggle.title = "Riconoscimento vocale non supportato da questo browser";
+  if (problem) {
+    micToggle.title = problem;
+    wakeToggle.title = problem;
     micToggle.disabled = true;
     wakeToggle.disabled = true;
   } else {
@@ -1573,8 +1626,9 @@ function scheduleWakeRestart() {
 }
 
 function startRecognition(mode) {
-  if (!SpeechRecognitionAPI) {
-    setVoiceStatus("Riconoscimento vocale non supportato da questo browser.");
+  const problem = voiceAvailabilityProblem();
+  if (problem) {
+    setVoiceStatus(problem);
     updateVoiceButtons();
     return;
   }
@@ -1583,6 +1637,7 @@ function startRecognition(mode) {
   recognition.continuous = mode === "wake";
   recognition.interimResults = mode === "wake";
   recognition.maxAlternatives = 1;
+  const dictationBase = mode === "dictation" ? input.value : "";
   voiceRecognition = recognition;
   voiceMode = mode;
   updateVoiceButtons();
@@ -1598,29 +1653,56 @@ function startRecognition(mode) {
   };
   recognition.onresult = (event) => {
     if (voiceRecognition !== recognition) return;
+    if (mode === "dictation") {
+      const base = dictationBase;
+      let finalText = "";
+      let interimText = "";
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        const transcript = (result[0]?.transcript || "").trim();
+        if (!transcript) continue;
+        if (result.isFinal) finalText += `${finalText ? " " : ""}${transcript}`;
+        else interimText += `${interimText ? " " : ""}${transcript}`;
+      }
+      const spoken = [finalText, interimText].filter(Boolean).join(" ");
+      if (spoken) {
+        const separator = base && !/\s$/.test(base) ? " " : "";
+        input.value = `${base}${separator}${spoken}`;
+        resizeComposer();
+      }
+      if (finalText) {
+        wakeListeningRequested = false;
+        recognition.stop();
+      }
+      return;
+    }
+
     for (let index = event.resultIndex; index < event.results.length; index += 1) {
       const result = event.results[index];
       if (!result.isFinal) continue;
       const transcript = result[0].transcript.trim();
-      if (mode === "dictation") {
-        appendTranscript(transcript);
-        wakeListeningRequested = false;
-        recognition.stop();
-        return;
-      }
-
       if (!wakeTriggered) {
         const phrase = wakePhraseInput.value.trim() || "Nok";
-        const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const escaped = wakeVariants(phrase)
+          .map((item) => item.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+          .join("|");
         const wakePattern = new RegExp(
-          `(^|[^\\p{L}\\p{N}])(${escapedPhrase})(?=$|[^\\p{L}\\p{N}])`,
+          `(^|[^\\p{L}\\p{N}])(${escaped})(?=$|[^\\p{L}\\p{N}])`,
           "iu",
         );
-        const match = wakePattern.exec(transcript);
+        const normalized = normalizeWakeText(transcript);
+        const match = wakePattern.exec(normalized);
         if (!match) continue;
         wakeTriggered = true;
+        const matchedWords = normalized
+          .slice(0, match.index + match[0].length)
+          .split(" ")
+          .filter(Boolean).length;
         const command = transcript
-          .slice(match.index + match[0].length)
+          .trim()
+          .split(/\s+/)
+          .slice(matchedWords)
+          .join(" ")
           .replace(/^[\s,.:;!?-]+/, "")
           .trim();
         if (command) {
@@ -1645,7 +1727,9 @@ function startRecognition(mode) {
   recognition.onerror = (event) => {
     if (voiceRecognition !== recognition) return;
     const messagesByError = {
-      "not-allowed": "Accesso al microfono negato. Controlla i permessi del browser.",
+      "not-allowed": voiceInIframe
+        ? "Accesso al microfono negato. Se NOKK è dentro un riquadro, aprilo in una scheda del browser e riprova."
+        : "Accesso al microfono negato. Controlla i permessi del browser.",
       "service-not-allowed": "Il browser non consente il servizio di riconoscimento vocale.",
       "audio-capture": "Microfono non disponibile. Controlla il dispositivo audio.",
       "language-not-supported": "Il riconoscimento vocale non supporta la lingua italiana.",
@@ -1664,6 +1748,8 @@ function startRecognition(mode) {
       wakeListeningRequested = false;
       wakeTriggered = false;
       window.clearTimeout(wakeRestartTimer);
+    } else if (wakeListeningRequested && !voiceRecognition) {
+      scheduleWakeRestart();
     }
     updateVoiceButtons();
   };
