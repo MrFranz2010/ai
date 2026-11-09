@@ -60,6 +60,15 @@ from reminders import (
     build_due_soon_reminders as _build_due_soon_reminders,
     parse_reminder as _parse_reminder,
 )
+from api_access import (
+    MAX_API_KEYS,
+    RateLimiter,
+    default_api_config as _default_api_config,
+    find_api_key as _find_api_key,
+    make_api_key_record as _make_api_key_record,
+    public_api_keys as _public_api_keys,
+    validate_api_config as _validate_api_config,
+)
 from telegram_text import (
     markdown_to_telegram_html,
     telegram_chunks as _telegram_chunks,
@@ -685,6 +694,14 @@ WORKFLOWS_FILE = CONFIG_FILE.with_name("workflows.json")
 PLANNER_FILE = CONFIG_FILE.with_name("planner.json")
 TELEGRAM_FILE = CONFIG_FILE.with_name("telegram.json")
 GOOGLE_CALENDAR_FILE = CONFIG_FILE.with_name("google_calendar.json")
+API_FILE = CONFIG_FILE.with_name("api.json")
+API_PREFIX = "/api/v1/"
+API_CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, X-API-Key, Authorization",
+    "Access-Control-Max-Age": "600",
+}
 config_lock = threading.Lock()
 telegram_lock = threading.Lock()
 telegram_stop_event = threading.Event()
@@ -2506,6 +2523,34 @@ def save_telegram_file(new_config):
     save_json_file(TELEGRAM_FILE, new_config)
 
 
+def default_api_config():
+    return _default_api_config()
+
+
+def validate_api_config(saved):
+    return _validate_api_config(saved)
+
+
+def load_api_file():
+    try:
+        with API_FILE.open("r", encoding="utf-8") as api_file:
+            saved = json.load(api_file)
+    except FileNotFoundError:
+        return default_api_config()
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(
+            f"Impossibile leggere la configurazione API {API_FILE}: {error}"
+        ) from error
+    try:
+        return _validate_api_config(saved)
+    except ValueError as error:
+        raise RuntimeError(f"File di configurazione API non valido: {error}") from error
+
+
+def save_api_file(new_config):
+    save_json_file(API_FILE, new_config)
+
+
 def telegram_api_call(token, method, parameters, timeout=15):
     request = Request(
         f"https://api.telegram.org/bot{token}/{method}",
@@ -2985,6 +3030,9 @@ config = load_config_file()
 workflows = load_workflows_file()
 planner = load_planner_file()
 telegram_config = load_telegram_file()
+api_config = load_api_file()
+api_lock = threading.Lock()
+api_rate_limiter = RateLimiter()
 google_calendar_config = load_google_calendar_file()
 google_calendar_lock = threading.Lock()
 google_oauth_states = {}
@@ -5498,6 +5546,9 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if getattr(self, "_api_cors", False):
+            for name, value in API_CORS_HEADERS.items():
+                self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -5525,7 +5576,25 @@ class AppHandler(BaseHTTPRequestHandler):
         except (json.JSONDecodeError, UnicodeDecodeError):
             raise ValueError("Il corpo della richiesta deve essere JSON valido.") from None
 
+    def do_OPTIONS(self):
+        if self.path.startswith(API_PREFIX):
+            self.send_response(204)
+            for name, value in API_CORS_HEADERS.items():
+                self.send_header(name, value)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        self._send_json(404, {"error": "Endpoint non trovato."})
+
     def do_GET(self):
+        if self.path.startswith(API_PREFIX):
+            self._handle_api_get()
+            return
+        if self.path == "/api/api-keys":
+            with api_lock:
+                snapshot = _public_api_keys(api_config)
+            self._send_json(200, snapshot)
+            return
         if self.path == "/api/telegram":
             with telegram_lock:
                 status = {
@@ -5694,13 +5763,16 @@ class AppHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
+        if self.path.startswith(API_PREFIX):
+            self._handle_api_post()
+            return
         approval_match = re.fullmatch(
             r"/api/jobs/([a-f0-9]{32})/approval", self.path
         )
         if self.path not in {
             "/api/config", "/api/chat", "/api/workflows", "/api/extract",
             "/api/planner", "/api/reminders", "/api/telegram",
-            "/api/google-calendar",
+            "/api/google-calendar", "/api/api-keys",
         } and not approval_match:
             self._send_json(404, {"error": "Endpoint non trovato."})
             return
@@ -5724,6 +5796,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 self._save_planner(data)
             elif self.path == "/api/google-calendar":
                 self._save_google_calendar(data)
+            elif self.path == "/api/api-keys":
+                self._save_api_keys(data)
             else:
                 self._approve_action(approval_match.group(1), data)
         except ValueError as error:
@@ -6094,6 +6168,140 @@ class AppHandler(BaseHTTPRequestHandler):
             "label": draft["label"],
             "item": tasks[-1] if tasks else None,
         })
+
+    def _api_key_record(self):
+        presented = self.headers.get("X-API-Key", "")
+        if not presented:
+            authorization = self.headers.get("Authorization", "")
+            scheme, _, value = authorization.partition(" ")
+            if scheme.lower() == "bearer":
+                presented = value.strip()
+        with api_lock:
+            snapshot = {
+                "enabled": api_config["enabled"],
+                "keys": [dict(key) for key in api_config["keys"]],
+            }
+        if not snapshot["enabled"]:
+            self._send_json(403, {
+                "error": "API disattivata. Attivala dalle impostazioni di NOKK.",
+            })
+            return None
+        record = _find_api_key(snapshot, presented)
+        if record is None:
+            self._send_json(401, {"error": "Chiave API mancante o non valida."})
+            return None
+        if not api_rate_limiter.allow(record["id"]):
+            self._send_json(429, {
+                "error": "Troppe richieste: riprova tra un minuto.",
+            })
+            return None
+        return record
+
+    def _handle_api_get(self):
+        self._api_cors = True
+        path = self.path.split("?", 1)[0]
+        if path == "/api/v1/health":
+            self._send_json(200, {"ok": True, "service": "NOKK"})
+            return
+        if self._api_key_record() is None:
+            return
+        if path == "/api/v1/planner":
+            with config_lock:
+                payload = {
+                    kind: [item.copy() for item in planner[kind]]
+                    for kind in ("events", "tasks")
+                }
+            self._send_json(200, payload)
+            return
+        job_match = re.fullmatch(r"/api/v1/jobs/([a-f0-9]{32})", path)
+        if job_match:
+            with chat_jobs_lock:
+                job = chat_jobs.get(job_match.group(1))
+                if job is None:
+                    self._send_json(404, {"error": "Attività non trovata o scaduta."})
+                    return
+                public_job = {
+                    key: job[key]
+                    for key in (
+                        "status", "action", "reply", "tool_events", "error",
+                        "details", "hint",
+                    )
+                    if key in job
+                }
+            self._send_json(200, public_job)
+            return
+        self._send_json(404, {"error": "Endpoint non trovato."})
+
+    def _handle_api_post(self):
+        self._api_cors = True
+        path = self.path.split("?", 1)[0]
+        if self._api_key_record() is None:
+            return
+        try:
+            data = self._read_json()
+            if not isinstance(data, dict):
+                raise ValueError("Il corpo della richiesta deve essere un oggetto JSON.")
+            if path == "/api/v1/chat":
+                self._start_chat(data)
+            elif path == "/api/v1/reminders":
+                self._save_reminder(data)
+            else:
+                self._send_json(404, {"error": "Endpoint non trovato."})
+        except ValueError as error:
+            self._send_json(400, {"error": str(error)})
+        except RuntimeError as error:
+            self._send_json(502, {"error": str(error)})
+        except Exception as error:  # noqa: BLE001 - the caller expects JSON
+            self.log_error("Errore imprevisto su %s: %r", self.path, error)
+            self._send_json(500, {"error": "Errore interno del server. Riprova."})
+
+    def _save_api_keys(self, data):
+        global api_config
+        action = data.get("action")
+        with api_lock:
+            current = {
+                "enabled": api_config["enabled"],
+                "keys": [dict(key) for key in api_config["keys"]],
+            }
+            if action == "create":
+                if len(current["keys"]) >= MAX_API_KEYS:
+                    raise ValueError(
+                        f"Puoi creare al massimo {MAX_API_KEYS} chiavi API."
+                    )
+                record, secret = _make_api_key_record(data.get("name"))
+                current["keys"].append(record)
+                save_api_file(current)
+                api_config = current
+                self._send_json(200, {
+                    "ok": True,
+                    "key": secret,
+                    "id": record["id"],
+                    "name": record["name"],
+                    "hint": record["hint"],
+                })
+                return
+            if action == "revoke":
+                key_id = data.get("id")
+                if not isinstance(key_id, str):
+                    raise ValueError("Identificativo della chiave non valido.")
+                remaining = [
+                    key for key in current["keys"] if key["id"] != key_id
+                ]
+                if len(remaining) == len(current["keys"]):
+                    self._send_json(404, {"error": "Chiave API non trovata."})
+                    return
+                current["keys"] = remaining
+                api_rate_limiter.reset(key_id)
+            elif action == "set_enabled":
+                enabled = data.get("enabled")
+                if not isinstance(enabled, bool):
+                    raise ValueError("Stato dell'API non valido.")
+                current["enabled"] = enabled
+            else:
+                raise ValueError("Azione non riconosciuta.")
+            save_api_file(current)
+            api_config = current
+        self._send_json(200, {"ok": True, **_public_api_keys(current)})
 
     def _start_chat(self, data):
         messages = data.get("messages")

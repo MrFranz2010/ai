@@ -255,6 +255,9 @@
                 <button class="settings-tab" id="settings-tab-google-calendar" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-google-calendar" data-settings-tab="google-calendar" tabindex="-1">
                   <span class="section-index">07</span><span>Google Calendar<small>Agenda collegata</small></span>
                 </button>
+                <button class="settings-tab" id="settings-tab-api" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-api" data-settings-tab="api" tabindex="-1">
+                  <span class="section-index">08</span><span>API<small>Chiavi per script ed estensione</small></span>
+                </button>
               </div>
               <div class="settings-panels">
                 <section class="settings-panel" id="settings-panel-connection" role="tabpanel" aria-labelledby="settings-tab-connection" data-settings-panel="connection">
@@ -383,6 +386,28 @@
                   <div class="data-actions">
                     <button class="telegram-action" id="export-data" type="button">Esporta dati (JSON)</button>
                     <a class="telegram-action" href="/api/calendar.ics" download="nokk-calendario.ics">Esporta calendario (.ics)</a>
+                  </div>
+                </section>
+                <section class="settings-panel" id="settings-panel-api" role="tabpanel" aria-labelledby="settings-tab-api" data-settings-panel="api" hidden>
+                  <div class="api-settings">
+                    <p class="telegram-status" id="api-status" role="status">API disattivata</p>
+                    <label class="toggle-label" for="api-enabled">
+                      <input id="api-enabled" type="checkbox">
+                      <span>Abilita l’API HTTP e i webhook</span>
+                    </label>
+                    <p class="field-help">Con l’API attiva, script e estensione del browser possono scrivere a NOKK usando una chiave. Ogni chiave vale al massimo 60 richieste al minuto.</p>
+                    <label for="api-key-name">Nome della nuova chiave</label>
+                    <input id="api-key-name" type="text" maxlength="40" autocomplete="off" placeholder="Es. Estensione browser">
+                    <div class="telegram-actions">
+                      <button class="telegram-action" id="api-key-create" type="button">Crea chiave</button>
+                    </div>
+                    <div class="api-key-secret" id="api-key-secret" hidden>
+                      <p>Copia la chiave ora: non verrà mostrata di nuovo.</p>
+                      <code id="api-key-value"></code>
+                      <button class="telegram-action" id="api-key-copy" type="button">Copia chiave</button>
+                    </div>
+                    <ul class="api-key-list" id="api-key-list"></ul>
+                    <p class="field-help">Endpoint disponibili: <code>GET /api/v1/health</code>, <code>POST /api/v1/chat</code>, <code>GET /api/v1/jobs/&lt;id&gt;</code>, <code>POST /api/v1/reminders</code>, <code>GET /api/v1/planner</code>. Invia la chiave nell’intestazione <code>X-API-Key</code> oppure come <code>Authorization: Bearer</code>.</p>
                   </div>
                 </section>
                 <section class="settings-panel" id="settings-panel-google-calendar" role="tabpanel" aria-labelledby="settings-tab-google-calendar" data-settings-panel="google-calendar" hidden>

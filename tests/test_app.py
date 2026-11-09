@@ -68,6 +68,7 @@ class AppRouteTests(unittest.TestCase):
         app.GOOGLE_CALENDAR_FILE = (
             Path(cls.config_directory.name) / "google_calendar.json"
         )
+        app.API_FILE = Path(cls.config_directory.name) / "api.json"
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), app.AppHandler)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
@@ -86,6 +87,11 @@ class AppRouteTests(unittest.TestCase):
         app.PLANNER_FILE.unlink(missing_ok=True)
         app.TELEGRAM_FILE.unlink(missing_ok=True)
         app.GOOGLE_CALENDAR_FILE.unlink(missing_ok=True)
+        app.API_FILE.unlink(missing_ok=True)
+        with app.api_lock:
+            app.api_config.clear()
+            app.api_config.update(app.default_api_config())
+        app.api_rate_limiter.reset()
         with app.google_calendar_lock:
             app.google_calendar_config.clear()
             app.google_calendar_config.update(app.default_google_calendar())
