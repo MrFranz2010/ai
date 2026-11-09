@@ -128,8 +128,15 @@
       .map((message) => ({ role: message.role, content: message.content }));
     chat.updated_at = Date.now();
     const firstUser = chat.messages.find((message) => message.role === "user");
-    if (firstUser && (!chat.title || chat.title === "Nuova chat")) {
-      chat.title = firstUser.content.trim().replace(/\s+/g, " ").slice(0, 48) || "Nuova chat";
+    const firstReply = chat.messages.find((message) => message.role === "assistant");
+    if (
+      firstUser
+      && (!chat.title || chat.title === "Nuova chat" || isGenericChatTitle(chat.title))
+    ) {
+      chat.title = summarizeChatTitle(
+        firstUser.content,
+        firstReply ? firstReply.content : "",
+      );
     }
     renderChats();
   }

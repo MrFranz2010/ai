@@ -62,6 +62,108 @@ const terminalEnabledInput = document.querySelector("#terminal-enabled");
 const approvalModeSelect = document.querySelector("#approval-mode");
 const workspaceInput = document.querySelector("#workspace");
 const pageTitle = document.querySelector("#page-title");
+const CHAT_TITLE_MAX_WORDS = 6;
+const CHAT_TITLE_MAX_CHARS = 42;
+const CHAT_TITLE_FILLERS = new Set([
+  "ciao", "salve", "buongiorno", "buonasera", "buonanotte", "ehi", "hey",
+  "hello", "hi", "aiuto", "help", "scusa", "scusami", "grazie", "ok", "okay",
+  "test", "prova", "domanda", "aspetta", "senti", "nuova chat",
+  "una nuova conversazione", "conversazione",
+]);
+const CHAT_TITLE_OPENERS = [
+  "mi puoi", "mi potresti", "potresti", "puoi", "sapresti", "sai",
+  "vorrei", "volevo", "mi servirebbe", "ho bisogno di", "aiutami a",
+  "aiutami", "per favore", "gentilmente", "come posso", "come faccio a",
+  "come si fa a", "spiegami", "dimmi", "can you", "could you",
+  "i want to", "i'd like to", "help me", "how do i", "please",
+];
+const CHAT_TITLE_CONNECTORS = new Set([
+  "e", "o", "ma", "che", "di", "a", "il", "lo", "la", "i", "gli", "le",
+  "un", "uno", "una", "con", "per", "su", "in", "da", "al", "allo", "alla",
+  "ai", "agli", "alle", "del", "dello", "della", "dei", "degli", "delle",
+  "nel", "nello", "nella", "nei", "negli", "nelle", "sul", "sullo", "sulla",
+  "sui", "sugli", "sulle", "dal", "dallo", "dalla", "dai", "dagli", "dalle",
+  "più", "anche", "come", "quando", "mentre", "perché", "and", "or", "the",
+  "a", "an", "of", "to", "for", "with", "about",
+]);
+
+function cleanChatTitleText(text) {
+  return String(text || "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/[`*_>#|]/g, " ")
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildChatTitle(text) {
+  let cleaned = cleanChatTitleText(text);
+  cleaned = cleaned.replace(/^\/[a-z0-9_-]+\s*/i, "");
+  if (!cleaned) return "";
+  let sentence = cleaned.split(/[.!?;]\s|\n/)[0].trim();
+  sentence = sentence.replace(/^[\s"“”'’(¿¡\-–—]+/, "");
+  let words = sentence.split(" ").filter(Boolean);
+  let trimmed = true;
+  while (trimmed && words.length) {
+    trimmed = false;
+    const head = words.join(" ").toLocaleLowerCase("it");
+    for (const opener of CHAT_TITLE_OPENERS) {
+      if (head === opener) {
+        words = [];
+        trimmed = true;
+        break;
+      }
+      if (head.startsWith(`${opener} `)) {
+        words = words.slice(opener.split(" ").length);
+        trimmed = true;
+        break;
+      }
+    }
+  }
+  const complete = words.slice(0, CHAT_TITLE_MAX_WORDS);
+  let title = complete.join(" ");
+  if (title.length > CHAT_TITLE_MAX_CHARS) {
+    title = title.slice(0, CHAT_TITLE_MAX_CHARS + 1);
+    title = title.slice(0, Math.max(0, title.lastIndexOf(" ")));
+  }
+  let pieces = title.split(" ").filter(Boolean);
+  while (pieces.length > 1) {
+    const last = pieces[pieces.length - 1].toLocaleLowerCase("it");
+    if (!CHAT_TITLE_CONNECTORS.has(last)) break;
+    pieces.pop();
+  }
+  title = pieces.join(" ")
+    .replace(/[\s,;:.!?"'“”()\-–—…]+$/g, "")
+    .trim();
+  if (title.length < 3) return "";
+  const cased = pieces.map((word) => {
+    if (word.length > 2 && word === word.toLocaleUpperCase("it")) {
+      return word.charAt(0) + word.slice(1).toLocaleLowerCase("it");
+    }
+    return word;
+  }).join(" ");
+  const result = cased.replace(/[\s,;:.!?"'“”()\-–—…]+$/g, "").trim();
+  return result.charAt(0).toLocaleUpperCase("it") + result.slice(1);
+}
+
+function isGenericChatTitle(title) {
+  const value = String(title || "")
+    .toLocaleLowerCase("it")
+    .replace(/[.!?…]+$/g, "")
+    .trim();
+  if (value.length < 4) return true;
+  return CHAT_TITLE_FILLERS.has(value);
+}
+
+function summarizeChatTitle(text, topicText = "") {
+  const fromMessage = buildChatTitle(text);
+  if (fromMessage && !isGenericChatTitle(fromMessage)) return fromMessage;
+  const fromTopic = buildChatTitle(topicText);
+  if (fromTopic && !isGenericChatTitle(fromTopic)) return fromTopic;
+  return "Nuova chat";
+}
 const connectionLabel = document.querySelector("#connection-label");
 const newChatButton = document.querySelector("#new-chat");
 const workflowsToggle = document.querySelector("#workflows-toggle");
@@ -3162,7 +3264,7 @@ async function handleChatCommand(rawText) {
 
 async function sendChatMessage(messageText, attachments = [], mode = null) {
   welcome.hidden = true;
-  if (messages.length === 0) pageTitle.textContent = messageText.slice(0, 50);
+  if (messages.length === 0) pageTitle.textContent = summarizeChatTitle(messageText);
   messages.push({ role: "user", content: messageText, attachments });
   addMessage("user", messageText, "", attachments);
   sending = true;
@@ -3181,6 +3283,10 @@ async function sendChatMessage(messageText, attachments = [], mode = null) {
     pending.remove();
     messages.push({ role: "assistant", content: reply });
     addMessage("assistant", reply);
+    const firstUserMessage = messages.find((message) => message.role === "user");
+    if (firstUserMessage && isGenericChatTitle(pageTitle.textContent)) {
+      pageTitle.textContent = summarizeChatTitle(firstUserMessage.content, reply);
+    }
     if (ttsAutoPlayInput.checked) speakText(reply);
   } catch (error) {
     pending.classList.remove("pending");
