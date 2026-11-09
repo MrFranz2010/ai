@@ -156,6 +156,22 @@ class AppRouteTests(unittest.TestCase):
                 urlopen(f"{self.base_url}/api/weather")
         self.assertEqual(raised.exception.code, 503)
 
+    def test_weather_network_failure_tells_the_sidebar_why(self):
+        with app.config_lock:
+            app.config["weather_enabled"] = True
+            app.config["weather_city"] = "Roma"
+        with patch(
+            "app.fetch_weather",
+            side_effect=RuntimeError("Impossibile raggiungere il servizio meteo."),
+        ):
+            with self.assertRaises(HTTPError) as raised:
+                urlopen(f"{self.base_url}/api/weather")
+            payload = json.loads(raised.exception.read())
+        self.assertEqual(raised.exception.code, 503)
+        self.assertEqual(
+            payload["error"], "Impossibile raggiungere il servizio meteo."
+        )
+
     def test_weather_reports_an_unknown_city_to_the_sidebar(self):
         with app.config_lock:
             app.config["weather_enabled"] = True
