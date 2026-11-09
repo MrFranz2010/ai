@@ -4352,14 +4352,22 @@ def fetch_weather(city):
         and time.time() - cached["fetched_at"] < WEATHER_CACHE_SECONDS
     ):
         return dict(cached["data"])
-    geo = _weather_json(
-        WEATHER_GEOCODE_URL,
-        {"name": city, "count": 1, "language": "it", "format": "json"},
-    )
-    results = geo.get("results")
-    if not isinstance(results, list) or not results:
+    candidates = [city]
+    shortened = city.split(",")[0].strip()
+    if shortened and shortened not in candidates:
+        candidates.append(shortened)
+    place = None
+    for candidate in candidates:
+        geo = _weather_json(
+            WEATHER_GEOCODE_URL,
+            {"name": candidate, "count": 1, "language": "it", "format": "json"},
+        )
+        results = geo.get("results")
+        if isinstance(results, list) and results:
+            place = results[0]
+            break
+    if place is None:
         raise RuntimeError(f"Città non trovata: {city}.")
-    place = results[0]
     latitude = place.get("latitude")
     longitude = place.get("longitude")
     if not isinstance(latitude, (int, float)) or not isinstance(
@@ -5480,6 +5488,9 @@ class AppHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": str(error)})
         except RuntimeError as error:
             self._send_json(502, {"error": str(error)})
+        except Exception as error:  # noqa: BLE001 - the browser expects JSON
+            self.log_error("Errore imprevisto su %s: %r", self.path, error)
+            self._send_json(500, {"error": "Errore interno del server. Riprova."})
 
     def _extract_document(self, data):
         filename = data.get("name")
@@ -5515,10 +5526,13 @@ class AppHandler(BaseHTTPRequestHandler):
             weather = fetch_weather(city)
         except RuntimeError as error:
             self.log_error("Meteo non disponibile: %s", error)
+            message = str(error)
+            if not message.startswith(("Città non trovata", "Indica la città")):
+                message = "Meteo non disponibile in questo momento."
             self._send_json(503, {
                 "configured": True,
                 "city": city,
-                "error": "Meteo non disponibile in questo momento.",
+                "error": message,
             })
             return
         self._send_json(200, {"configured": True, **weather})

@@ -156,6 +156,41 @@ class AppRouteTests(unittest.TestCase):
                 urlopen(f"{self.base_url}/api/weather")
         self.assertEqual(raised.exception.code, 503)
 
+    def test_weather_reports_an_unknown_city_to_the_sidebar(self):
+        with app.config_lock:
+            app.config["weather_enabled"] = True
+            app.config["weather_city"] = "Roma, Lazio"
+        with patch(
+            "app.fetch_weather",
+            side_effect=RuntimeError("Città non trovata: Roma, Lazio."),
+        ):
+            with self.assertRaises(HTTPError) as raised:
+                urlopen(f"{self.base_url}/api/weather")
+            payload = json.loads(raised.exception.read())
+        self.assertEqual(raised.exception.code, 503)
+        self.assertEqual(payload["error"], "Città non trovata: Roma, Lazio.")
+
+    def test_fetch_weather_ignores_the_region_after_the_comma(self):
+        def fake_json(url, parameters):
+            if "latitude" in parameters:
+                return {
+                    "current": {"temperature_2m": 18.4, "weather_code": 0},
+                    "daily": {"temperature_2m_min": [11], "temperature_2m_max": [20]},
+                }
+            if parameters["name"] != "Roma":
+                return {"results": []}
+            return {"results": [{
+                "name": "Roma", "country_code": "IT",
+                "latitude": 41.9, "longitude": 12.5,
+            }]}
+
+        with app.weather_cache_lock:
+            app.weather_cache.update({"city": None, "fetched_at": 0, "data": None})
+        with patch("app._weather_json", side_effect=fake_json):
+            weather = app.fetch_weather("Roma, Lazio")
+        self.assertEqual(weather["city"], "Roma")
+        self.assertEqual(weather["temperature"], 18)
+
     def run_chat(self, messages, approve=True, expect_failure=False):
         response = self.request_json("/api/chat", {"messages": messages})
         job_id = response["job_id"]
