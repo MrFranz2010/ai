@@ -11,6 +11,7 @@ STATE_FILES = frozenset({
     "chats.json",
     "memories.json",
     "api.json",
+    "hub.json",
 })
 MISSING = object()
 
