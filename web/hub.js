@@ -192,6 +192,48 @@ function saveSettings() {
 let settings = loadSettings();
 let controllers = new Map();
 
+/* The stream is shared by every device: the server copy wins over this device. */
+
+async function pullSharedStream() {
+  try {
+    const response = await fetch("/api/hub", { cache: "no-store" });
+    if (!response.ok) return;
+    const data = await response.json().catch(() => null);
+    if (!data || typeof data !== "object") return;
+    const url = normalizeStreamUrl(data.stream_url);
+    const name = typeof data.stream_name === "string"
+      ? data.stream_name.trim().slice(0, 60)
+      : "";
+    if (url === settings.streamUrl && name === settings.streamName) return;
+    settings.streamUrl = url;
+    settings.streamName = name;
+    saveSettings();
+    if (document.activeElement !== els.streamUrl) els.streamUrl.value = url;
+    if (document.activeElement !== els.streamName) els.streamName.value = name;
+    renderRails();
+  } catch {
+    /* offline: this device keeps its last known stream */
+  }
+}
+
+async function pushSharedStream() {
+  try {
+    const response = await fetch("/api/hub", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        stream_url: settings.streamUrl,
+        stream_name: settings.streamName,
+      }),
+    });
+    if (response.ok) return;
+    const result = await response.json().catch(() => ({}));
+    els.connection.textContent = result.error || "Flusso non salvato";
+  } catch {
+    els.connection.textContent = "Flusso non salvato";
+  }
+}
+
 /* Widgets */
 
 function renderRails() {
@@ -863,12 +905,14 @@ els.streamUrl.addEventListener("change", () => {
   resetPlayer();
   saveSettings();
   renderRails();
+  pushSharedStream();
 });
 els.streamName.addEventListener("change", () => {
   settings.streamName = els.streamName.value.trim().slice(0, 60);
   els.streamName.value = settings.streamName;
   saveSettings();
   renderRails();
+  pushSharedStream();
 });
 els.speakReplies.addEventListener("change", () => {
   settings.speakReplies = els.speakReplies.checked;
@@ -964,6 +1008,7 @@ window.addEventListener("offline", updateConnection);
 
 applyTheme(document.documentElement.dataset.theme);
 renderRails();
+pullSharedStream();
 loadPlanner();
 keepAwake();
 updateConnection();
