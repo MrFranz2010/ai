@@ -38,6 +38,7 @@ const els = {
   railRight: document.getElementById("rail-right"),
   ptt: document.getElementById("ptt"),
   pttHint: document.getElementById("ptt-hint"),
+  stop: document.getElementById("stop-button"),
   transcript: document.getElementById("transcript"),
   reply: document.getElementById("reply"),
   connection: document.getElementById("connection"),
@@ -620,6 +621,7 @@ async function transcribeAndAsk(blob) {
     els.transcript.textContent = `Tu: ${text}`;
     await askAssistant(text);
   } catch (error) {
+    if (error?.name === "AbortError") return;
     showError(error.message);
     setPttState("idle", "Tieni premuto e parla");
   } finally {
@@ -627,28 +629,64 @@ async function transcribeAndAsk(blob) {
   }
 }
 
-async function askAssistant(text) {
-  setPttState("thinking", "Ci penso…");
-  const response = await fetch("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages: [{ role: "user", content: text }] }),
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.error || "Richiesta non riuscita.");
-  if (!result.job_id) throw new Error("Il server non ha avviato la richiesta.");
-  const job = await waitForJob(result.job_id);
-  showJob(job);
+/* Interrupting the answer */
+
+const interruption = { controller: null, speaking: false };
+
+function updateStopButton() {
+  if (!els.stop) return;
+  els.stop.hidden = !interruption.controller && !interruption.speaking;
 }
 
-async function waitForJob(jobId) {
+function interrupt() {
+  const controller = interruption.controller;
+  interruption.controller = null;
+  interruption.speaking = false;
+  if (controller) controller.abort();
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  setPttState("idle", "Tieni premuto e parla");
+  updateStopButton();
+  showReply("Ho interrotto la risposta.", []);
+  els.connection.textContent = "pronto";
+}
+
+async function askAssistant(text) {
+  interruption.speaking = false;
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  const controller = new AbortController();
+  interruption.controller = controller;
+  setPttState("thinking", "Ci penso…");
+  updateStopButton();
+  try {
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: [{ role: "user", content: text }] }),
+      signal: controller.signal,
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "Richiesta non riuscita.");
+    if (!result.job_id) throw new Error("Il server non ha avviato la richiesta.");
+    const job = await waitForJob(result.job_id, controller.signal);
+    showJob(job);
+  } finally {
+    if (interruption.controller === controller) {
+      interruption.controller = null;
+      updateStopButton();
+      setPttState("idle", "Tieni premuto e parla");
+    }
+  }
+}
+
+async function waitForJob(jobId, signal) {
   const deadline = Date.now() + JOB_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const response = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" });
+    const response = await fetch(`/api/jobs/${jobId}`, { cache: "no-store", signal });
     const job = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(job.error || "Attività non trovata.");
     if (["complete", "failed", "awaiting_approval"].includes(job.status)) return job;
     await delay(JOB_POLL_MS);
+    if (signal?.aborted) throw new DOMException("Interrotto", "AbortError");
   }
   throw new Error("Nessuna risposta entro due minuti.");
 }
@@ -702,11 +740,21 @@ function speak(text) {
   utterance.rate = 1;
   const voice = window.speechSynthesis.getVoices().find((item) => /^it/i.test(item.lang));
   if (voice) utterance.voice = voice;
+  const done = () => {
+    interruption.speaking = false;
+    updateStopButton();
+  };
+  utterance.onend = done;
+  utterance.onerror = done;
+  interruption.speaking = true;
+  updateStopButton();
   window.speechSynthesis.speak(utterance);
 }
 
 function stopSpeaking() {
   if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  interruption.speaking = false;
+  updateStopButton();
   if (els.audio && !els.audio.paused) {
     /* speaking starts from a press: pause the stream so the mic is clean */
     els.audio.pause();
@@ -797,6 +845,8 @@ els.rotateButton.addEventListener("click", () => {
 applyRotation(storedRotation());
 window.addEventListener("resize", updateHubLayout);
 window.addEventListener("orientationchange", updateHubLayout);
+
+els.stop.addEventListener("click", interrupt);
 
 els.settingsButton.addEventListener("click", openSettings);
 els.settingsClose.addEventListener("click", closeSettings);

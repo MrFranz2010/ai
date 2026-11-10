@@ -263,6 +263,25 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 
 .ptt-hint { margin: 0; font-size: 12px; color: var(--muted); text-align: center; }
 
+.hub-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.hub-stop[hidden] { display: none; }
+.hub-stop svg { width: 16px; height: 16px; fill: var(--accent); stroke: none; }
+.hub-stop:hover, .hub-stop:focus-visible { border-color: var(--accent); outline: none; }
+
 .hub-transcript {
   margin: 0;
   min-height: 18px;
@@ -425,6 +444,7 @@ html[data-hub-layout="compact"] #rail-right { grid-area: right; }
 html[data-hub-layout="compact"] .hub-rail { overflow-y: auto; }
 html[data-hub-layout="compact"] .ptt { width: clamp(88px, 26vmin, 124px); height: clamp(88px, 26vmin, 124px); }
 html[data-hub-layout="compact"] .ptt-icon { width: 24px; height: 24px; }
+html[data-hub-layout="compact"] .hub-stop { padding: 6px 12px; font-size: 12px; }
 html[data-hub-layout="compact"] .ptt-label { font-size: 12px; }
 html[data-hub-layout="compact"] .hub-reply { max-height: 30vmin; }
 html[data-hub-layout="compact"] .clock-time { font-size: 30px; }
