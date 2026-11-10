@@ -69,6 +69,7 @@ class AppRouteTests(unittest.TestCase):
             Path(cls.config_directory.name) / "google_calendar.json"
         )
         app.API_FILE = Path(cls.config_directory.name) / "api.json"
+        app.HUB_FILE = Path(cls.config_directory.name) / "hub.json"
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), app.AppHandler)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
@@ -88,6 +89,10 @@ class AppRouteTests(unittest.TestCase):
         app.TELEGRAM_FILE.unlink(missing_ok=True)
         app.GOOGLE_CALENDAR_FILE.unlink(missing_ok=True)
         app.API_FILE.unlink(missing_ok=True)
+        app.HUB_FILE.unlink(missing_ok=True)
+        with app.hub_lock:
+            app.hub_settings.clear()
+            app.hub_settings.update(app.default_hub_settings())
         with app.api_lock:
             app.api_config.clear()
             app.api_config.update(app.default_api_config())
@@ -132,26 +137,27 @@ class AppRouteTests(unittest.TestCase):
             initial = json.loads(response.read())
         self.assertEqual(initial["stream_url"], "")
         self.assertEqual(initial["stream_name"], "")
-        self.request_json(
+        saved = self.request_json(
             "/api/hub",
             {
                 "stream_url": "https://ice.example/radio.mp3",
                 "stream_name": "Radio di casa",
             },
         )
+        self.assertTrue(saved["ok"])
         with urlopen(f"{self.base_url}/api/hub") as response:
-            saved = json.loads(response.read())
-        self.assertEqual(saved["stream_url"], "https://ice.example/radio.mp3")
-        self.assertEqual(saved["stream_name"], "Radio di casa")
+            public_hub = json.loads(response.read())
+        self.assertEqual(public_hub["stream_url"], "https://ice.example/radio.mp3")
+        self.assertEqual(public_hub["stream_name"], "Radio di casa")
+        stored = json.loads(app.HUB_FILE.read_text(encoding="utf-8"))
+        self.assertEqual(stored["stream_url"], "https://ice.example/radio.mp3")
+
+    def test_hub_stream_settings_do_not_touch_the_provider_config(self):
+        self.assertFalse(app.CONFIG_FILE.exists())
+        self.request_json("/api/hub", {"stream_url": "https://ice.example/radio.mp3"})
+        self.assertFalse(app.CONFIG_FILE.exists())
         with app.config_lock:
-            self.assertEqual(
-                app.config["hub_stream_url"], "https://ice.example/radio.mp3"
-            )
-        with urlopen(f"{self.base_url}/api/config") as response:
-            public_config = json.loads(response.read())
-        self.assertEqual(
-            public_config["hub_stream_url"], "https://ice.example/radio.mp3"
-        )
+            self.assertIsNone(app.config["provider"])
 
     def test_hub_stream_settings_reject_a_foreign_scheme(self):
         with self.assertRaises(HTTPError) as raised:
@@ -1102,8 +1108,6 @@ class AppRouteTests(unittest.TestCase):
             "alerts_enabled": False,
             "alerts_disk_percent": 90,
             "alerts_memory_percent": 92,
-            "hub_stream_url": "",
-            "hub_stream_name": "",
         })
         if os.name != "nt":
             self.assertEqual(app.CONFIG_FILE.stat().st_mode & 0o777, 0o600)

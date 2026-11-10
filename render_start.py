@@ -51,8 +51,6 @@ def config_from_state(saved):
             alerts_enabled=saved.get("alerts_enabled", False),
             alerts_disk_percent=saved.get("alerts_disk_percent", 90),
             alerts_memory_percent=saved.get("alerts_memory_percent", 92),
-            hub_stream_url=saved.get("hub_stream_url", ""),
-            hub_stream_name=saved.get("hub_stream_name", ""),
         )
     except ValueError as error:
         raise RuntimeError(f"Supabase configuration is invalid: {error}") from error
@@ -181,6 +179,17 @@ def _configure_supabase_storage():
             **reminder,
         }
 
+    def load_hub():
+        saved = load_json(app.HUB_FILE)
+        if saved is MISSING:
+            return app.default_hub_settings()
+        try:
+            return app.validate_hub_settings(saved)
+        except ValueError as error:
+            raise RuntimeError(
+                f"Supabase hub.json is invalid: {error}"
+            ) from error
+
     app.config = load_config()
     app.workflows[:] = load_workflows()
     app.planner.clear()
@@ -191,6 +200,8 @@ def _configure_supabase_storage():
     app.google_calendar_config.update(load_google_calendar())
     app.api_config.clear()
     app.api_config.update(load_api())
+    app.hub_settings.clear()
+    app.hub_settings.update(load_hub())
     app.save_json_file = save_json
     app.save_config_file = lambda data: save_json(app.CONFIG_FILE, data)
     app.save_telegram_file = lambda data: save_json(app.TELEGRAM_FILE, data)
@@ -198,6 +209,7 @@ def _configure_supabase_storage():
         app.GOOGLE_CALENDAR_FILE, data
     )
     app.save_api_file = lambda data: save_json(app.API_FILE, data)
+    app.save_hub_file = lambda data: save_json(app.HUB_FILE, data)
     return storage
 
 
