@@ -40,27 +40,6 @@ html[data-rotation="270"] body { transform: rotate(-90deg) translateX(-100%); }
   html[data-rotation="180"] body { width: 100dvw; height: 100dvh; }
 }
 
-/* A rotated portrait screen is wide: keep the three columns instead of stacking */
-@media (orientation: portrait) {
-  html[data-rotation="90"] .hub-grid,
-  html[data-rotation="270"] .hub-grid {
-    grid-template-columns: minmax(120px, 1fr) minmax(210px, 1.5fr) minmax(120px, 1fr);
-    grid-template-areas: "left center right";
-    gap: 10px;
-    padding: 4px 12px 12px;
-  }
-  html[data-rotation="90"] #rail-left,
-  html[data-rotation="270"] #rail-left { grid-area: left; }
-  html[data-rotation="90"] .hub-center,
-  html[data-rotation="270"] .hub-center { grid-area: center; padding: 4px 0; }
-  html[data-rotation="90"] #rail-right,
-  html[data-rotation="270"] #rail-right { grid-area: right; }
-  html[data-rotation="90"] .ptt,
-  html[data-rotation="270"] .ptt { width: clamp(96px, 22vh, 132px); height: clamp(96px, 22vh, 132px); }
-  html[data-rotation="90"] .hub-reply,
-  html[data-rotation="270"] .hub-reply { max-height: 30vh; }
-}
-
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 svg {
@@ -431,10 +410,23 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   .hub-reply { max-height: none; }
 }
 
-@media (max-height: 540px) and (min-width: 861px) {
-  .ptt { width: 104px; height: 104px; }
-  .ptt-icon { width: 24px; height: 24px; }
-  .ptt-label { font-size: 12px; }
-  .hub-reply { max-height: 26vh; }
-  .clock-time { font-size: 30px; }
+/* Compact landscape: phones on their side, short windows and a rotated portrait
+   screen keep the three columns with smaller controls instead of stacking. */
+html[data-hub-layout="compact"] body { overflow: hidden; }
+html[data-hub-layout="compact"] .hub-grid {
+  grid-template-columns: minmax(120px, 1fr) minmax(200px, 1.4fr) minmax(120px, 1fr);
+  grid-template-areas: "left center right";
+  gap: 10px;
+  padding: 4px 12px 12px;
 }
+html[data-hub-layout="compact"] #rail-left { grid-area: left; }
+html[data-hub-layout="compact"] .hub-center { grid-area: center; padding: 4px 0; }
+html[data-hub-layout="compact"] #rail-right { grid-area: right; }
+html[data-hub-layout="compact"] .hub-rail { overflow-y: auto; }
+html[data-hub-layout="compact"] .ptt { width: clamp(88px, 26vmin, 124px); height: clamp(88px, 26vmin, 124px); }
+html[data-hub-layout="compact"] .ptt-icon { width: 24px; height: 24px; }
+html[data-hub-layout="compact"] .ptt-label { font-size: 12px; }
+html[data-hub-layout="compact"] .hub-reply { max-height: 30vmin; }
+html[data-hub-layout="compact"] .clock-time { font-size: 30px; }
+
+/* Without JavaScript the page falls back to the device media queries below. */

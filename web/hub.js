@@ -3,6 +3,9 @@
 const STORAGE_KEY = "nokk-hub-settings-v1";
 const ROTATION_KEY = "nokk-hub-rotation";
 const ROTATIONS = [0, 90, 180, 270];
+const LAYOUT_WIDE_MIN_WIDTH = 861;
+const LAYOUT_COMPACT_MIN_WIDTH = 700;
+const LAYOUT_COMPACT_MAX_HEIGHT = 560;
 const WEATHER_REFRESH_MS = 15 * 60 * 1000;
 const PLANNER_REFRESH_MS = 60 * 1000;
 const JOB_POLL_MS = 800;
@@ -137,10 +140,29 @@ function storedRotation() {
   }
 }
 
+/* The manual rotation swaps the viewport on screen, so pick the layout from the
+   size the page really renders at instead of relying on the device media queries. */
+function effectiveViewport() {
+  const turned = currentRotation() === 90 || currentRotation() === 270;
+  return {
+    width: turned ? window.innerHeight : window.innerWidth,
+    height: turned ? window.innerWidth : window.innerHeight,
+  };
+}
+
+function updateHubLayout() {
+  const { width, height } = effectiveViewport();
+  let layout = "stack";
+  if (width >= LAYOUT_COMPACT_MIN_WIDTH && height <= LAYOUT_COMPACT_MAX_HEIGHT) layout = "compact";
+  else if (width >= LAYOUT_WIDE_MIN_WIDTH) layout = "wide";
+  document.documentElement.dataset.hubLayout = layout;
+}
+
 function applyRotation(degrees) {
   const rotation = ROTATIONS.includes(degrees) ? degrees : 0;
   if (rotation === 0) delete document.documentElement.dataset.rotation;
   else document.documentElement.dataset.rotation = String(rotation);
+  updateHubLayout();
   els.rotateButton.setAttribute("aria-label", `Ruota la schermata (attuale ${rotation}°)`);
   els.rotateButton.title = `Ruota la schermata (attuale ${rotation}°)`;
   try {
@@ -773,6 +795,8 @@ els.rotateButton.addEventListener("click", () => {
   els.connection.textContent = next === 0 ? "pronto" : `schermo ruotato di ${next}°`;
 });
 applyRotation(storedRotation());
+window.addEventListener("resize", updateHubLayout);
+window.addEventListener("orientationchange", updateHubLayout);
 
 els.settingsButton.addEventListener("click", openSettings);
 els.settingsClose.addEventListener("click", closeSettings);
