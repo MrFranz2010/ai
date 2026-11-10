@@ -127,6 +127,39 @@ class AppRouteTests(unittest.TestCase):
         with urlopen(request) as response:
             return json.loads(response.read())
 
+    def test_hub_stream_settings_are_shared_between_devices(self):
+        with urlopen(f"{self.base_url}/api/hub") as response:
+            initial = json.loads(response.read())
+        self.assertEqual(initial["stream_url"], "")
+        self.assertEqual(initial["stream_name"], "")
+        self.request_json(
+            "/api/hub",
+            {
+                "stream_url": "https://ice.example/radio.mp3",
+                "stream_name": "Radio di casa",
+            },
+        )
+        with urlopen(f"{self.base_url}/api/hub") as response:
+            saved = json.loads(response.read())
+        self.assertEqual(saved["stream_url"], "https://ice.example/radio.mp3")
+        self.assertEqual(saved["stream_name"], "Radio di casa")
+        with app.config_lock:
+            self.assertEqual(
+                app.config["hub_stream_url"], "https://ice.example/radio.mp3"
+            )
+        with urlopen(f"{self.base_url}/api/config") as response:
+            public_config = json.loads(response.read())
+        self.assertEqual(
+            public_config["hub_stream_url"], "https://ice.example/radio.mp3"
+        )
+
+    def test_hub_stream_settings_reject_a_foreign_scheme(self):
+        with self.assertRaises(HTTPError) as raised:
+            self.request_json("/api/hub", {"stream_url": "ftp://ice.example/radio"})
+        self.assertEqual(raised.exception.code, 400)
+        payload = json.loads(raised.exception.read())
+        self.assertIn("http", payload["error"])
+
     def test_reminder_endpoint_saves_the_deadline(self):
         payload = self.request_json(
             "/api/reminders", {"text": "Riunione con cliente domani alle 10"}
@@ -1069,6 +1102,8 @@ class AppRouteTests(unittest.TestCase):
             "alerts_enabled": False,
             "alerts_disk_percent": 90,
             "alerts_memory_percent": 92,
+            "hub_stream_url": "",
+            "hub_stream_name": "",
         })
         if os.name != "nt":
             self.assertEqual(app.CONFIG_FILE.stat().st_mode & 0o777, 0o600)

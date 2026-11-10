@@ -51,6 +51,8 @@ def config_from_state(saved):
             alerts_enabled=saved.get("alerts_enabled", False),
             alerts_disk_percent=saved.get("alerts_disk_percent", 90),
             alerts_memory_percent=saved.get("alerts_memory_percent", 92),
+            hub_stream_url=saved.get("hub_stream_url", ""),
+            hub_stream_name=saved.get("hub_stream_name", ""),
         )
     except ValueError as error:
         raise RuntimeError(f"Supabase configuration is invalid: {error}") from error

@@ -122,6 +122,8 @@ DEFAULT_SYSTEM_PROMPT = (
 MAX_SYSTEM_PROMPT_LENGTH = 10000
 MAX_WAKE_PHRASE_LENGTH = 40
 MAX_TRANSCRIBE_MODEL_LENGTH = 120
+MAX_HUB_STREAM_URL_LENGTH = 500
+MAX_HUB_STREAM_NAME_LENGTH = 60
 WAKE_WINDOW_MIN = 2
 WAKE_WINDOW_MAX = 15
 WAKE_WINDOW_DEFAULT = 5
@@ -1894,6 +1896,36 @@ def custom_chat_endpoint(base_url):
     return f"{base}/chat/completions"
 
 
+def validate_hub_stream_url(value):
+    """Normalize the hub audio stream address, shared by every device."""
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ValueError("Indirizzo del flusso audio non valido.")
+    raw = value.strip()
+    if not raw:
+        return ""
+    if len(raw) > MAX_HUB_STREAM_URL_LENGTH:
+        raise ValueError("L'indirizzo del flusso audio e' troppo lungo.")
+    parts = urlsplit(raw)
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
+        raise ValueError(
+            "L'indirizzo del flusso audio deve iniziare con http:// o https://."
+        )
+    return raw
+
+
+def validate_hub_stream_name(value):
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ValueError("Nome del flusso audio non valido.")
+    name = " ".join(value.split())
+    if len(name) > MAX_HUB_STREAM_NAME_LENGTH:
+        raise ValueError("Il nome del flusso audio e' troppo lungo.")
+    return name
+
+
 def validate_config(
     provider,
     model,
@@ -1915,6 +1947,8 @@ def validate_config(
     alerts_enabled=False,
     alerts_disk_percent=ALERT_DISK_PERCENT_DEFAULT,
     alerts_memory_percent=ALERT_MEMORY_PERCENT_DEFAULT,
+    hub_stream_url="",
+    hub_stream_name="",
 ):
     if not isinstance(provider, str) or provider not in PROVIDERS:
         raise ValueError("Provider non supportato nel file di configurazione.")
@@ -2005,6 +2039,8 @@ def validate_config(
                 f"La soglia {label} deve essere un numero tra "
                 f"{ALERT_PERCENT_MIN} e {ALERT_PERCENT_MAX}."
             )
+    hub_stream_url = validate_hub_stream_url(hub_stream_url)
+    hub_stream_name = validate_hub_stream_name(hub_stream_name)
     workspace_path = Path(workspace).expanduser()
     if not workspace_path.is_absolute() or not workspace_path.is_dir():
         raise ValueError("La cartella di lavoro deve esistere ed essere assoluta.")
@@ -2029,6 +2065,8 @@ def validate_config(
         "alerts_enabled": alerts_enabled,
         "alerts_disk_percent": alerts_disk_percent,
         "alerts_memory_percent": alerts_memory_percent,
+        "hub_stream_url": hub_stream_url,
+        "hub_stream_name": hub_stream_name,
     }
 
 
@@ -2054,6 +2092,8 @@ def default_config():
         "alerts_enabled": False,
         "alerts_disk_percent": ALERT_DISK_PERCENT_DEFAULT,
         "alerts_memory_percent": ALERT_MEMORY_PERCENT_DEFAULT,
+        "hub_stream_url": "",
+        "hub_stream_name": "",
     }
 
 
@@ -2097,6 +2137,8 @@ def load_config_file():
             alerts_memory_percent=saved.get(
                 "alerts_memory_percent", ALERT_MEMORY_PERCENT_DEFAULT
             ),
+            hub_stream_url=saved.get("hub_stream_url", ""),
+            hub_stream_name=saved.get("hub_stream_name", ""),
         )
     except ValueError as error:
         raise RuntimeError(f"File di configurazione non valido: {error}") from error
@@ -5833,9 +5875,19 @@ class AppHandler(BaseHTTPRequestHandler):
                     "alerts_enabled": config["alerts_enabled"],
                     "alerts_disk_percent": config["alerts_disk_percent"],
                     "alerts_memory_percent": config["alerts_memory_percent"],
+                    "hub_stream_url": config.get("hub_stream_url", ""),
+                    "hub_stream_name": config.get("hub_stream_name", ""),
                     "workflows": list(workflows),
                 }
             self._send_json(200, public_config)
+            return
+        if self.path == "/api/hub":
+            with config_lock:
+                hub_settings = {
+                    "stream_url": config.get("hub_stream_url", ""),
+                    "stream_name": config.get("hub_stream_name", ""),
+                }
+            self._send_json(200, hub_settings)
             return
         if self.path == "/api/workflows":
             with config_lock:
@@ -5998,6 +6050,7 @@ class AppHandler(BaseHTTPRequestHandler):
             "/api/config", "/api/chat", "/api/workflows", "/api/extract",
             "/api/planner", "/api/reminders", "/api/telegram",
             "/api/google-calendar", "/api/api-keys", "/api/transcribe",
+            "/api/hub",
         } and not approval_match:
             self._send_json(404, {"error": "Endpoint non trovato."})
             return
@@ -6009,6 +6062,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 self._transcribe_audio(data)
             elif self.path == "/api/config":
                 self._save_config(data)
+            elif self.path == "/api/hub":
+                self._save_hub(data)
             elif self.path == "/api/telegram":
                 self._save_telegram(data)
             elif self.path == "/api/chat":
@@ -6174,6 +6229,12 @@ class AppHandler(BaseHTTPRequestHandler):
                     "alerts_memory_percent", ALERT_MEMORY_PERCENT_DEFAULT
                 ),
             ),
+            hub_stream_url=data.get(
+                "hub_stream_url", current_config.get("hub_stream_url", "")
+            ),
+            hub_stream_name=data.get(
+                "hub_stream_name", current_config.get("hub_stream_name", "")
+            ),
         )
         with config_lock:
             try:
@@ -6189,6 +6250,37 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             config.update(new_config)
         self._send_json(200, {"ok": True})
+
+    def _save_hub(self, data):
+        with config_lock:
+            current_config = config.copy()
+        try:
+            stream_url = validate_hub_stream_url(
+                data.get("stream_url", current_config.get("hub_stream_url", ""))
+            )
+            stream_name = validate_hub_stream_name(
+                data.get("stream_name", current_config.get("hub_stream_name", ""))
+            )
+        except ValueError as error:
+            self._send_json(400, {"error": str(error)})
+            return
+        new_config = dict(current_config)
+        new_config["hub_stream_url"] = stream_url
+        new_config["hub_stream_name"] = stream_name
+        with config_lock:
+            try:
+                save_config_file(new_config)
+            except OSError as error:
+                self.log_error("Flusso audio non salvato: %s", error)
+                self._send_json(500, {
+                    "error": (
+                        "Impossibile salvare l'indirizzo del flusso. "
+                        "Controlla il percorso e i permessi."
+                    ),
+                })
+                return
+            config.update(new_config)
+        self._send_json(200, {"ok": True, "stream_url": stream_url, "stream_name": stream_name})
 
     def _save_telegram(self, data):
         global telegram_pairing
