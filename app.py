@@ -5981,7 +5981,8 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_header(
             "Content-Security-Policy",
             "default-src 'self'; style-src 'self'; script-src 'self'; "
-            "connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+            "connect-src 'self'; media-src 'self' https: http: blob:; "
+            "base-uri 'none'; frame-ancestors 'none'",
         )
         self.end_headers()
         self.wfile.write(body)
