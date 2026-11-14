@@ -276,7 +276,10 @@ class FrontendSmokeTests(ServerMixin, unittest.TestCase):
             page.evaluate("() => { configured = true; sendButton.disabled = false; }")
             page.evaluate("() => sendChatMessage('Ciao')")
             self.assertEqual(page.locator(".message.error").count(), 1)
-            self.assertIn("Riprova", page.locator(".message-actions").inner_text())
+            self.assertEqual(
+                page.locator(".message.error .message-action").filter(has_text="Riprova").count(),
+                1,
+            )
             page.locator(".message-action").filter(has_text="Riprova").click()
             page.wait_for_timeout(700)
             self.assertEqual(page.evaluate("() => messages.length"), 2)
