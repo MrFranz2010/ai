@@ -2665,6 +2665,38 @@ const modelPrices = {
   "grok-2-latest": { input: 2, output: 10 },
 };
 
+async function rememberFact(text, button) {
+  const suggestion = String(text || "").slice(0, 500);
+  const fact = window.prompt("Cosa vuoi che NOKK ricordi?", suggestion);
+  if (fact === null) return;
+  const clean = fact.trim().slice(0, 500);
+  if (!clean) return;
+  button.disabled = true;
+  try {
+    const currentResponse = await fetch("/api/memory");
+    const current = await readJsonResponse(currentResponse, "Memoria non disponibile.");
+    if (!currentResponse.ok) throw new Error(current.error || "Memoria non disponibile.");
+    const memories = Array.isArray(current.memories) ? current.memories : [];
+    if (memories.includes(clean)) {
+      button.textContent = "Già in memoria";
+      return;
+    }
+    memories.push(clean);
+    const response = await fetch("/api/memory", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "save", memories: memories.slice(-60) }),
+    });
+    const result = await readJsonResponse(response, "Impossibile salvare la memoria.");
+    if (!response.ok) throw new Error(result.error || "Impossibile salvare la memoria.");
+    button.textContent = "Salvato ✓";
+  } catch (error) {
+    window.alert(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function estimateTokens(text) {
   return Math.max(0, Math.ceil(String(text || "").length / 4));
 }
@@ -2803,6 +2835,20 @@ function addMessage(role, text, extraClass = "", attachments = []) {
           [], activeMode,
         );
       });
+      addMessageAction(body, "Critica", "Metti alla prova questa risposta", () => {
+        if (sending) return;
+        void sendChatMessage(
+          "Fai da avvocato del diavolo: individua errori, assunzioni fragili e rischi nella tua ultima risposta. Poi fornisci una versione corretta e più solida.",
+          [], activeMode,
+        );
+      });
+      addMessageAction(body, "Continua", "Continua questa risposta da dove si interrompe", () => {
+        if (sending) return;
+        void sendChatMessage(
+          "Continua la tua ultima risposta esattamente da dove si interrompe, senza ripetere quanto già detto.",
+          [], activeMode,
+        );
+      });
     }
     appendExportLinks(body, attachments);
   } else {
@@ -2810,6 +2856,10 @@ function addMessage(role, text, extraClass = "", attachments = []) {
     paragraph.textContent = text;
     body.append(paragraph);
     addCopyButton(body, text);
+    const remember = addMessageAction(
+      body, "Ricorda", "Salva un fatto di questo messaggio nella memoria",
+      () => { void rememberFact(text, remember); },
+    );
   }
   row.append(roleIcon, body);
   conversation.append(row);
