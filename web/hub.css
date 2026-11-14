@@ -450,3 +450,58 @@ html[data-hub-layout="compact"] .hub-reply { max-height: 30vmin; }
 html[data-hub-layout="compact"] .clock-time { font-size: 30px; }
 
 /* Without JavaScript the page falls back to the device media queries below. */
+
+/* ==========================================================================
+   Hub flat — stessa superficie piena e stessa profondità zero dell'app.
+   Il colore distingue gli stati; niente gradienti, ombre o aloni.
+   ========================================================================== */
+
+.hub-dot { box-shadow: none; }
+
+.hub-icon-button,
+.hub-widget,
+.media-toggle,
+.hub-stop,
+.hub-reply .reply-attachment,
+.hub-settings-panel,
+.hub-widget-row,
+.hub-widget-row select,
+.hub-widget-row .row-move,
+.hub-settings-field input,
+.hub-settings-field select {
+  border-radius: 4px;
+}
+
+.hub-settings-panel { box-shadow: none; }
+.hub-settings-backdrop { backdrop-filter: none; }
+
+/* Pulsante push-to-talk: pieno, piatto, senza alone. */
+.ptt {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: none;
+  transition: background-color .18s ease, border-color .18s ease, color .18s ease;
+}
+.ptt:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.ptt:active { transform: none; }
+.ptt:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+
+.ptt[data-state="recording"] {
+  background: var(--hub-record);
+  border-color: var(--hub-record);
+  color: #fff;
+  box-shadow: none;
+  animation: none;
+}
+.ptt[data-state="transcribing"],
+.ptt[data-state="thinking"] {
+  background: color-mix(in srgb, var(--accent) 58%, var(--panel));
+  border-color: var(--border);
+  filter: none;
+}
+
+/* I widget restano leggibili ma senza profondità. */
+.hub-widget { background: var(--panel); }
+.media-toggle { background: var(--panel-hover); }
+.hub-settings-backdrop { background: rgba(0, 0, 0, .55); }
