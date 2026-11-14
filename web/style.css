@@ -2481,3 +2481,185 @@ a.message-attachment:hover { border-color: var(--text); }
   text-transform: uppercase;
 }
 .usage-table tr:last-child td { border-bottom: 0; }
+
+/* ==========================================================================
+   Tema flat — superfici piene, bordi netti, nessuna profondità.
+   Gli angoli restano piccoli (4–6px), le ombre e i gradienti decorativi
+   vengono rimossi: la gerarchia resta affidata a bordi, superfici e tipografia.
+   ========================================================================== */
+
+:root,
+:root[data-theme] {
+  --ui-radius-sm: 4px;
+  --ui-radius: 6px;
+  --ui-radius-lg: 8px;
+  --ui-shadow-soft: none;
+  --ui-shadow-pop: none;
+  --ui-ring: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+:root[data-theme] body { background: var(--page); }
+
+:root[data-theme] .brand-icon,
+:root[data-theme] .welcome-mark {
+  color: var(--page);
+  background: var(--accent);
+  border-color: var(--accent);
+  border-radius: 4px;
+  box-shadow: none;
+}
+:root[data-theme] .welcome-mark span { text-shadow: none; }
+:root[data-theme] .welcome-mark::before,
+:root[data-theme] .welcome-mark::after,
+:root[data-theme] .welcome-mark i { display: none; }
+:root[data-theme] .status-dot.connected,
+:root[data-theme] .system-pulse { box-shadow: none; }
+
+/* Struttura */
+:root[data-theme] .sidebar { background: var(--sidebar); }
+:root[data-theme] .topbar {
+  background: var(--page);
+  backdrop-filter: none;
+}
+:root[data-theme] .theme-button,
+:root[data-theme] .settings-button,
+:root[data-theme] .launcher-trigger {
+  background: var(--panel);
+  border-radius: 4px;
+}
+:root[data-theme] .theme-button:hover,
+:root[data-theme] .settings-button:hover,
+:root[data-theme] .launcher-trigger:hover { background: var(--panel-hover); }
+:root[data-theme] .new-chat {
+  background: var(--panel);
+  border-radius: 4px;
+}
+:root[data-theme] .new-chat:hover { background: var(--panel-hover); }
+:root[data-theme] .sidebar-clock,
+:root[data-theme] .sidebar-weather,
+:root[data-theme] .sidebar-note { border-radius: 4px; }
+
+/* Benvenuto */
+:root[data-theme] .welcome::before { display: none; }
+:root[data-theme] .welcome .eyebrow {
+  padding: 6px 10px;
+  background: var(--panel);
+  border-radius: 4px;
+  letter-spacing: 1px;
+}
+:root[data-theme] .welcome-capabilities span {
+  background: var(--panel);
+  border-radius: 4px;
+}
+:root[data-theme] .welcome-setup {
+  border-radius: 4px;
+  box-shadow: none;
+}
+:root[data-theme] .welcome-setup:hover { transform: none; }
+
+/* Composer */
+:root[data-theme] .composer {
+  background: var(--panel);
+  border-color: var(--border);
+  border-radius: 6px;
+  box-shadow: none;
+}
+:root[data-theme] .composer:focus-within {
+  border-color: var(--accent);
+  box-shadow: none;
+}
+:root[data-theme] .send-button {
+  color: var(--page);
+  background: var(--accent);
+  border-radius: 4px;
+  box-shadow: none;
+}
+:root[data-theme] .send-button:hover:not(:disabled) {
+  background: var(--accent-hover);
+  filter: none;
+  box-shadow: none;
+}
+:root[data-theme] .voice-button,
+:root[data-theme] .attach-button,
+:root[data-theme] .speak-message,
+:root[data-theme] .copy-message,
+:root[data-theme] .message-action { border-radius: 4px; }
+
+/* Messaggi */
+:root[data-theme] .message.user .message-body {
+  background: var(--panel);
+  border-radius: 4px;
+}
+:root[data-theme] .message-role { border-radius: 4px; }
+
+/* Impostazioni e finestre */
+:root[data-theme] .settings-overlay {
+  background: rgba(0, 0, 0, .55);
+  backdrop-filter: none;
+}
+:root[data-theme] .settings-card {
+  border-radius: 6px;
+  box-shadow: none;
+}
+:root[data-theme] .settings-card input,
+:root[data-theme] .settings-card select,
+:root[data-theme] .settings-card textarea,
+:root[data-theme] .api-settings input[type="text"],
+:root[data-theme] .api-key-secret,
+:root[data-theme] .api-key-secret code,
+:root[data-theme] .api-key-item,
+:root[data-theme] .voice-settings,
+:root[data-theme] .terminal-settings,
+:root[data-theme] .user-memory-card,
+:root[data-theme] .user-memory-card textarea,
+:root[data-theme] .user-memory-actions button,
+:root[data-theme] .settings-actions .save-button,
+:root[data-theme] .settings-actions .cancel-button { border-radius: 4px; }
+:root[data-theme] .settings-tab { border-radius: 4px; }
+:root[data-theme] .settings-tab[aria-selected="true"] { box-shadow: none; }
+:root[data-theme] .settings-actions { backdrop-filter: none; }
+:root[data-theme] .settings-actions .save-button { box-shadow: none; }
+
+/* Procedure, launcher, finestre */
+:root[data-theme] .workflow-card-item { border-radius: 4px; }
+:root[data-theme] .workflow-card-item:hover { transform: none; }
+:root[data-theme] .workflow-card-actions button,
+:root[data-theme] .workflow-day,
+:root[data-theme] .mode-chip,
+:root[data-theme] .attachment-chip,
+:root[data-theme] .command-menu,
+:root[data-theme] .command-item,
+:root[data-theme] .launcher-card,
+:root[data-theme] .launcher-result,
+:root[data-theme] .launcher-result-icon,
+:root[data-theme] .app-window,
+:root[data-theme] .window-dock-item,
+:root[data-theme] .usage-table-wrap { border-radius: 4px; }
+:root[data-theme] .command-menu,
+:root[data-theme] .launcher-card,
+:root[data-theme] .app-window { box-shadow: none; }
+:root[data-theme] .app-menu-item:hover,
+:root[data-theme] button:active:not(:disabled) { transform: none; }
+
+@media (max-width: 820px) {
+  :root[data-theme] .sidebar {
+    background: var(--sidebar);
+    border-radius: 0;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+  :root[data-theme] .sidebar-backdrop { backdrop-filter: none; }
+  :root[data-theme] .topbar { background: var(--page); }
+  :root[data-theme] .composer {
+    background: var(--panel);
+    border-radius: 6px;
+    box-shadow: none;
+  }
+  :root[data-theme] .settings-tab,
+  :root[data-theme] .attachment-chip,
+  :root[data-theme] .send-button,
+  :root[data-theme] .workflow-card-item { border-radius: 4px; }
+  :root[data-theme] .message.user .message-body { border-radius: 4px; }
+  :root[data-theme] .launcher-card,
+  :root[data-theme] .app-window { border-radius: 6px; }
+}
