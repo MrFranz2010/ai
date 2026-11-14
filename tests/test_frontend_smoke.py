@@ -223,6 +223,15 @@ class FrontendSmokeTests(ServerMixin, unittest.TestCase):
             self.assertEqual(
                 page.locator(".message-action").filter(has_text="Approfondisci").count(), 1
             )
+            self.assertEqual(
+                page.locator(".message-action").filter(has_text="Critica").count(), 1
+            )
+            self.assertEqual(
+                page.locator(".message-action").filter(has_text="Continua").count(), 1
+            )
+            self.assertEqual(
+                page.locator(".message-action").filter(has_text="Ricorda").count(), 1
+            )
             page.locator("#settings-toggle").click()
             page.wait_for_timeout(300)
             page.locator("#settings-tab-usage").click()
@@ -240,6 +249,42 @@ class FrontendSmokeTests(ServerMixin, unittest.TestCase):
             page.locator(".message-action").filter(has_text="Modifica").first.click()
             self.assertEqual(page.evaluate("() => messages.length"), 0)
             self.assertEqual(page.locator("#message-input").input_value(), "Ciao NOKK")
+        finally:
+            context.close()
+
+    def test_remember_saves_a_fact_to_memory(self):
+        context, page = self.open_page(True)
+        try:
+            saved = {"items": []}
+
+            def memory_route(route):
+                if route.request.method == "POST":
+                    payload = route.request.post_data_json or {}
+                    saved["items"] = payload.get("memories", [])
+                    route.fulfill(
+                        status=200,
+                        content_type="application/json",
+                        body=json.dumps({"ok": True}),
+                    )
+                else:
+                    route.fulfill(
+                        status=200,
+                        content_type="application/json",
+                        body=json.dumps({"memories": saved["items"]}),
+                    )
+
+            page.route("**/api/memory", memory_route)
+            page.evaluate("() => addMessage('user', 'Ricorda che preferisco risposte brevi.')")
+            page.once(
+                "dialog",
+                lambda dialog: dialog.accept("Preferisco risposte brevi."),
+            )
+            page.locator(".message-action").filter(has_text="Ricorda").click()
+            page.wait_for_timeout(400)
+            self.assertEqual(saved["items"], ["Preferisco risposte brevi."])
+            self.assertEqual(
+                page.locator(".message-action").filter(has_text="Salvato").count(), 1
+            )
         finally:
             context.close()
 
