@@ -2276,4 +2276,167 @@ a.message-attachment:hover { border-color: var(--text); }
   :root[data-theme] .settings-actions .save-button { min-height: 40px; padding: 0 15px; }
   :root[data-theme] .app-window { border-radius: 14px; box-shadow: var(--ui-shadow-soft); }
 }
+
+/* ==========================================================================
+   UI refresh — mobile e tablet.
+   Stessa palette e stesso carattere: cambiano forme, densità e gesti, mentre
+   i target touch restano da 44px e il drawer conserva comportamento e safe area.
+   ========================================================================== */
+
+/* Il livello desktop compatta alcuni pulsanti: qui tornano i 44px touch. */
+@media (any-pointer: coarse) {
+  :root[data-theme] .theme-button,
+  :root[data-theme] .settings-button,
+  :root[data-theme] .launcher-trigger,
+  :root[data-theme] .mobile-menu-button,
+  :root[data-theme] .sidebar-close,
+  :root[data-theme] .send-button,
+  :root[data-theme] .voice-button,
+  :root[data-theme] .attach-button,
+  :root[data-theme] .welcome-setup,
+  :root[data-theme] .copy-message,
+  :root[data-theme] .speak-message,
+  :root[data-theme] .close-button,
+  :root[data-theme] .window-control,
+  :root[data-theme] .calendar-nav {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  :root[data-theme] .new-chat,
+  :root[data-theme] .app-menu-item { min-height: 46px; }
+  :root[data-theme] .send-button { width: 44px; height: 44px; border-radius: 14px; }
+  :root[data-theme] .composer textarea,
+  :root[data-theme] #settings-form input,
+  :root[data-theme] #settings-form select,
+  :root[data-theme] #settings-form textarea,
+  :root[data-theme] #workflow-form input,
+  :root[data-theme] #workflow-form textarea { font-size: 16px; }
+}
+
+@media (max-width: 820px) {
+  /* Barra superiore e comandi */
+  :root[data-theme] .topbar {
+    gap: 10px;
+    background: color-mix(in srgb, var(--page) 82%, transparent);
+  }
+  :root[data-theme] .topbar h1 { font-size: 15px; letter-spacing: -.1px; }
+  :root[data-theme] .mobile-menu-button,
+  :root[data-theme] .theme-button,
+  :root[data-theme] .settings-button,
+  :root[data-theme] .launcher-trigger {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--panel) 80%, transparent);
+  }
+  :root[data-theme] .theme-button,
+  :root[data-theme] .settings-button { padding: 0; }
+
+  /* Drawer: pannello arrotondato, ombra profonda, stessa transizione */
+  :root[data-theme] .sidebar {
+    border-radius: 0 22px 22px 0;
+    background: color-mix(in srgb, var(--sidebar) 96%, transparent);
+    box-shadow: 24px 0 70px color-mix(in srgb, #000 45%, transparent);
+    backdrop-filter: blur(16px) saturate(120%);
+    transition: transform .24s cubic-bezier(.22, .61, .36, 1);
+  }
+  :root[data-theme] .sidebar-backdrop {
+    background: color-mix(in srgb, #000 55%, transparent);
+    backdrop-filter: blur(3px);
+  }
+  :root[data-theme] .brand { margin-bottom: 20px; }
+  :root[data-theme] .new-chat { border-radius: 14px; }
+  :root[data-theme] .app-menu { gap: 4px; }
+  :root[data-theme] .app-menu-item { border-radius: 12px; }
+  :root[data-theme] .sidebar-note {
+    margin: 16px 0;
+    padding: 11px 12px;
+    background: color-mix(in srgb, var(--panel) 70%, transparent);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+  }
+  :root[data-theme] .sidebar-clock,
+  :root[data-theme] .sidebar-weather { border-radius: 14px; }
+  :root[data-theme] .window-dock-item { border-radius: 10px; }
+
+  /* Benvenuto */
+  :root[data-theme] .welcome { padding-top: clamp(20px, 7vh, 54px); }
+  :root[data-theme] .welcome::before { top: -18%; width: 130%; height: 300px; }
+  :root[data-theme] .welcome .eyebrow { padding: 6px 10px; letter-spacing: 1px; }
+  :root[data-theme] .welcome-capabilities { margin-bottom: 20px; }
+  :root[data-theme] .welcome-setup { width: 100%; max-width: 320px; justify-content: center; }
+
+  /* Composer */
+  :root[data-theme] .composer {
+    width: calc(100% - 24px);
+    padding: 12px 12px 10px 14px;
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--panel) 96%, var(--page));
+    box-shadow: 0 14px 34px color-mix(in srgb, #000 26%, transparent);
+  }
+  :root[data-theme] .composer-actions { gap: 6px; }
+  :root[data-theme] .voice-button,
+  :root[data-theme] .attach-button { border-radius: 12px; }
+  :root[data-theme] .command-menu { border-radius: 14px; }
+  :root[data-theme] .composer-attachments { gap: 6px; }
+  :root[data-theme] .attachment-chip { border-radius: 999px; }
+
+  /* Messaggi */
+  :root[data-theme] .message { gap: 10px; margin-bottom: 20px; }
+  :root[data-theme] .message-role { border-radius: 9px; }
+  :root[data-theme] .message.user .message-body {
+    padding: 10px 13px;
+    border-radius: 4px 14px 14px 14px;
+  }
+
+  /* Impostazioni a tutta pagina: tab a pillola scorrevoli */
+  :root[data-theme] .settings-card { border-radius: 0; }
+  :root[data-theme] .settings-tabs {
+    flex-wrap: nowrap;
+    gap: 6px;
+    padding: 0 0 9px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  :root[data-theme] .settings-tabs::-webkit-scrollbar { display: none; }
+  :root[data-theme] .settings-tab {
+    padding: 9px 13px;
+    background: color-mix(in srgb, var(--panel) 70%, transparent);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 11px;
+  }
+  :root[data-theme] .settings-tab[aria-selected="true"] {
+    background: color-mix(in srgb, var(--accent) 15%, var(--panel));
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+    box-shadow: none;
+  }
+  :root[data-theme] .settings-actions {
+    background: color-mix(in srgb, var(--panel) 94%, transparent);
+    border-top-color: var(--border);
+    backdrop-filter: blur(12px);
+  }
+  :root[data-theme] .settings-actions .save-button,
+  :root[data-theme] .settings-actions .cancel-button { border-radius: 999px; }
+
+  /* Launcher, finestre e procedure */
+  :root[data-theme] .launcher-card { top: 12%; border-radius: 18px; }
+  :root[data-theme] .launcher-input-row { min-height: 56px; }
+  :root[data-theme] .app-window { border-radius: 16px; }
+  :root[data-theme] .app-window-titlebar { background: color-mix(in srgb, var(--sidebar) 92%, transparent); }
+  :root[data-theme] .workflow-panel { border-bottom-color: var(--border); }
+  :root[data-theme] .workflow-card-item { border-radius: 16px; }
+}
+
+/* Tablet con touch: raggi coerenti senza alterare le misure dei controlli. */
+@media (min-width: 821px) and (max-width: 1366px) and (any-pointer: coarse) {
+  :root[data-theme] .theme-button,
+  :root[data-theme] .settings-button,
+  :root[data-theme] .launcher-trigger { border-radius: 12px; }
+  :root[data-theme] .new-chat,
+  :root[data-theme] .app-menu-item { border-radius: 12px; }
+  :root[data-theme] .composer { border-radius: 18px; }
+  :root[data-theme] .settings-card { border-radius: 18px; }
+  :root[data-theme] .app-window { border-radius: 16px; }
+}
 :root[data-theme="dark"] .api-key-secret code { background: #1b1310; }
