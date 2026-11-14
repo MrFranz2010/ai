@@ -580,6 +580,7 @@ function openSettings(sectionName = "") {
   settingsError.hidden = true;
   settingsOverlay.hidden = false;
   activateSettingsTab(sectionName, { focus: true });
+  renderUsage();
 }
 
 function closeSettings() {
@@ -2619,6 +2620,150 @@ function addCopyButton(body, text) {
   body.append(button);
 }
 
+function addMessageAction(body, label, title, onClick, className = "") {
+  let actions = body.querySelector(".message-actions");
+  if (!actions) {
+    actions = document.createElement("div");
+    actions.className = "message-actions";
+    body.append(actions);
+  }
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `message-action ${className}`.trim();
+  button.textContent = label;
+  button.title = title;
+  button.setAttribute("aria-label", title);
+  button.addEventListener("click", onClick);
+  actions.append(button);
+  return button;
+}
+
+function downloadTextFile(filename, content, mimeType = "text/markdown;charset=utf-8") {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+const usageStorageKey = "nokk-usage-v1";
+const draftStorageKey = "nokk-draft-v1";
+// Indicative prices in USD per million tokens; only used for a local estimate.
+const modelPrices = {
+  "gpt-4o-mini": { input: 0.15, output: 0.6 },
+  "gpt-4o": { input: 2.5, output: 10 },
+  "gpt-4.1-mini": { input: 0.4, output: 1.6 },
+  "claude-3-5-haiku-latest": { input: 0.8, output: 4 },
+  "claude-3-5-sonnet-latest": { input: 3, output: 15 },
+  "gemini-2.0-flash": { input: 0.1, output: 0.4 },
+  "gemini-1.5-flash": { input: 0.075, output: 0.3 },
+  "mistral-small-latest": { input: 0.1, output: 0.3 },
+  "llama-3.3-70b-versatile": { input: 0.59, output: 0.79 },
+  "deepseek-chat": { input: 0.27, output: 1.1 },
+  "grok-2-latest": { input: 2, output: 10 },
+};
+
+function estimateTokens(text) {
+  return Math.max(0, Math.ceil(String(text || "").length / 4));
+}
+
+function loadUsage() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(usageStorageKey) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((entry) => entry && typeof entry === "object") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveUsage(entries) {
+  try {
+    window.localStorage.setItem(usageStorageKey, JSON.stringify(entries));
+  } catch {
+    // Private browsing can refuse storage: the chat keeps working without it.
+  }
+}
+
+function recordUsage(provider, model, inputTokens, outputTokens) {
+  const price = modelPrices[String(model || "").trim().toLowerCase()] || null;
+  const cost = price
+    ? (inputTokens * price.input + outputTokens * price.output) / 1000000
+    : null;
+  const entries = loadUsage();
+  entries.push({
+    at: Date.now(), provider, model,
+    input: inputTokens, output: outputTokens, cost,
+  });
+  saveUsage(entries.slice(-200));
+  renderUsage();
+}
+
+function formatCost(value) {
+  if (value === null || !Number.isFinite(value)) return "—";
+  if (value === 0) return "$0";
+  if (value < 0.0001) return "< $0.0001";
+  if (value < 0.01) return `$${value.toFixed(4)}`;
+  return `$${value.toFixed(2)}`;
+}
+
+function renderUsage() {
+  const summary = document.getElementById("usage-summary");
+  if (!summary) return;
+  const tableBody = document.getElementById("usage-table-body");
+  const tableWrap = document.getElementById("usage-table-wrap");
+  const entries = loadUsage();
+  if (!entries.length) {
+    summary.textContent = "Nessuna risposta registrata su questo dispositivo.";
+    if (tableBody) tableBody.replaceChildren();
+    if (tableWrap) tableWrap.hidden = true;
+    return;
+  }
+  const groups = new Map();
+  let totalTokens = 0;
+  let totalCost = 0;
+  let partialCost = false;
+  for (const entry of entries) {
+    const key = `${entry.provider || "custom"}|${entry.model || "modello"}`;
+    const group = groups.get(key) || {
+      provider: entry.provider, model: entry.model,
+      replies: 0, tokens: 0, cost: 0, unknown: false,
+    };
+    const tokens = (entry.input || 0) + (entry.output || 0);
+    group.replies += 1;
+    group.tokens += tokens;
+    totalTokens += tokens;
+    if (Number.isFinite(entry.cost)) {
+      group.cost += entry.cost;
+      totalCost += entry.cost;
+    } else {
+      group.unknown = true;
+      partialCost = true;
+    }
+    groups.set(key, group);
+  }
+  summary.textContent = `${entries.length} ${entries.length === 1 ? "risposta" : "risposte"} · ${new Intl.NumberFormat("it-IT").format(totalTokens)} token stimati · ${partialCost ? "costo parziale" : `≈ ${formatCost(totalCost)}`}`;
+  if (tableBody) {
+    tableBody.replaceChildren(...[...groups.values()].map((group) => {
+      const row = document.createElement("tr");
+      for (const value of [
+        group.model || "—",
+        providerLabels[group.provider] || group.provider || "—",
+        String(group.replies),
+        new Intl.NumberFormat("it-IT").format(group.tokens),
+        group.unknown ? "—" : formatCost(group.cost),
+      ]) {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.append(cell);
+      }
+      return row;
+    }));
+  }
+  if (tableWrap) tableWrap.hidden = false;
+}
+
 function addMessage(role, text, extraClass = "", attachments = []) {
   const row = document.createElement("article");
   row.className = `message ${role} ${extraClass}`.trim();
@@ -3418,6 +3563,8 @@ const chatCommands = [
   { name: "/studio", hint: "Spiegazioni passo passo per lo studio" },
   { name: "/analista", hint: "Analizza numeri, tabelle e dati" },
   { name: "/meteo", hint: "Aggiorna il meteo in sidebar" },
+  { name: "/copia", hint: "Copia la conversazione negli appunti" },
+  { name: "/esporta", hint: "Scarica la conversazione in Markdown" },
 ];
 const chatModes = {
   "/codice": "codice",
@@ -3517,6 +3664,29 @@ async function handleChatCommand(rawText) {
   const argument = rest.join(" ").trim();
   if (!chatCommands.some((command) => command.name === name)) return false;
   welcome.hidden = true;
+  if (name === "/copia" || name === "/esporta") {
+    const transcript = messages
+      .filter((message) => ["user", "assistant"].includes(message.role) && message.content)
+      .map((message) => `**${message.role === "user" ? "Tu" : "NOKK"}:** ${message.content}`)
+      .join("\n\n");
+    if (!transcript) {
+      addMessage("assistant", "Non c'è ancora niente da copiare in questa conversazione.");
+      return true;
+    }
+    if (name === "/esporta") {
+      downloadTextFile(
+        `nokk-${new Date().toISOString().slice(0, 10)}.md`,
+        `# ${pageTitle.textContent}\n\n${transcript}`,
+      );
+      addMessage("assistant", "Conversazione esportata in Markdown.");
+      return true;
+    }
+    const copied = await copyTextToClipboard(`${pageTitle.textContent}\n\n${transcript}`);
+    addMessage("assistant", copied
+      ? "Conversazione copiata negli appunti."
+      : "Copia non riuscita: il browser ha bloccato gli appunti.");
+    return true;
+  }
   if (name === "/promemoria") {
     addMessage("user", rawText);
     if (!argument) {
@@ -3588,11 +3758,23 @@ async function handleChatCommand(rawText) {
   return true;
 }
 
-async function sendChatMessage(messageText, attachments = [], mode = null) {
-  welcome.hidden = true;
-  if (messages.length === 0) pageTitle.textContent = summarizeChatTitle(messageText);
-  messages.push({ role: "user", content: messageText, attachments });
-  addMessage("user", messageText, "", attachments);
+let lastTurn = null;
+let lastRegenerateRow = null;
+const messageRows = new WeakMap();
+
+function attachRegenerate(row) {
+  if (!row) return;
+  lastRegenerateRow?.querySelector(".message-action.regenerate")?.remove();
+  addMessageAction(
+    row.querySelector(".message-body"),
+    "Rigenera", "Rigenera questa risposta",
+    () => { void regenerateReply(); },
+    "regenerate",
+  );
+  lastRegenerateRow = row;
+}
+
+async function requestReply(payloadMessages, mode) {
   sending = true;
   sendButton.disabled = true;
   newChatButton.disabled = true;
@@ -3601,7 +3783,7 @@ async function sendChatMessage(messageText, attachments = [], mode = null) {
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(mode ? { messages, mode } : { messages }),
+      body: JSON.stringify(mode ? { messages: payloadMessages, mode } : { messages: payloadMessages }),
     });
     const result = await readJsonResponse(response, "La richiesta non è riuscita.");
     if (!response.ok) throw new Error(result.error || "La richiesta non è riuscita.");
@@ -3609,8 +3791,19 @@ async function sendChatMessage(messageText, attachments = [], mode = null) {
     const reply = job.reply || "";
     const artifacts = Array.isArray(job.artifacts) ? job.artifacts : [];
     pending.remove();
-    messages.push({ role: "assistant", content: reply, artifacts });
-    addMessage("assistant", reply, "", artifacts);
+    const assistantMessage = { role: "assistant", content: reply, artifacts };
+    messages.push(assistantMessage);
+    const assistantRow = addMessage("assistant", reply, "", artifacts);
+    messageRows.set(assistantMessage, assistantRow);
+    attachRegenerate(assistantRow);
+    lastTurn = { messages: messages.slice(0, -1), mode };
+    const requestText = payloadMessages
+      .map((message) => message.content || "")
+      .join("\n");
+    recordUsage(
+      providerSelect.value, modelInput.value,
+      estimateTokens(requestText), estimateTokens(reply),
+    );
     const firstUserMessage = messages.find((message) => message.role === "user");
     if (firstUserMessage && isGenericChatTitle(pageTitle.textContent)) {
       pageTitle.textContent = summarizeChatTitle(firstUserMessage.content, reply);
@@ -3630,6 +3823,47 @@ async function sendChatMessage(messageText, attachments = [], mode = null) {
   }
 }
 
+async function sendChatMessage(messageText, attachments = [], mode = null) {
+  welcome.hidden = true;
+  if (messages.length === 0) pageTitle.textContent = summarizeChatTitle(messageText);
+  const userMessage = { role: "user", content: messageText, attachments };
+  messages.push(userMessage);
+  const userRow = addMessage("user", messageText, "", attachments);
+  messageRows.set(userMessage, userRow);
+  addMessageAction(
+    userRow.querySelector(".message-body"),
+    "Modifica", "Modifica questo messaggio e riparti da qui",
+    () => editMessage(userMessage),
+  );
+  await requestReply(messages, mode);
+}
+
+function editMessage(message) {
+  if (sending) return;
+  const index = messages.indexOf(message);
+  if (index < 0) return;
+  for (const removed of messages.slice(index)) messageRows.get(removed)?.remove();
+  messages.splice(index);
+  input.value = message.content;
+  pendingAttachments = (message.attachments || []).slice();
+  renderPendingAttachments();
+  setActiveMode(null);
+  lastTurn = null;
+  lastRegenerateRow = null;
+  resizeComposer();
+  input.focus();
+}
+
+async function regenerateReply() {
+  if (sending || !lastTurn) return;
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "assistant") return;
+  messages.pop();
+  messageRows.get(last)?.remove();
+  lastRegenerateRow = null;
+  await requestReply(lastTurn.messages, lastTurn.mode);
+}
+
 chatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = input.value.trim();
@@ -3646,13 +3880,22 @@ chatForm.addEventListener("submit", async (event) => {
   pendingAttachments = [];
   renderPendingAttachments();
   input.value = "";
+  try { window.localStorage.removeItem(draftStorageKey); } catch {}
   resizeComposer();
   await sendChatMessage(messageText, attachments, activeMode);
 });
 
+let draftSaveTimer = null;
 input.addEventListener("input", () => {
   resizeComposer();
   updateCommandMenu();
+  window.clearTimeout(draftSaveTimer);
+  draftSaveTimer = window.setTimeout(() => {
+    try {
+      if (input.value.trim()) window.localStorage.setItem(draftStorageKey, input.value);
+      else window.localStorage.removeItem(draftStorageKey);
+    } catch {}
+  }, 300);
 });
 
 input.addEventListener("keydown", (event) => {
@@ -3692,6 +3935,20 @@ async function refreshWorkflows() {
 window.setInterval(() => {
   if (!workflowPanel.hidden) void refreshWorkflows();
 }, 30000);
+
+try {
+  const savedDraft = window.localStorage.getItem(draftStorageKey);
+  if (savedDraft && !input.value) {
+    input.value = savedDraft;
+    resizeComposer();
+    updateCommandMenu();
+  }
+} catch {}
+
+document.querySelector("#usage-reset")?.addEventListener("click", () => {
+  try { window.localStorage.removeItem(usageStorageKey); } catch {}
+  renderUsage();
+});
 
 loadConfig().catch((error) => {
   connectionLabel.textContent = error.message;

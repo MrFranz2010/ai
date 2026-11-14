@@ -8,6 +8,8 @@ MAX_MEMORY_FACTS = 60
 MAX_MEMORY_FACT_LENGTH = 500
 MAX_MEMORY_TOTAL_LENGTH = 5000
 MAX_MEMORY_FILE_CHARS = 5000
+MEMORY_RELEVANCE_LIMIT = 18
+MEMORY_WORD_PATTERN = re.compile(r"[^\W_]{3,}", re.UNICODE)
 MEMORY_FILE_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".log", ".pdf", ".docx"}
 MEMORY_FILE_NAME_PATTERN = re.compile(r"^[^/\\\x00]{1,120}$")
 
@@ -30,6 +32,38 @@ def validate_memories(value):
             raise ValueError("La memoria supera il limite totale di testo.")
         clean.append(fact)
     return clean
+
+
+def _memory_words(text):
+    return {
+        match.casefold() for match in MEMORY_WORD_PATTERN.findall(str(text or ""))
+    }
+
+
+def select_relevant_memories(facts, messages=None, limit=MEMORY_RELEVANCE_LIMIT):
+    """Keep the facts most likely to matter for the latest user message.
+
+    A short memory is returned untouched; with a long one, facts sharing words
+    with the request win and the original order is preserved for stable output.
+    """
+    clean = validate_memories(facts)
+    if len(clean) <= limit:
+        return clean
+    query = ""
+    for message in reversed(messages or []):
+        if isinstance(message, dict) and message.get("role") == "user":
+            query = message.get("content") or ""
+            break
+    wanted = _memory_words(query)
+    if not wanted:
+        return clean[:limit]
+    scored = []
+    for index, fact in enumerate(clean):
+        overlap = len(wanted & _memory_words(fact))
+        scored.append((overlap, -index, index))
+    scored.sort(reverse=True)
+    keep = {index for _, _, index in scored[:limit]}
+    return [fact for index, fact in enumerate(clean) if index in keep]
 
 
 def validate_memory_file_name(name):
@@ -158,7 +192,9 @@ def install(app, handler_class, load_memories, save_memories):
         def run_chat_job_with_memory(job_id, messages, active_config, mode=None):
             request_config = active_config.copy()
             try:
-                facts = validate_memories(load_memories())
+                facts = select_relevant_memories(
+                    validate_memories(load_memories()), messages
+                )
             except Exception as error:
                 print(f"Unable to load user memory for chat: {error}")
                 facts = []

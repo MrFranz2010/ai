@@ -28,6 +28,38 @@
   let saveTimer = null;
   let chatQuery = "";
 
+  function chatMeta() {
+    try { return JSON.parse(window.localStorage.getItem("nokk-chat-meta") || "{}"); }
+    catch { return {}; }
+  }
+
+  function chatMetaFor(id) { return chatMeta()[id] || {}; }
+
+  function setChatMeta(id, patch) {
+    const all = chatMeta();
+    all[id] = { ...(all[id] || {}), ...patch };
+    try { window.localStorage.setItem("nokk-chat-meta", JSON.stringify(all)); } catch {}
+  }
+
+  function togglePin(id) {
+    setChatMeta(id, { pinned: !chatMetaFor(id).pinned });
+    renderChats();
+  }
+
+  async function renameChat(chat) {
+    if (state().sending) return;
+    const current = chat.title || "Nuova chat";
+    const title = window.prompt("Nuovo nome della chat", current);
+    if (title === null) return;
+    const clean = title.trim().replace(/\s+/g, " ").slice(0, 80);
+    if (!clean || clean === current) return;
+    chat.title = clean;
+    if (chat.id === activeChatId) state().pageTitle.textContent = clean;
+    renderChats();
+    try { await saveChat(chat); }
+    catch (error) { window.alert(error.message); }
+  }
+
   function state() {
     return { conversation, welcome, input, pageTitle, messages, sending, addMessage, resizeComposer };
   }
@@ -40,14 +72,19 @@
     historyList.replaceChildren();
     historyPanel.classList.toggle("has-chats", chats.length > 0);
     const query = chatQuery.trim().toLocaleLowerCase("it");
+    const pinned = chatMeta();
+    const ordered = [...chats].sort((left, right) => (
+      Number(Boolean(pinned[right.id]?.pinned)) - Number(Boolean(pinned[left.id]?.pinned))
+      || right.updated_at - left.updated_at
+    ));
     const visible = query
-      ? chats.filter((chat) => {
+      ? ordered.filter((chat) => {
           if ((chat.title || "").toLocaleLowerCase("it").includes(query)) return true;
           return (chat.messages || []).some((message) =>
             (message.content || "").toLocaleLowerCase("it").includes(query)
           );
         })
-      : chats;
+      : ordered;
     if (!visible.length) {
       const empty = document.createElement("p");
       empty.className = "chat-history-empty";
@@ -66,6 +103,23 @@
       open.title = open.textContent;
       open.disabled = state().sending;
       open.addEventListener("click", () => openChat(chat.id));
+      const rename = document.createElement("button");
+      rename.type = "button";
+      rename.className = "chat-history-delete chat-history-rename";
+      rename.textContent = "✎";
+      rename.title = `Rinomina ${chat.title || "Nuova chat"}`;
+      rename.setAttribute("aria-label", rename.title);
+      rename.disabled = state().sending;
+      rename.addEventListener("click", () => { void renameChat(chat); });
+      const pinnedChat = Boolean(chatMetaFor(chat.id).pinned);
+      const pin = document.createElement("button");
+      pin.type = "button";
+      pin.className = "chat-history-delete chat-history-pin";
+      pin.textContent = pinnedChat ? "★" : "☆";
+      pin.title = pinnedChat ? "Togli dai fissati" : "Fissa in alto";
+      pin.setAttribute("aria-label", pin.title);
+      pin.disabled = state().sending;
+      pin.addEventListener("click", () => togglePin(chat.id));
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "chat-history-delete";
@@ -74,7 +128,7 @@
       remove.setAttribute("aria-label", remove.title);
       remove.disabled = state().sending;
       remove.addEventListener("click", () => deleteChat(chat.id));
-      row.append(open, remove);
+      row.append(open, rename, pin, remove);
       historyList.append(row);
       if (query) {
         const message = (chat.messages || []).find((item) =>

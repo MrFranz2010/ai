@@ -261,6 +261,9 @@
                 <button class="settings-tab" id="settings-tab-api" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-api" data-settings-tab="api" tabindex="-1">
                   <span class="section-index">08</span><span>API<small>Chiavi per script ed estensione</small></span>
                 </button>
+                <button class="settings-tab" id="settings-tab-usage" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-usage" data-settings-tab="usage" tabindex="-1">
+                  <span class="section-index">09</span><span>Consumi<small>Token e costo stimati</small></span>
+                </button>
               </div>
               <div class="settings-panels">
                 <section class="settings-panel" id="settings-panel-connection" role="tabpanel" aria-labelledby="settings-tab-connection" data-settings-panel="connection">
@@ -419,6 +422,21 @@
                     </div>
                     <ul class="api-key-list" id="api-key-list"></ul>
                     <p class="field-help">Endpoint disponibili: <code>GET /api/v1/health</code>, <code>POST /api/v1/chat</code>, <code>GET /api/v1/jobs/&lt;id&gt;</code>, <code>POST /api/v1/reminders</code>, <code>GET /api/v1/planner</code>. Invia la chiave nell’intestazione <code>X-API-Key</code> oppure come <code>Authorization: Bearer</code>.</p>
+                  </div>
+                </section>
+                <section class="settings-panel" id="settings-panel-usage" role="tabpanel" aria-labelledby="settings-tab-usage" data-settings-panel="usage" hidden>
+                  <div class="usage-settings">
+                    <p class="telegram-status" id="usage-summary" role="status">Nessuna risposta registrata su questo dispositivo.</p>
+                    <div class="usage-table-wrap" id="usage-table-wrap" hidden>
+                      <table class="usage-table">
+                        <thead><tr><th>Modello</th><th>Provider</th><th>Risposte</th><th>Token</th><th>Costo</th></tr></thead>
+                        <tbody id="usage-table-body"></tbody>
+                      </table>
+                    </div>
+                    <p class="field-help">Stima locale: circa 4 caratteri per token e prezzi indicativi per milione di token. Non sostituisce la fattura del provider. I dati restano in questo browser.</p>
+                    <div class="telegram-actions">
+                      <button class="telegram-action" id="usage-reset" type="button">Azzera i consumi</button>
+                    </div>
                   </div>
                 </section>
                 <section class="settings-panel" id="settings-panel-google-calendar" role="tabpanel" aria-labelledby="settings-tab-google-calendar" data-settings-panel="google-calendar" hidden>
