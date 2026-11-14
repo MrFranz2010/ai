@@ -2441,3 +2441,43 @@ a.message-attachment:hover { border-color: var(--text); }
   :root[data-theme] .app-window { border-radius: 16px; }
 }
 :root[data-theme="dark"] .api-key-secret code { background: #1b1310; }
+
+/* Chat actions, draft and local usage estimate */
+.message-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.message-action {
+  padding: 4px 10px;
+  color: #3a424a;
+  background: #fff;
+  border: 1px solid #dfe3e6;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+.message-action:hover { background: #f1f3f5; }
+.message-action:focus-visible { outline: 2px solid #2867e8; outline-offset: 2px; }
+:root[data-theme="dark"] .message-action {
+  color: #c8dfe1;
+  background: #0d222b;
+  border-color: #294852;
+}
+:root[data-theme="dark"] .message-action:hover { background: #17343d; }
+
+.usage-settings { display: grid; gap: 12px; }
+.usage-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+.usage-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.usage-table th, .usage-table td {
+  padding: 8px 10px;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+.usage-table th {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.usage-table tr:last-child td { border-bottom: 0; }

@@ -44,6 +44,39 @@ class UserMemoryErrorTests(unittest.TestCase):
         self.assertIn("Impossibile salvare la memoria", handler.payload["error"])
         self.assertRegex(handler.payload["error_id"], re.compile(r"^[a-f0-9]{8}$"))
 
+class MemoryRelevanceTests(unittest.TestCase):
+    def test_a_short_memory_is_returned_unchanged(self):
+        facts = ["Mangio vegetariano.", "Studio fisica."]
+        selected = user_memory.select_relevant_memories(
+            facts, [{"role": "user", "content": "Come procede fisica?"}]
+        )
+        self.assertEqual(selected, facts)
+
+    def test_a_long_memory_keeps_the_facts_closest_to_the_request(self):
+        facts = [f"Cosa numero {index} su argomento {index}." for index in range(30)]
+        facts.append("Il mio progetto si chiama NOKK.")
+        selected = user_memory.select_relevant_memories(
+            facts, [{"role": "user", "content": "Come procede il progetto NOKK?"}]
+        )
+        self.assertLessEqual(len(selected), user_memory.MEMORY_RELEVANCE_LIMIT)
+        self.assertIn("Il mio progetto si chiama NOKK.", selected)
+
+    def test_the_latest_user_message_drives_the_selection(self):
+        facts = [f"Fatto {index} sul tema {index}." for index in range(25)]
+        facts.append("Uso Debian sul portatile.")
+        facts.append("Il gatto si chiama Nocciola.")
+        selected = user_memory.select_relevant_memories(
+            facts,
+            [
+                {"role": "user", "content": "Parliamo del gatto"},
+                {"role": "assistant", "content": "Certo."},
+                {"role": "user", "content": "Che sistema uso sul portatile?"},
+            ],
+        )
+        self.assertIn("Uso Debian sul portatile.", selected)
+        self.assertNotIn("Il gatto si chiama Nocciola.", selected)
+
+
 class ChatJobModeTests(unittest.TestCase):
     def test_the_memory_wrapper_forwards_the_chat_mode(self):
         calls = []
