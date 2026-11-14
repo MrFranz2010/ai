@@ -2788,6 +2788,22 @@ function addMessage(role, text, extraClass = "", attachments = []) {
     });
     body.append(speakButton);
     addCopyButton(body, text);
+    if (!extraClass) {
+      addMessageAction(body, "Semplifica", "Riscrivi questa risposta in modo più semplice", () => {
+        if (sending) return;
+        void sendChatMessage(
+          "Spiega la tua ultima risposta in modo più semplice, con parole comuni e un esempio concreto.",
+          [], activeMode,
+        );
+      });
+      addMessageAction(body, "Approfondisci", "Aggiungi dettagli ed esempi a questa risposta", () => {
+        if (sending) return;
+        void sendChatMessage(
+          "Approfondisci la tua ultima risposta con dettagli, esempi e casi limite.",
+          [], activeMode,
+        );
+      });
+    }
     appendExportLinks(body, attachments);
   } else {
     const paragraph = document.createElement("p");
@@ -3565,6 +3581,8 @@ const chatCommands = [
   { name: "/meteo", hint: "Aggiorna il meteo in sidebar" },
   { name: "/copia", hint: "Copia la conversazione negli appunti" },
   { name: "/esporta", hint: "Scarica la conversazione in Markdown" },
+  { name: "/riassumi", hint: "Riassumi la conversazione in punti" },
+  { name: "/azioni", hint: "Estrai azioni e prossimi passi" },
 ];
 const chatModes = {
   "/codice": "codice",
@@ -3685,6 +3703,17 @@ async function handleChatCommand(rawText) {
     addMessage("assistant", copied
       ? "Conversazione copiata negli appunti."
       : "Copia non riuscita: il browser ha bloccato gli appunti.");
+    return true;
+  }
+  if (name === "/riassumi" || name === "/azioni") {
+    if (!messages.some((message) => message.role === "assistant")) {
+      addMessage("assistant", "Prima di procedere serve almeno una risposta in questa conversazione.");
+      return true;
+    }
+    const prompt = name === "/riassumi"
+      ? "Riassumi questa conversazione in massimo 6 punti chiari, partendo dalle conclusioni."
+      : "Elenca le azioni concrete emerse da questa conversazione, con il prossimo passo per ciascuna.";
+    await sendChatMessage(prompt, [], activeMode);
     return true;
   }
   if (name === "/promemoria") {
@@ -3815,6 +3844,15 @@ async function requestReply(payloadMessages, mode) {
     const errorParagraph = document.createElement("p");
     errorParagraph.textContent = error.message;
     pending.querySelector(".message-body").replaceChildren(errorParagraph);
+    addMessageAction(
+      pending.querySelector(".message-body"),
+      "Riprova", "Riprova la richiesta",
+      () => {
+        if (sending || messages[messages.length - 1]?.role !== "user") return;
+        pending.remove();
+        void requestReply(messages, mode);
+      },
+    );
   } finally {
     sending = false;
     sendButton.disabled = !configured;

@@ -217,6 +217,12 @@ class FrontendSmokeTests(ServerMixin, unittest.TestCase):
             self.assertEqual(
                 page.locator(".message-action").filter(has_text="Modifica").count(), 1
             )
+            self.assertEqual(
+                page.locator(".message-action").filter(has_text="Semplifica").count(), 1
+            )
+            self.assertEqual(
+                page.locator(".message-action").filter(has_text="Approfondisci").count(), 1
+            )
             page.locator("#settings-toggle").click()
             page.wait_for_timeout(300)
             page.locator("#settings-tab-usage").click()
@@ -225,9 +231,56 @@ class FrontendSmokeTests(ServerMixin, unittest.TestCase):
             page.locator(".message-action.regenerate").click()
             page.wait_for_timeout(700)
             self.assertEqual(page.evaluate("() => messages.length"), 2)
-            page.locator(".message-action").filter(has_text="Modifica").click()
+            page.evaluate("() => handleChatCommand('/riassumi')")
+            self.assertEqual(page.evaluate("() => messages.length"), 4)
+            self.assertIn(
+                "Riassumi questa conversazione",
+                page.evaluate("() => messages[2].content"),
+            )
+            page.locator(".message-action").filter(has_text="Modifica").first.click()
             self.assertEqual(page.evaluate("() => messages.length"), 0)
             self.assertEqual(page.locator("#message-input").input_value(), "Ciao NOKK")
+        finally:
+            context.close()
+
+    def test_retry_recovers_from_a_failed_request(self):
+        context, page = self.open_page(True)
+        try:
+            attempts = {"count": 0}
+
+            def chat_route(route):
+                attempts["count"] += 1
+                if attempts["count"] == 1:
+                    route.fulfill(
+                        status=500,
+                        content_type="application/json",
+                        body=json.dumps({"error": "Errore simulato"}),
+                    )
+                else:
+                    route.fulfill(
+                        status=200,
+                        content_type="application/json",
+                        body=json.dumps({"job_id": "retry-1"}),
+                    )
+
+            page.route("**/api/chat", chat_route)
+            page.route("**/api/jobs/retry-1", lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "status": "complete",
+                    "reply": "Recuperata",
+                    "tool_events": [],
+                }),
+            ))
+            page.evaluate("() => { configured = true; sendButton.disabled = false; }")
+            page.evaluate("() => sendChatMessage('Ciao')")
+            self.assertEqual(page.locator(".message.error").count(), 1)
+            self.assertIn("Riprova", page.locator(".message-actions").inner_text())
+            page.locator(".message-action").filter(has_text="Riprova").click()
+            page.wait_for_timeout(700)
+            self.assertEqual(page.evaluate("() => messages.length"), 2)
+            self.assertEqual(page.locator(".message.error").count(), 0)
         finally:
             context.close()
 
