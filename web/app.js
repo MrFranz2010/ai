@@ -2617,16 +2617,22 @@ function addCopyButton(body, text) {
       button.classList.remove("copied");
     }, 1600);
   });
-  body.append(button);
+  messageActionsHost(body).append(button);
 }
 
-function addMessageAction(body, label, title, onClick, className = "") {
-  let actions = body.querySelector(".message-actions");
+function messageActionsHost(body) {
+  const host = body.parentElement?.classList.contains("message") ? body.parentElement : body;
+  let actions = host.querySelector(":scope > .message-actions");
   if (!actions) {
     actions = document.createElement("div");
     actions.className = "message-actions";
-    body.append(actions);
+    host.append(actions);
   }
+  return actions;
+}
+
+function addMessageAction(body, label, title, onClick, className = "") {
+  const actions = messageActionsHost(body);
   const button = document.createElement("button");
   button.type = "button";
   button.className = `message-action ${className}`.trim();
@@ -2808,6 +2814,7 @@ function addMessage(role, text, extraClass = "", attachments = []) {
   if (role === "user") appendAttachmentPreviews(body, attachments);
   if (role === "assistant") {
     renderMarkdown(body, text);
+    if (!extraClass) {
     const speakButton = document.createElement("button");
     speakButton.type = "button";
     speakButton.className = "speak-message";
@@ -2818,9 +2825,8 @@ function addMessage(role, text, extraClass = "", attachments = []) {
       if (aiMuted) setAiMuted(false);
       speakText(text);
     });
-    body.append(speakButton);
+    messageActionsHost(body).append(speakButton);
     addCopyButton(body, text);
-    if (!extraClass) {
       addMessageAction(body, "Semplifica", "Riscrivi questa risposta in modo più semplice", () => {
         if (sending) return;
         void sendChatMessage(
@@ -2862,6 +2868,8 @@ function addMessage(role, text, extraClass = "", attachments = []) {
     );
   }
   row.append(roleIcon, body);
+  const inlineActions = body.querySelector(":scope > .message-actions");
+  if (inlineActions) row.append(inlineActions);
   conversation.append(row);
   conversation.scrollTo({ top: conversation.scrollHeight, behavior: "smooth" });
   return row;
@@ -3891,6 +3899,7 @@ async function requestReply(payloadMessages, mode) {
   } catch (error) {
     pending.classList.remove("pending");
     pending.classList.add("error");
+    pending.querySelector(":scope > .message-actions")?.replaceChildren();
     const errorParagraph = document.createElement("p");
     errorParagraph.textContent = error.message;
     pending.querySelector(".message-body").replaceChildren(errorParagraph);

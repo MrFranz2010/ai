@@ -232,6 +232,8 @@ class FrontendSmokeTests(ServerMixin, unittest.TestCase):
             self.assertEqual(
                 page.locator(".message-action").filter(has_text="Ricorda").count(), 1
             )
+            self.assertEqual(page.locator(".message.user > .message-actions").count(), 1)
+            self.assertEqual(page.locator(".message.assistant > .message-actions").count(), 1)
             page.locator("#settings-toggle").click()
             page.wait_for_timeout(300)
             page.locator("#settings-tab-usage").click()
