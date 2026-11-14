@@ -166,6 +166,7 @@ function summarizeChatTitle(text, topicText = "") {
 }
 const connectionLabel = document.querySelector("#connection-label");
 const newChatButton = document.querySelector("#new-chat");
+const welcomeSetup = document.querySelector("#welcome-setup");
 const workflowsToggle = document.querySelector("#workflows-toggle");
 const workflowPanel = document.querySelector("#workflow-panel");
 const workflowList = document.querySelector("#workflow-list");
@@ -2311,6 +2312,7 @@ function setConfigured(isConfigured, provider, model) {
   input.placeholder = configured ? "Scrivi un messaggio..." : "Configura un provider per iniziare...";
   const providerName = providerLabels[provider] || provider;
   connectionLabel.textContent = configured ? `${providerName} · ${model}` : "Configura un provider";
+  welcomeSetup.hidden = configured || configuredProviders.size > 0;
   document.querySelector(".status-dot").classList.toggle("connected", configured);
   updateVoiceButtons();
 }
@@ -2987,7 +2989,7 @@ document.addEventListener("keydown", (event) => {
     sidebarToggle.focus();
   }
 });
-document.querySelector("#welcome-setup").addEventListener("click", () => openSettings());
+welcomeSetup.addEventListener("click", () => openSettings());
 document.querySelector("#settings-close").addEventListener("click", closeSettings);
 document.querySelector("#settings-cancel").addEventListener("click", closeSettings);
 settingsTabs.forEach((tab, index) => {

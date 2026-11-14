@@ -2031,3 +2031,248 @@ a.message-attachment:hover { border-color: var(--text); }
   border-color: #4a2a22;
 }
 :root[data-theme="dark"] .api-key-secret code { background: #1b1310; }
+   UI refresh — superfici, ritmo e micro-interazioni più moderne.
+   Palette, contrasti e carattere editoriale dei temi restano quelli già
+   esistenti: qui cambiano solo forme, profondità, spaziature e transizioni.
+   ========================================================================== */
+
+:root[data-theme] {
+  --ui-radius-sm: 10px;
+  --ui-radius: 14px;
+  --ui-radius-lg: 20px;
+  --ui-shadow-soft: 0 18px 40px color-mix(in srgb, #000 22%, transparent);
+  --ui-shadow-pop: 0 24px 70px color-mix(in srgb, #000 38%, transparent);
+  --ui-ring: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+:root[data-theme] button,
+:root[data-theme] a,
+:root[data-theme] input,
+:root[data-theme] select,
+:root[data-theme] textarea {
+  transition: background-color .18s ease, border-color .18s ease, color .18s ease,
+    box-shadow .18s ease, transform .18s ease, opacity .18s ease;
+}
+:root[data-theme] :is(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+:root[data-theme] button:active:not(:disabled) { transform: translateY(1px); }
+
+/* Barra superiore */
+:root[data-theme] .topbar {
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--page) 74%, transparent);
+  backdrop-filter: blur(18px) saturate(130%);
+}
+:root[data-theme] .topbar .eyebrow { margin-bottom: 5px; letter-spacing: 1.5px; }
+:root[data-theme] .theme-button,
+:root[data-theme] .settings-button {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 65%, transparent);
+  border-color: var(--border);
+}
+:root[data-theme] .theme-button:hover,
+:root[data-theme] .settings-button:hover {
+  background: var(--panel-hover);
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+}
+:root[data-theme] .launcher-trigger {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 65%, transparent);
+}
+:root[data-theme] .launcher-trigger:hover {
+  background: var(--panel-hover);
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+}
+:root[data-theme] .launcher-card {
+  border-radius: var(--ui-radius-lg);
+  box-shadow: var(--ui-shadow-pop);
+}
+:root[data-theme] .launcher-result,
+:root[data-theme] .launcher-result-icon { border-radius: 9px; }
+
+/* Barra laterale */
+:root[data-theme] .sidebar-clock,
+:root[data-theme] .sidebar-weather { border-radius: 12px; }
+:root[data-theme] .new-chat {
+  border-radius: 12px;
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent 72%),
+    var(--panel);
+  font-weight: 600;
+  letter-spacing: .2px;
+}
+:root[data-theme] .new-chat:hover {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 20%, transparent), transparent 72%),
+    var(--panel-hover);
+}
+:root[data-theme] .app-menu { gap: 3px; }
+:root[data-theme] .app-menu-item {
+  border-radius: 10px;
+  color: color-mix(in srgb, var(--text) 86%, var(--muted));
+}
+:root[data-theme] .app-menu-item > span:first-child { transition: transform .18s ease; }
+:root[data-theme] .app-menu-item:hover {
+  background: var(--panel);
+  border-color: var(--border);
+  transform: translateX(2px);
+}
+:root[data-theme] .sidebar-section-label { letter-spacing: 1.6px; }
+
+/* Schermata di benvenuto */
+:root[data-theme] .welcome {
+  position: relative;
+  isolation: isolate;
+}
+:root[data-theme] .welcome::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: -12%;
+  left: 50%;
+  width: min(760px, 110%);
+  height: min(440px, 85%);
+  transform: translateX(-50%);
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 15%, transparent), transparent 78%);
+  filter: blur(6px);
+  pointer-events: none;
+}
+:root[data-theme] .welcome .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  color: color-mix(in srgb, var(--accent) 88%, var(--text));
+  background: color-mix(in srgb, var(--panel) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+  border-radius: 999px;
+  letter-spacing: 1.3px;
+}
+:root[data-theme] .welcome h2 { letter-spacing: -1.4px; line-height: 1.02; }
+:root[data-theme] .welcome-copy { margin-top: 16px; letter-spacing: .1px; }
+:root[data-theme] .welcome-capabilities { gap: 7px; }
+:root[data-theme] .welcome-capabilities span {
+  padding: 6px 11px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--panel) 55%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  letter-spacing: 1.1px;
+}
+:root[data-theme] .welcome-capabilities span:first-child {
+  padding-left: 11px;
+  border-left: 1px solid var(--border);
+}
+:root[data-theme] .welcome-setup {
+  border-radius: 12px;
+  font-weight: 600;
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+:root[data-theme] .welcome-setup:hover { transform: translateY(-1px); }
+:root[data-theme] .welcome-setup[hidden] { display: none; }
+
+/* Composer */
+:root[data-theme] .composer {
+  background: color-mix(in srgb, var(--panel) 90%, var(--page));
+  border-color: color-mix(in srgb, var(--border) 82%, var(--accent));
+  box-shadow:
+    0 18px 42px color-mix(in srgb, #000 24%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 6%, transparent);
+}
+:root[data-theme] .composer:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+  box-shadow: 0 18px 42px color-mix(in srgb, #000 26%, transparent), var(--ui-ring);
+}
+:root[data-theme] .send-button {
+  border-radius: 11px;
+  background: linear-gradient(150deg, var(--accent), color-mix(in srgb, var(--accent) 72%, #000));
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+:root[data-theme] .send-button:hover:not(:disabled) {
+  filter: brightness(1.08);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 36%, transparent);
+}
+:root[data-theme] .voice-button,
+:root[data-theme] .attach-button,
+:root[data-theme] .speak-message,
+:root[data-theme] .copy-message { border-radius: 10px; }
+
+/* Messaggi */
+:root[data-theme] .message { gap: 14px; margin-bottom: 22px; }
+:root[data-theme] .message-role { border-radius: 10px; }
+:root[data-theme] .message.user .message-body {
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 4px 14px 14px 14px;
+}
+
+/* Impostazioni, procedure, finestre */
+:root[data-theme] .settings-tab { border-radius: 11px; }
+:root[data-theme] .settings-tab:hover { background: color-mix(in srgb, var(--panel) 70%, transparent); }
+:root[data-theme] .settings-tab[aria-selected="true"] {
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  box-shadow: none;
+}
+:root[data-theme] .settings-card input,
+:root[data-theme] .settings-card select,
+:root[data-theme] .settings-card textarea { border-radius: 10px; }
+:root[data-theme] .settings-actions .cancel-button,
+:root[data-theme] .settings-actions .save-button { border-radius: 11px; }
+:root[data-theme] .workflow-card-item {
+  border-radius: 14px;
+  transition: transform .18s ease, border-color .18s ease;
+}
+:root[data-theme] .workflow-card-item:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+}
+:root[data-theme] .workflow-card-actions button { border-radius: 9px; }
+:root[data-theme] .window-control:hover { background: var(--panel-hover); }
+
+/* Misure e spaziature: solo desktop, per non alterare i target touch. */
+@media (min-width: 821px) {
+  :root[data-theme] .topbar { padding: 14px clamp(22px, 4vw, 48px); }
+  :root[data-theme] .topbar h1 { font-size: 17px; letter-spacing: -.2px; }
+  :root[data-theme] .topbar-actions { gap: 10px; }
+  :root[data-theme] .theme-button,
+  :root[data-theme] .settings-button { min-height: 36px; padding: 0 14px; font-size: 11.5px; }
+  :root[data-theme] .launcher-trigger { min-height: 38px; }
+
+  :root[data-theme] .sidebar-note {
+    margin: 12px 0;
+    padding: 10px 11px;
+    background: color-mix(in srgb, var(--panel) 55%, transparent);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  :root[data-theme] .new-chat { min-height: 42px; padding: 0 13px; font-size: 12.5px; }
+  :root[data-theme] .app-menu { margin-top: 10px; }
+  :root[data-theme] .app-menu-item { min-height: 38px; padding: 0 12px; font-size: 11.5px; }
+
+  :root[data-theme] .welcome .eyebrow { font-size: 9px; }
+  :root[data-theme] .welcome-capabilities { margin-bottom: 24px; }
+  :root[data-theme] .welcome-capabilities span { font-size: 8.5px; }
+  :root[data-theme] .welcome-setup { min-height: 42px; padding: 0 16px; font-size: 12.5px; }
+
+  :root[data-theme] .composer {
+    width: min(calc(100% - 48px), 760px);
+    margin-bottom: 26px;
+    padding: 14px 15px 11px 18px;
+    border-radius: 18px;
+  }
+  :root[data-theme] .composer textarea { font-size: 14.5px; line-height: 1.6; }
+  :root[data-theme] .message.user .message-body { padding: 11px 15px; }
+
+  :root[data-theme] .settings-card { border-radius: var(--ui-radius-lg); }
+  :root[data-theme] .settings-card.settings-window { padding: 24px; }
+  :root[data-theme] .settings-actions .cancel-button,
+  :root[data-theme] .settings-actions .save-button { min-height: 40px; padding: 0 15px; }
+  :root[data-theme] .app-window { border-radius: 14px; box-shadow: var(--ui-shadow-soft); }
+}
+:root[data-theme="dark"] .api-key-secret code { background: #1b1310; }
