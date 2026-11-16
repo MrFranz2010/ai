@@ -76,6 +76,11 @@ girano con i permessi del tuo utente e possono leggere o modificare tutto il
 sistema, anche con percorsi assoluti fuori da quella cartella. Nella TUI puoi
 cambiarla con `/cd /` (Linux/macOS), `/cd C:\` (Windows) o `/cd ~`.
 
+Se un comando usa `sudo`, la TUI mostra una richiesta nascosta per la password e
+la passa a sudo tramite stdin (`sudo -S`); nella modalità a righe la password
+viene chiesta con `getpass`. La password resta solo in memoria, non viene
+salvata, non compare nel transcript e non viene inviata al modello.
+
 - `!comando` esegue subito un comando locale e aggiunge l'output al contesto.
 - Con l'agente attivo, se NOKK propone un comando nel blocco `nokk-run`, il
   client chiede conferma, lo esegue **sulla macchina locale** e rimanda

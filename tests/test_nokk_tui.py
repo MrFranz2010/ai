@@ -8,7 +8,13 @@ import nokk_cli
 from nokk_cli import Config
 
 try:
-    from nokk_tui import NokkTuiApp, SettingsScreen, collect_file_context, git_output
+    from nokk_tui import (
+        NokkTuiApp,
+        SettingsScreen,
+        SudoPasswordScreen,
+        collect_file_context,
+        git_output,
+    )
     HAS_TUI = True
 except ImportError:
     HAS_TUI = False
@@ -63,6 +69,17 @@ class AgentClient(FakeClient):
             return {
                 "status": "complete",
                 "reply": "Eseguo.\n```nokk-run\necho locale\n```",
+            }
+        return {"status": "complete", "reply": "Fatto."}
+
+
+class SudoAgentClient(FakeClient):
+    def job(self, job_id):
+        self.jobs += 1
+        if self.jobs == 1:
+            return {
+                "status": "complete",
+                "reply": "Serve sudo.\n```nokk-run\nsudo id\n```",
             }
         return {"status": "complete", "reply": "Fatto."}
 
@@ -147,6 +164,38 @@ class NokkTuiTests(unittest.IsolatedAsyncioTestCase):
                     and "locale" in message["content"]
                     for message in app.active_chat.messages
                 ))
+
+    async def test_sudo_command_asks_for_a_hidden_password(self):
+        with tempfile.TemporaryDirectory() as directory:
+            calls = []
+
+            def runner(command, cwd, sudo_password=None):
+                calls.append((command, Path(cwd), sudo_password))
+                return nokk_cli.LocalResult(command, 0, "ok")
+
+            app = NokkTuiApp(
+                Config(),
+                Path(directory) / "cli.json",
+                client=SudoAgentClient(),
+                auto_yes=True,
+                cwd=directory,
+                runner=runner,
+            )
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                app.query_one("#prompt").value = "serve sudo"
+                await pilot.press("enter")
+                shown = await wait_until(
+                    pilot, lambda: isinstance(app.screen, SudoPasswordScreen)
+                )
+                self.assertTrue(shown)
+                field = app.screen.query_one("#sudo-password")
+                self.assertTrue(field.password)
+                field.value = "segreta"
+                await pilot.press("enter")
+                self.assertTrue(await wait_until(pilot, lambda: not app.busy))
+        self.assertEqual(calls[0][0], "sudo id")
+        self.assertEqual(calls[0][2], "segreta")
 
     async def test_server_command_is_approved_from_a_modal(self):
         client = ServerClient()

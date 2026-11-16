@@ -68,7 +68,9 @@ rispondi includendo un unico blocco con questo formato:
 
 Il comando verrà eseguito davvero nella directory locale e ti sarà restituito
 l'output. Non inventare l'output e non usare il terminale del server per i
-comandi locali. Spiega brevemente i comandi distruttivi prima di proporli.
+comandi locali. Se serve sudo, proponi il comando normalmente: il client chiede
+la password in modo nascosto. Non chiedere la password e non inserirla nel
+comando. Spiega brevemente i comandi distruttivi prima di proporli.
 Quando non servono altri comandi, rispondi normalmente e concludi."""
 
 CONTINUE_RULES = """\
@@ -489,6 +491,97 @@ class NokkClient:
         return self._request("POST", path, {})
 
 
+def _shell_words(command):
+    """Divide un comando shell in parole e separatori, rispettando le virgolette."""
+    words = []
+    index = 0
+    length = len(command)
+    while index < length:
+        char = command[index]
+        if char in " \t":
+            index += 1
+            continue
+        if char == "\n" or char in ";&|()":
+            start = index
+            if char in "&|" and index + 1 < length and command[index + 1] == char:
+                index += 2
+            else:
+                index += 1
+            words.append((start, index, command[start:index], True))
+            continue
+        start = index
+        while index < length:
+            char = command[index]
+            if char in " \t\n;&|()":
+                break
+            if char in "'\"":
+                quote = char
+                index += 1
+                while index < length:
+                    if command[index] == "\\" and quote == '"':
+                        index += 2
+                    elif command[index] == quote:
+                        index += 1
+                        break
+                    else:
+                        index += 1
+                continue
+            if char == "\\":
+                index += 2
+                continue
+            index += 1
+        words.append((start, index, command[start:index], False))
+    return words
+
+
+def _sudo_positions(command):
+    """Posizioni dei comandi sudo che possono leggere la password da stdin."""
+    positions = []
+    expect_command = True
+    words = _shell_words(command)
+    for index, (start, end, text, separator) in enumerate(words):
+        if separator:
+            expect_command = True
+            continue
+        if not expect_command:
+            continue
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", text):
+            continue
+        if text in {"then", "do", "else", "elif", "if", "while", "until", "!", "time", "{"}:
+            continue
+        expect_command = False
+        if text != "sudo":
+            continue
+        next_word = words[index + 1] if index + 1 < len(words) else None
+        if next_word and not next_word[3] and next_word[2] in {"-S", "--stdin"}:
+            continue
+        positions.append((start, end))
+    return positions
+
+
+def needs_sudo_password(command):
+    """True se il comando contiene sudo in posizione di comando."""
+    return bool(_sudo_positions(command or ""))
+
+
+def ensure_sudo_stdin(command):
+    """Aggiunge -S ai comandi sudo così la password può arrivare da stdin."""
+    replacements = _sudo_positions(command or "")
+    for start, end in reversed(replacements):
+        command = command[:start] + "sudo -S" + command[end:]
+    return command
+
+
+def prompt_sudo_password(command):
+    """Chiede la password sudo senza mostrarla; None significa annullato."""
+    if not needs_sudo_password(command) or not sys.stdin.isatty():
+        return ""
+    try:
+        return getpass.getpass("Password sudo: ")
+    except (EOFError, KeyboardInterrupt):
+        return None
+
+
 def resolve_working_directory(value=None):
     """Risolve la cartella iniziale di TUI, REPL e comandi one-shot."""
     target = Path(value).expanduser() if value else Path.cwd()
@@ -501,7 +594,7 @@ def resolve_working_directory(value=None):
     return target
 
 
-def run_local(command, cwd, timeout=LOCAL_TIMEOUT):
+def run_local(command, cwd, timeout=LOCAL_TIMEOUT, sudo_password=None):
     """Esegue un comando nella directory locale dell'utente."""
     command = (command or "").strip()
     if not command:
@@ -509,17 +602,22 @@ def run_local(command, cwd, timeout=LOCAL_TIMEOUT):
     directory = Path(cwd).expanduser()
     if not directory.is_dir():
         raise CliError(f"La directory non esiste: {directory}")
+    password = sudo_password if isinstance(sudo_password, str) and sudo_password else None
+    stdin_options = {"stdin": subprocess.DEVNULL}
+    if password:
+        command = ensure_sudo_stdin(command)
+        stdin_options = {"input": password + "\n"}
     try:
         completed = subprocess.run(
             command,
             shell=True,
             cwd=str(directory),
-            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             errors="replace",
             timeout=timeout,
+            **stdin_options,
         )
     except subprocess.TimeoutExpired as error:
         output = error.output or ""
@@ -549,6 +647,7 @@ class Session:
         confirm=None,
         runner=None,
         cwd=None,
+        password_prompt=None,
     ):
         self.client = client
         self.config_path = Path(config_path)
@@ -560,6 +659,7 @@ class Session:
         self.out = out or print
         self.confirm = confirm
         self.runner = runner or run_local
+        self.password_prompt = password_prompt
         self.cwd = Path(cwd or Path.cwd()).expanduser().resolve()
         self.messages = []
         self.last_reply = ""
@@ -766,7 +866,7 @@ class Session:
                         })
                         self.messages = conversation[-40:]
                         return True
-                    result = self.runner(command, self.cwd)
+                    result = self._run_local(command)
                     self._print_result(result, prefix="locale")
                     outputs.append(self._result_context(result))
                 conversation.append({
@@ -795,6 +895,20 @@ class Session:
             f"output:\n{output or '(nessun output)'}"
         )
 
+    def _run_local(self, command):
+        """Esegue localmente, chiedendo la password solo quando serve sudo."""
+        password = ""
+        if needs_sudo_password(command):
+            prompt = self.password_prompt or prompt_sudo_password
+            password = prompt(command)
+            if password is None:
+                raise CliError(
+                    "Password sudo non inserita: comando annullato."
+                )
+        if password:
+            return self.runner(command, self.cwd, sudo_password=password)
+        return self.runner(command, self.cwd)
+
     def run_local_and_remember(self, command):
         """Esegue un comando locale e lo aggiunge al contesto della chat."""
         command = (command or "").strip()
@@ -803,7 +917,7 @@ class Session:
             return False
         self._write(self.ansi.bold("Comando locale:") + " " + command)
         try:
-            result = self.runner(command, self.cwd)
+            result = self._run_local(command)
         except CliError as error:
             self.error(error)
             return False
@@ -1134,7 +1248,10 @@ def main(argv=None):
     try:
         cwd = resolve_working_directory(args.cwd)
         if args.exec is not None:
-            result = run_local(args.exec, cwd)
+            password = prompt_sudo_password(args.exec)
+            if password is None:
+                raise CliError("Password sudo non inserita: comando annullato.")
+            result = run_local(args.exec, cwd, sudo_password=password or None)
             ansi = Ansi(ansi_enabled())
             print(ansi.bold("Comando locale:") + " " + result.command)
             if result.output:

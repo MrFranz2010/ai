@@ -57,6 +57,7 @@ from nokk_cli import (
     extract_run_commands,
     mask_key,
     infer_profile,
+    needs_sudo_password,
     normalize_base_url,
     normalize_mode,
     run_local,
@@ -432,6 +433,51 @@ chat, `Ctrl+Y` copia l'ultima risposta, `Ctrl+R` ripete l'ultima domanda,
 """
 
 
+class SudoPasswordScreen(ModalScreen[str | None]):
+    """Chiede la password di sudo senza mostrarla nel transcript."""
+
+    BINDINGS = [Binding("escape", "cancel", "Annulla")]
+
+    def __init__(self, command):
+        super().__init__()
+        self.command = command
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            yield Static("Password per sudo", id="dialog-title")
+            yield Static(
+                Panel(
+                    Text(
+                        f"Comando: {self.command}\n\n"
+                        "La password viene usata solo per questo comando e non "
+                        "viene salvata. Lascia vuoto se sudo non richiede password."
+                    ),
+                    border_style="#30363d",
+                    padding=(0, 1),
+                ),
+                id="dialog-text",
+            )
+            yield Input(placeholder="Password sudo", password=True, id="sudo-password")
+            with Horizontal(classes="dialog-buttons"):
+                yield Button("Esegui", id="save", variant="primary")
+                yield Button("Annulla", id="cancel", variant="default")
+
+    def on_mount(self):
+        self.query_one("#sudo-password", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted):
+        self.dismiss(event.value)
+
+    def on_button_pressed(self, event: Button.Pressed):
+        if event.button.id == "save":
+            self.dismiss(self.query_one("#sudo-password", Input).value)
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self):
+        self.dismiss(None)
+
+
 class HelpScreen(ModalScreen[None]):
     BINDINGS = [Binding("escape", "close", "Chiudi")]
 
@@ -761,6 +807,7 @@ class NokkTuiApp(App):
         job_timeout=JOB_TIMEOUT,
         cwd=None,
         session_path=None,
+        runner=None,
     ):
         super().__init__()
         self.client = client or NokkClient(config.base_url, config.api_key)
@@ -789,6 +836,7 @@ class NokkTuiApp(App):
         self.agent = bool(config.agent)
         self.auto_yes = bool(auto_yes)
         self.job_timeout = job_timeout
+        self.runner = runner or run_local
         self.cwd = Path(cwd or Path.cwd()).expanduser().resolve()
         self.model_override = None
         self.current_job_id = None
@@ -1350,7 +1398,7 @@ class NokkTuiApp(App):
                         )
                         self.set_busy(False, "comando rifiutato")
                         return
-                    result = await asyncio.to_thread(run_local, command, self.cwd)
+                    result = await self.run_local_with_sudo(command)
                     self.write_command(result)
                     chat.messages.append({
                         "role": "user",
@@ -1383,6 +1431,21 @@ class NokkTuiApp(App):
             f"output:\n{output or '(nessun output)'}"
         )
 
+    async def run_local_with_sudo(self, command):
+        """Esegue localmente, chiedendo la password solo quando serve sudo."""
+        password = ""
+        if needs_sudo_password(command):
+            password = await self._ask_screen(SudoPasswordScreen(command))
+            if password is None:
+                raise CliError(
+                    "Password sudo non inserita: comando annullato."
+                )
+        if password:
+            return await asyncio.to_thread(
+                self.runner, command, self.cwd, sudo_password=password
+            )
+        return await asyncio.to_thread(self.runner, command, self.cwd)
+
     async def run_local_command(self, command):
         command = (command or "").strip()
         if not command:
@@ -1390,7 +1453,7 @@ class NokkTuiApp(App):
             return
         self.set_busy(True, "comando locale…")
         try:
-            result = await asyncio.to_thread(run_local, command, self.cwd)
+            result = await self.run_local_with_sudo(command)
             self.write_command(result)
             self.active_chat.messages.append({
                 "role": "user",
