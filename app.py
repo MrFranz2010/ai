@@ -4477,11 +4477,17 @@ def run_chat_job(job_id, messages, active_config, mode=None):
                     "chiedere conferma. Non dire che il codice non è accessibile "
                     "prima di aver provato il terminale locale."
                 )
+            elif active_config.get("terminal_enabled"):
+                app_prompt += (
+                    " In questa istanza non hai gli strumenti del repository: "
+                    "ispeziona il progetto con run_terminal_command nella "
+                    "cartella di lavoro del server. Non usare il planner."
+                )
             else:
                 app_prompt += (
-                    " In questa istanza non hai accesso al repository né al "
-                    "terminale locale: dillo chiaramente e chiedi all'utente di "
-                    "usare la versione locale di NOKK."
+                    " In questa istanza non hai accesso al repository né a un "
+                    "terminale: dillo chiaramente e chiedi all'utente di usare "
+                    "la versione locale di NOKK."
                 )
         elif ambiguous_topic_request:
             app_prompt += (
