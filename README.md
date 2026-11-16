@@ -63,7 +63,7 @@ valgono anche per la CLI:
 Nella TUI puoi scrivere normalmente all'assistente, usare `!comando` per
 eseguire subito un comando locale e `/help` per gli altri comandi (`/cd`,
 `/run`, `/agent`, `/mode`, `/url`, `/key`, `/server`, `/status`, `/export`,
-`/copy`, `/retry`, `/sessions`, `/resume`, `/rename`, `/model`, `/diff`,
+`/copy`, `/retry`, `/sessions`, `/delete`, `/resume`, `/rename`, `/model`, `/diff`,
 `/git`, `/cancel`). Con l'agente attivo,
 se NOKK propone un comando in un blocco `nokk-run`, il client chiede conferma,
 lo esegue **sulla macchina locale** e restituisce l'output al modello. Con
@@ -84,7 +84,8 @@ conversazione in Markdown (per impostazione predefinita in
 `nokk-chat-<data>.md`), `/copy [numero|all]` copia l'ultima risposta, una
 risposta precedente o tutto il transcript, mentre `/status` riassume profilo,
 connessione, provider, modello, directory e configurazione. Le sessioni sono
-salvate in `sessions.json`: `/sessions`, `/resume <n>` e `/rename <titolo>`;
+salvate in `sessions.json`: `/sessions`, `/delete [n|all]`, `/resume <n>` e
+`/rename <titolo>`;
 `/model <provider>/<modello>` cambia modello per la sessione, `@file` allega
 file al contesto e `/diff`/`/git status` mostrano il repository. Con i provider
 OpenAI-compatibili la risposta compare mentre viene generata; gli altri

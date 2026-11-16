@@ -445,6 +445,7 @@ I comandi che NOKK vuole eseguire sul server passano da una conferma separata.
 | `/copy [n|all]` | copia l'ultima risposta, una precedente o tutto |
 | `/retry` | ripete l'ultima domanda |
 | `/sessions` | elenca le sessioni salvate |
+| `/delete [n/all]` | elimina una chat o tutte le chat salvate |
 | `/resume <n>` | riapre una sessione salvata |
 | `/rename <titolo>` | rinomina la sessione attiva |
 | `/model [provider/modello]` | cambia modello per questa sessione |
@@ -1874,6 +1875,8 @@ class NokkTuiApp(App):
             self.show_status()
         elif name == "/sessions":
             self.list_sessions()
+        elif name in {"/delete", "/remove"}:
+            await self.delete_sessions(argument)
         elif name == "/resume":
             self.resume_session(argument)
         elif name == "/rename":
@@ -2055,8 +2058,62 @@ class NokkTuiApp(App):
             lines.append(f"{marker} {index}. {chat.title} · {count} msg · {when}")
         self.write_system(
             "Sessioni salvate\n" + "\n".join(lines)
-            + "\n\nUsa /resume <numero> per riaprirne una."
+            + "\n\nUsa /resume <numero> per riaprirne una, "
+            "/delete <numero> per eliminarla."
         )
+
+    async def delete_sessions(self, argument):
+        value = (argument or "").strip().lower()
+        if value in {"all", "tutte", "*"}:
+            targets = list(range(len(self.chats)))
+            label = "tutte le chat salvate"
+        elif value:
+            try:
+                number = int(value)
+            except ValueError:
+                self.write_system("Uso: /delete [numero|all] (vedi /sessions)")
+                return
+            if not 1 <= number <= len(self.chats):
+                self.write_system("Numero di sessione non valido.")
+                return
+            targets = [number - 1]
+            label = f"la chat «{self.chats[number - 1].title}»"
+        else:
+            targets = [self.active_index]
+            label = f"la chat attiva «{self.active_chat.title}»"
+        if not targets:
+            self.write_system("Nessuna chat da eliminare.")
+            return
+        if not self.auto_yes:
+            approved = await self._ask_screen(ConfirmScreen(
+                "Eliminare dalla memoria?",
+                f"Sto per eliminare {label}.\n\n"
+                "La chat verrà rimossa da sessions.json e non potrà essere "
+                "recuperata.",
+                yes_label="Elimina",
+            ))
+            if not approved:
+                self.write_system("Eliminazione annullata.")
+                return
+        previous_index = self.active_index
+        removed_active = previous_index in targets
+        for index in sorted(targets, reverse=True):
+            del self.chats[index]
+        if not self.chats:
+            self.chats = [ChatSession("Chat 1")]
+            self.active_index = 0
+        elif removed_active:
+            self.active_index = min(min(targets), len(self.chats) - 1)
+        else:
+            self.active_index = previous_index - sum(
+                1 for index in targets if index < previous_index
+            )
+        self.messages = self.active_chat.messages
+        self.render_chat()
+        self.refresh_chat_list()
+        self.refresh_widgets()
+        self._persist_sessions()
+        self.write_system(f"Eliminata {label} dalla memoria.")
 
     def resume_session(self, argument):
         try:
