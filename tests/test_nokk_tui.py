@@ -42,9 +42,11 @@ class FakeClient:
 
     def start_chat(
         self, messages, mode=None, provider=None, model=None, stream=False,
+        terminal_enabled=None, local_terminal=False,
     ):
         self.last_model = (provider, model)
         self.last_stream = stream
+        self.last_terminal = (terminal_enabled, local_terminal)
         return "a" * 32
 
     def job(self, job_id):

@@ -66,8 +66,12 @@ eseguire subito un comando locale e `/help` per gli altri comandi (`/cd`,
 `/copy`, `/retry`, `/sessions`, `/resume`, `/rename`, `/model`, `/diff`,
 `/git`, `/cancel`). Con l'agente attivo,
 se NOKK propone un comando in un blocco `nokk-run`, il client chiede conferma,
-lo esegue **sulla macchina locale** e restituisce l'output al modello; i comandi
-che NOKK vuole eseguire sul server restano soggetti alle approvazioni del server.
+lo esegue **sulla macchina locale** e restituisce l'output al modello. Con
+l'agente attivo il client disattiva il terminale del server per quella
+richiesta: anche collegandosi all'hosting, i comandi vengono eseguiti sul PC,
+non sul server. La pagina web invece non può accedere al computer dell'utente:
+il terminale lì agisce sulla macchina su cui gira NOKK, quindi per lavorare sul
+proprio PC serve la CLI o la TUI.
 
 Tasti: `Ctrl+Q` esce, `Ctrl+N` nuova chat, `Ctrl+B` mostra o nasconde la
 barra laterale, `Ctrl+E` esporta la chat, `Ctrl+Y` copia l'ultima risposta,

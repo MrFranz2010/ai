@@ -1606,6 +1606,8 @@ class NokkTuiApp(App):
             model.get("provider"),
             model.get("model"),
             stream=self.stream,
+            terminal_enabled=False if self.agent else None,
+            local_terminal=self.agent,
         )
         self.current_job_id = job_id
         self.last_latency = time.monotonic() - started
