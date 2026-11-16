@@ -140,6 +140,38 @@ def short_path(path, limit=34):
     return "…" + text[-(limit - 1):]
 
 
+def native_clipboard_copy(text):
+    """Best-effort copy through the desktop clipboard tools."""
+    if sys.platform == "darwin":
+        commands = [["pbcopy"]]
+    elif os.name == "nt":
+        commands = [["clip"]]
+    elif os.environ.get("WAYLAND_DISPLAY"):
+        commands = [["wl-copy"], ["xclip", "-selection", "clipboard"]]
+    else:
+        commands = [
+            ["xclip", "-selection", "clipboard"],
+            ["xsel", "--clipboard", "--input"],
+        ]
+    for command in commands:
+        if shutil.which(command[0]) is None:
+            continue
+        try:
+            subprocess.run(
+                command,
+                input=text,
+                text=True,
+                timeout=1.5,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return True
+        except (OSError, subprocess.SubprocessError):
+            continue
+    return False
+
+
 def git_branch(cwd):
     try:
         completed = subprocess.run(
@@ -1476,11 +1508,13 @@ class NokkTuiApp(App):
                 return
             text = answers[-position]
             label = "risposta" if position == 1 else f"risposta {position}"
+        native = native_clipboard_copy(text)
         try:
             self.copy_to_clipboard(text)
         except Exception as error:  # noqa: BLE001 - clipboard is terminal-specific
-            self.write_error(CliError(f"Copia non riuscita: {error}"))
-            return
+            if not native:
+                self.write_error(CliError(f"Copia non riuscita: {error}"))
+                return
         self.write_system(f"{label.capitalize()} copiato negli appunti.")
         self.activity_log().write(
             Text(f"copia: {label}", style="#3fb950")
