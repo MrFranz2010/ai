@@ -457,11 +457,13 @@ APP_TOOLS = [
     {
         "name": "manage_planner_item",
         "description": (
-            "Crea, aggiorna o elimina un elemento di calendario o un'attività. "
-            "Compiti, verifiche e interrogazioni scolastiche sono attività: "
-            "creale in section=tasks con due_date, ricavando il giorno dalla "
-            "data corrente. Per l'aggiornamento includi id e i campi da "
-            "mantenere."
+            "Crea, aggiorna o elimina un elemento di calendario o un'attività "
+            "solo quando l'utente lo chiede esplicitamente. Non usarlo per "
+            "comandi, file, codice o altri compiti: non creare eventi come "
+            "effetto collaterale. Compiti, verifiche e interrogazioni "
+            "scolastiche sono attività: creale in section=tasks con due_date, "
+            "ricavando il giorno dalla data corrente. Per l'aggiornamento "
+            "includi id e i campi da mantenere."
         ),
         "parameters": {
             "type": "object",
@@ -565,8 +567,10 @@ APP_TOOLS = [
         "name": "google_calendar",
         "description": (
             "Legge, crea o elimina eventi nel Google Calendar collegato. "
-            "Usalo per appuntamenti e impegni dell'utente; se il calendario "
-            "non è collegato, chiedi di collegarlo dalle impostazioni."
+            "Modifica il calendario solo quando l'utente lo chiede "
+            "esplicitamente; non creare eventi come effetto collaterale di "
+            "comandi o altri compiti. Se il calendario non è collegato, chiedi "
+            "di collegarlo dalle impostazioni."
         ),
         "parameters": {
             "type": "object",
@@ -4324,6 +4328,16 @@ def run_chat_job(job_id, messages, active_config, mode=None):
     tool_events = []
     mcp_registry = None
     mcp_tools = []
+    user_text = next(
+        (
+            message.get("content", "")
+            for message in reversed(messages)
+            if isinstance(message, dict)
+            and message.get("role") == "user"
+            and isinstance(message.get("content"), str)
+        ),
+        "",
+    )
     if active_config.get("mcp_servers"):
         try:
             mcp_registry = load_mcp_registry(active_config["mcp_servers"])
@@ -4367,6 +4381,14 @@ def run_chat_job(job_id, messages, active_config, mode=None):
             " When you use manage_planner_item, always write starts_at as "
             "YYYY-MM-DDTHH:MM in 24-hour local time and due_date as YYYY-MM-DD "
             "or null. Never use DD/MM/YYYY, seconds or timezone suffixes."
+        )
+        app_prompt += (
+            " Never create, update or delete calendar events, tasks or planner "
+            "items unless the user explicitly asks for that change in the "
+            "current request. Terminal commands, file operations, code changes "
+            "and general questions must never modify the planner. If the user "
+            "only mentions an activity or a deadline without asking to save it, "
+            "ask before calling manage_planner_item."
         )
         app_prompt += (
             " When the user mentions a school assignment, test or oral exam "
@@ -4566,7 +4588,9 @@ def run_chat_job(job_id, messages, active_config, mode=None):
                     and call["name"] in {tool["name"] for tool in APP_TOOLS}
                 ):
                     try:
-                        app_result = execute_app_tool(call["name"], arguments)
+                        app_result = execute_app_tool(
+                            call["name"], arguments, user_text,
+                        )
                         if (
                             isinstance(app_result, dict)
                             and isinstance(app_result.get("artifact"), dict)
@@ -6165,9 +6189,73 @@ def save_timetable_from_tool(days):
     return {"ok": True, "days": len(facts), "facts": facts}
 
 
-def execute_app_tool(name, arguments):
+PLANNER_MUTATION_ACTIONS = {"create", "update", "delete"}
+PLANNER_MUTATION_WORDS = {
+    "aggiungi", "aggiungere", "crea", "creare", "salva", "salvare", "metti",
+    "mettere", "inserisci", "inserire", "segna", "segnare", "ricordami",
+    "sposta", "spostare", "modifica", "modificare", "aggiorna", "aggiornare",
+    "elimina", "eliminare", "cancella", "cancellare", "completa",
+    "completare", "add", "create", "save", "schedule", "remind", "remove",
+    "delete", "update", "mark",
+}
+PLANNER_INTENT_WORDS = {
+    "calendario", "evento", "eventi", "appuntamento", "appuntamenti",
+    "riunione", "riunioni", "impegno", "impegni", "compleanno", "promemoria",
+    "scadenza", "scadenze", "task", "attività", "attivita", "compito",
+    "compiti", "verifica", "verifiche", "interrogazione", "interrogazioni",
+    "calendar", "event", "events", "appointment", "meeting", "deadline",
+    "assignment", "homework", "exam", "reminder",
+}
+STRONG_PLANNER_WORDS = {
+    "calendario", "evento", "eventi", "appuntamento", "appuntamenti",
+    "riunione", "riunioni", "promemoria", "scadenza", "scadenze", "task",
+    "attività", "attivita", "verifica", "verifiche", "interrogazione",
+    "interrogazioni", "calendar", "event", "events", "appointment", "meeting",
+    "deadline", "reminder",
+}
+TERMINAL_CONTEXT_WORDS = {
+    "terminale", "comando", "comandi", "esegui", "eseguire", "script", "shell",
+    "bash", "npm", "git", "python", "pytest", "docker", "build", "file",
+    "cartella", "directory", "codice", "progetto", "funzione", "bug", "test",
+}
+
+
+def has_explicit_planner_intent(text):
+    """Return True only for an explicit request to change calendar or tasks."""
+    if not isinstance(text, str) or not text.strip():
+        return False
+    words = set(re.findall(r"[a-zà-ÿ0-9'-]+", text.casefold()))
+    if "ricordami" in words or "remind" in words:
+        return True
+    if not (words & PLANNER_MUTATION_WORDS and words & PLANNER_INTENT_WORDS):
+        return False
+    if words & TERMINAL_CONTEXT_WORDS and not (words & STRONG_PLANNER_WORDS):
+        return False
+    return True
+
+
+def _is_planner_mutation(name, arguments):
+    if not isinstance(arguments, dict):
+        return False
+    if name == "manage_planner_item":
+        return arguments.get("action") in PLANNER_MUTATION_ACTIONS
+    if name == "google_calendar":
+        return arguments.get("action") in {"create", "delete"}
+    return False
+
+
+def execute_app_tool(name, arguments, user_text=None):
     if not isinstance(arguments, dict):
         raise ValueError("Argomenti dello strumento non validi.")
+    if (
+        user_text is not None
+        and _is_planner_mutation(name, arguments)
+        and not has_explicit_planner_intent(user_text)
+    ):
+        raise ValueError(
+            "Calendario e attività non modificati: manca una richiesta "
+            "esplicita dell'utente. Chiedi conferma prima di riprovare."
+        )
     if name == "save_timetable":
         return save_timetable_from_tool(arguments)
     if name == "get_app_data":

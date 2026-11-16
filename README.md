@@ -114,6 +114,11 @@ attive, terminale e strumenti disponibili. La descrizione include anche i limiti
 NOKK non ha sensi, non percepisce file o rete senza uno strumento e non deve
 dichiarare azioni non confermate. Non vengono esposte chiavi API o altri segreti.
 
+NOKK non modifica calendario o attività come effetto collaterale: i comandi da
+terminale, le operazioni sui file e le richieste di codice non possono creare
+eventi. La modifica richiede una richiesta esplicita dell'utente nell'ultimo
+messaggio; in caso contrario il tool viene rifiutato e NOKK chiede conferma.
+
 ## Attività persistenti
 
 I metadati delle richieste vengono salvati in `jobs.json` nella tabella privata
