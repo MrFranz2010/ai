@@ -34,8 +34,11 @@ class FakeClient:
             "approval_mode": "manual",
         }
 
-    def start_chat(self, messages, mode=None, provider=None, model=None):
+    def start_chat(
+        self, messages, mode=None, provider=None, model=None, stream=False,
+    ):
         self.last_model = (provider, model)
+        self.last_stream = stream
         return "a" * 32
 
     def job(self, job_id):
@@ -318,6 +321,7 @@ class NokkTuiTests(unittest.IsolatedAsyncioTestCase):
                 app.change_model("openai/gpt-test")
                 await app.ask("ciao")
                 self.assertEqual(client.last_model, ("openai", "gpt-test"))
+                self.assertTrue(client.last_stream)
 
     def test_file_mentions_become_context(self):
         with tempfile.TemporaryDirectory() as directory:

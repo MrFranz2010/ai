@@ -433,7 +433,9 @@ class NokkClient:
             return self._request("GET", "/api/v1/health")
         return self._request("GET", "/api/config")
 
-    def start_chat(self, messages, mode=None, provider=None, model=None):
+    def start_chat(
+        self, messages, mode=None, provider=None, model=None, stream=False,
+    ):
         payload = {"messages": messages}
         if mode:
             payload["mode"] = mode
@@ -441,6 +443,8 @@ class NokkClient:
             payload["provider"] = provider
         if model:
             payload["model"] = model
+        if stream:
+            payload["stream"] = True
         path = "/api/v1/chat" if self.versioned else "/api/chat"
         data = self._request("POST", path, payload)
         job_id = data.get("job_id")

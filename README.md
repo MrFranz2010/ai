@@ -90,7 +90,8 @@ python nokk_cli.py --exec "git status"
 - `/model <provider>/<modello>` sceglie il modello per la sessione;
   `@file` allega file al contesto; `/diff`, `/git status` e `/git log`
   mostrano il repository.
-- `/cancel` o `Ctrl+X` annulla il job in corso.
+- `/cancel` o `Ctrl+X` annulla il job in corso. Con i provider
+  OpenAI-compatibili la risposta compare mentre viene generata.
 
 ### Tasti della TUI
 
