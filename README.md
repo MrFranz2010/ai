@@ -1,35 +1,65 @@
 # NOKK Terminal
 
-Client da terminale per NOKK, con TUI a pannelli. Funziona con entrambe le
-varianti del server: quella locale (`linux_start.py`) e quella hosting
-(Render/Fly con Supabase). Questo ramo contiene **solo il client**, così non
-serve mantenere due copie del terminale.
+Client da terminale per **NOKK**, con TUI a pannelli in stile Claude Code.
+Questo ramo contiene solo il client: si collega indifferentemente al NOKK
+locale o al NOKK hosting, quindi non serve mantenere due copie del terminale.
 
-## Installazione
+## Requisiti
+
+- Python 3.10 o successivo.
+- Un server NOKK raggiungibile (locale o hosting).
+- `textual` solo per la TUI: è una dipendenza opzionale del client, non del server.
+
+## Avvio rapido
 
 ```bash
+git switch nokk-cli-unified
 python -m pip install -r requirements-tui.txt
 python nokk_cli.py
 ```
 
-La TUI apre la chat a sinistra e, a destra, agenti, chat, utilizzo delle
-risorse, widget e attività.
+La TUI apre la chat a sinistra e, a destra, la barra con:
+
+- **Agenti:** stato di NOKK API, agente locale, terminale e approvazioni.
+- **Chat:** sessioni della sessione corrente.
+- **Risorse:** CPU, RAM, disco, token di contesto stimati, richieste, latenza e
+  memoria del processo.
+- **Widget:** profilo attivo, modalità, agente, directory corrente e branch Git.
+- **Attività:** ultimi comandi e approvazioni.
+
+Se `textual` non è installato, il client usa automaticamente la modalità a
+righe. `--plain` la forza, mentre `--tui` richiede esplicitamente la TUI.
 
 ## Profili Locale e Hosting
 
-Premi `F2` (oppure scrivi `/settings`) per aprire le impostazioni:
+Premi **`F2`** oppure scrivi **`/settings`**. Nella schermata puoi:
 
-- **Locale**: per esempio `http://127.0.0.1:8000`, senza chiave API.
-- **Hosting**: indirizzo pubblico e chiave creata in **Impostazioni → API**.
-- Server e chiave dei due profili restano salvati separatamente in
-  `~/.config/nokk/cli.json` (permessi `600`).
-- Il pulsante **Prova connessione** verifica il profilo prima di salvarlo.
+- scegliere il profilo **Locale** o **Hosting**;
+- modificare URL del server e chiave API del profilo selezionato;
+- scegliere la modalità (`codice`, `studio`, `analista`, `off`);
+- attivare o disattivare i comandi locali proposti dall'agente;
+- provare la connessione prima di salvare.
 
-Puoi anche usare le variabili d'ambiente:
+I due profili restano salvati separatamente in `~/.config/nokk/cli.json`,
+creato con permessi `600`. Cambiare server non cancella la chiave dell'altro
+profilo.
+
+Valori predefiniti:
+
+| Profilo | URL tipico | Chiave |
+| --- | --- | --- |
+| Locale | `http://127.0.0.1:8000` | di solito non serve |
+| Hosting | `https://tuo-nokk.onrender.com` | `nokk_...` da Impostazioni → API |
+
+Puoi anche usare le variabili d'ambiente, che hanno la precedenza sul file di
+configurazione all'avvio:
 
 ```bash
 NOKK_URL=https://tuo-nokk.onrender.com NOKK_API_KEY=nokk_... python nokk_cli.py
 ```
+
+Non passare la chiave come argomento della riga di comando: finirebbe nella
+cronologia della shell. Usa `F2` o `/key`.
 
 ## Uso
 
@@ -40,15 +70,59 @@ python nokk_cli.py "domanda"       # one-shot
 python nokk_cli.py --exec "git status"
 ```
 
-- `!comando` esegue un comando locale e aggiunge l'output al contesto.
-- L'agente propone comandi locali nei blocchi `nokk-run`; il client chiede
-  conferma e li esegue sulla macchina locale.
-- I comandi che NOKK vuole eseguire sul server passano dalle approvazioni.
-- `Ctrl+Q` esce, `Ctrl+N` nuova chat, `Ctrl+B` sidebar, `Ctrl+L` pulisce,
-  `F1` aiuto, `F2` impostazioni.
+- `!comando` esegue subito un comando locale e aggiunge l'output al contesto.
+- Con l'agente attivo, se NOKK propone un comando nel blocco `nokk-run`, il
+  client chiede conferma, lo esegue **sulla macchina locale** e rimanda
+  l'output al modello.
+- I comandi che NOKK vuole eseguire sul server passano dalle approvazioni del
+  server, mostrate in una modale separata.
+- Nelle esecuzioni one-shot i comandi sono bloccati per sicurezza; `--yes` li
+  approva automaticamente.
+- `/new`, `/cd`, `/run`, `/agent`, `/mode`, `/url`, `/key`, `/server`,
+  `/config`, `/settings` sono disponibili anche come comandi slash.
+
+### Tasti della TUI
+
+| Tasto | Azione |
+| --- | --- |
+| `Ctrl+Q` | esci |
+| `Ctrl+N` | nuova chat |
+| `Ctrl+B` | mostra/nascondi la barra laterale |
+| `Ctrl+L` | pulisci il transcript |
+| `F1` | aiuto |
+| `F2` | impostazioni |
+
+Su terminali stretti la barra laterale si nasconde automaticamente.
+
+## Rami
+
+| Ramo | Contenuto |
+| --- | --- |
+| `nokk-cli-unified` | solo client e TUI; funziona con locale e hosting |
+| `nokk-cli` | app desktop/locale + client |
+| `nokk-cli-hosting` | app hosting (Render/Fly + Supabase) + client |
+
+I rami server restano separati: `AGENTS.md` vieta il merge tra la variante
+desktop e quella hosting. Il ramo unificato non è un merge, è il client comune
+che parla con entrambi tramite le API HTTP.
+
+## API usate
+
+Il client usa le rotte stabili di NOKK:
+
+- `POST /api/v1/chat`
+- `GET /api/v1/jobs/<id>`
+- `POST /api/v1/jobs/<id>/approval`
+
+Con una chiave API usa sempre `/api/v1/*`; senza chiave usa le rotte del
+browser, comode su un NOKK locale. Le approvazioni dal terminale richiedono una
+versione del server che esponga la rotta `/api/v1/jobs/<id>/approval`.
 
 ## Test
 
 ```bash
 python -m unittest discover -s tests
 ```
+
+I test del client non richiedono il backend: usano un server simulato e la
+test harness headless di Textual.
