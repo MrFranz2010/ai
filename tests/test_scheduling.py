@@ -125,6 +125,45 @@ class TimetableParsingTests(unittest.TestCase):
             app.build_current_datetime_message(now),
         )
 
+    def test_self_awareness_context_describes_state_and_limits(self):
+        context = app.build_self_awareness_context(
+            {
+                "provider": "openai",
+                "model": "gpt-test",
+                "api_key": "chiave-segreta",
+                "terminal_enabled": True,
+                "approval_mode": "manual",
+                "workspace": "/tmp/progetto",
+                "app_tools_enabled": True,
+            },
+            "codice",
+            [{"name": "mcp_prova"}],
+            2,
+        )
+        self.assertIn("Consapevolezza operativa di NOKK", context)
+        self.assertIn("provider openai", context)
+        self.assertIn("modello gpt-test", context)
+        self.assertIn("modalità codice", context)
+        self.assertIn("2 attività attive", context)
+        self.assertIn("terminale è abilitato", context)
+        self.assertIn("1 strumento MCP", context)
+        self.assertIn("non sei una persona", context)
+        self.assertIn("non inventare capacità", context)
+        self.assertNotIn("chiave-segreta", context)
+
+    def test_self_awareness_omits_the_terminal_when_disabled(self):
+        context = app.build_self_awareness_context(
+            {
+                "provider": "openai",
+                "model": "gpt-test",
+                "app_tools_enabled": False,
+                "terminal_enabled": False,
+            }
+        )
+        self.assertIn("Il terminale non è disponibile", context)
+        self.assertIn("strumenti NOKK sono disabilitati", context)
+        self.assertNotIn("esecuzione di comandi", context)
+
     def test_save_timetable_tool_replaces_previous_schedule(self):
         days = {
             "lunedi": ["Italiano", "Storia"],

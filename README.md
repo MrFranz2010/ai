@@ -99,6 +99,14 @@ python nokk_cli.py --cwd / --exec "git status"
 Nelle esecuzioni one-shot i comandi sono bloccati per sicurezza: aggiungi `--yes`
 per approvarli automaticamente.
 
+### Consapevolezza operativa
+
+NOKK riceve nel system prompt una descrizione del proprio stato: identità di
+assistente software, provider e modello in uso, modalità, numero di attività
+attive, terminale e strumenti disponibili. La descrizione include anche i limiti:
+NOKK non ha sensi, non percepisce file o rete senza uno strumento e non deve
+dichiarare azioni non confermate. Non vengono esposte chiavi API o altri segreti.
+
 ### Attività persistenti
 
 I metadati delle richieste vengono salvati in `jobs.json` accanto alla
