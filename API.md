@@ -31,6 +31,7 @@ Ogni chiave accetta al massimo **60 richieste al minuto**; oltre si riceve
 | GET | `/api/v1/health` | Stato del servizio, senza chiave |
 | POST | `/api/v1/chat` | Avvia una conversazione |
 | GET | `/api/v1/jobs/<id>` | Legge l'esito di una conversazione |
+| POST | `/api/v1/jobs/<id>/approval` | Approva o rifiuta un comando in attesa |
 | POST | `/api/v1/reminders` | Crea un promemoria da testo italiano |
 | GET | `/api/v1/planner` | Elenca eventi e attività |
 
