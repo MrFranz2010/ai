@@ -33,6 +33,10 @@ VERSION = "0.1.0"
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 DEFAULT_TIMEOUT = 30
 JOB_TIMEOUT = 300
+MIN_JOB_TIMEOUT = 10
+MAX_JOB_TIMEOUT = 3600
+MIN_AGENT_ROUNDS = 1
+MAX_AGENT_ROUNDS_LIMIT = 20
 LOCAL_TIMEOUT = 120
 POLL_INTERVAL = 1.5
 MAX_OUTPUT = 20_000
@@ -98,6 +102,14 @@ class Config:
     local_api_key: str = ""
     hosting_url: str = ""
     hosting_api_key: str = ""
+    initial_cwd: str = ""
+    job_timeout: int = JOB_TIMEOUT
+    auto_approve: bool = False
+    stream: bool = True
+    save_sessions: bool = True
+    max_rounds: int = MAX_AGENT_ROUNDS
+    bell_on_finish: bool = False
+    show_banner: bool = True
 
 
 @dataclass
@@ -212,6 +224,12 @@ def default_config_path():
     return root / "nokk" / "cli.json"
 
 
+def _bounded_int(value, default, minimum, maximum):
+    if not isinstance(value, int) or isinstance(value, bool):
+        return default
+    return max(minimum, min(maximum, value))
+
+
 def read_config(path):
     path = Path(path)
     if not path.exists():
@@ -234,6 +252,24 @@ def read_config(path):
         config.mode = normalize_mode(saved["mode"])
     if isinstance(saved.get("agent"), bool):
         config.agent = saved["agent"]
+    if isinstance(saved.get("initial_cwd"), str):
+        config.initial_cwd = saved["initial_cwd"].strip()
+    config.job_timeout = _bounded_int(
+        saved.get("job_timeout"), JOB_TIMEOUT, MIN_JOB_TIMEOUT, MAX_JOB_TIMEOUT,
+    )
+    for name, default in (
+        ("auto_approve", False),
+        ("stream", True),
+        ("save_sessions", True),
+        ("bell_on_finish", False),
+        ("show_banner", True),
+    ):
+        if isinstance(saved.get(name), bool):
+            setattr(config, name, saved[name])
+    config.max_rounds = _bounded_int(
+        saved.get("max_rounds"), MAX_AGENT_ROUNDS,
+        MIN_AGENT_ROUNDS, MAX_AGENT_ROUNDS_LIMIT,
+    )
     config.profile = saved.get("profile")
     if config.profile not in {"local", "hosting"}:
         config.profile = infer_profile(config.base_url)
@@ -309,6 +345,19 @@ def save_config(config, path):
         "local_api_key": local_api_key,
         "hosting_url": normalize_base_url(hosting_url) if hosting_url else "",
         "hosting_api_key": hosting_api_key,
+        "initial_cwd": config.initial_cwd.strip(),
+        "job_timeout": _bounded_int(
+            config.job_timeout, JOB_TIMEOUT, MIN_JOB_TIMEOUT, MAX_JOB_TIMEOUT,
+        ),
+        "auto_approve": bool(config.auto_approve),
+        "stream": bool(config.stream),
+        "save_sessions": bool(config.save_sessions),
+        "max_rounds": _bounded_int(
+            config.max_rounds, MAX_AGENT_ROUNDS,
+            MIN_AGENT_ROUNDS, MAX_AGENT_ROUNDS_LIMIT,
+        ),
+        "bell_on_finish": bool(config.bell_on_finish),
+        "show_banner": bool(config.show_banner),
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -641,8 +690,14 @@ class Session:
         mode=None,
         agent=True,
         auto_yes=False,
+        auto_approve=False,
         interactive=True,
         job_timeout=JOB_TIMEOUT,
+        max_rounds=MAX_AGENT_ROUNDS,
+        stream=True,
+        save_sessions=True,
+        bell_on_finish=False,
+        show_banner=True,
         out=None,
         confirm=None,
         runner=None,
@@ -654,8 +709,14 @@ class Session:
         self.mode = mode
         self.agent = bool(agent)
         self.auto_yes = bool(auto_yes)
+        self.auto_approve = bool(auto_approve)
         self.interactive = bool(interactive)
         self.job_timeout = job_timeout
+        self.max_rounds = max_rounds
+        self.stream = bool(stream)
+        self.save_sessions = bool(save_sessions)
+        self.bell_on_finish = bool(bell_on_finish)
+        self.show_banner = bool(show_banner)
         self.out = out or print
         self.confirm = confirm
         self.runner = runner or run_local
@@ -822,7 +883,7 @@ class Session:
         conversation = list(self.messages[-38:])
         conversation.append({"role": "user", "content": self._wire_text(text)})
         try:
-            for round_number in range(MAX_AGENT_ROUNDS + 1):
+            for round_number in range(self.max_rounds + 1):
                 job = self._chat(conversation)
                 reply = job.get("reply")
                 reply = reply.strip() if isinstance(reply, str) else ""
@@ -842,7 +903,7 @@ class Session:
                     "role": "assistant",
                     "content": truncate(reply, 12_000),
                 })
-                if round_number >= MAX_AGENT_ROUNDS:
+                if round_number >= self.max_rounds:
                     self._write(self.ansi.yellow(
                         "Limite di comandi locali raggiunto: riprendi tu."
                     ))
@@ -969,6 +1030,14 @@ class Session:
             api_key=self.client.api_key,
             mode=self.mode,
             agent=self.agent,
+            initial_cwd=str(self.cwd),
+            job_timeout=self.job_timeout,
+            auto_approve=self.auto_approve,
+            stream=self.stream,
+            save_sessions=self.save_sessions,
+            max_rounds=self.max_rounds,
+            bell_on_finish=self.bell_on_finish,
+            show_banner=self.show_banner,
         ), self.config_path)
 
     def handle_slash(self, line):
@@ -1144,10 +1213,11 @@ def setup_readline(config_path):
 
 def run_repl(session):
     setup_readline(session.config_path)
-    session._write(
-        session.ansi.bold(f"NOKK terminale {VERSION}")
-        + session.ansi.dim(" · /help per i comandi · !comando per il terminale locale")
-    )
+    if session.show_banner:
+        session._write(
+            session.ansi.bold(f"NOKK terminale {VERSION}")
+            + session.ansi.dim(" · /help per i comandi · !comando per il terminale locale")
+        )
     try:
         session.health_summary()
     except CliError as error:
@@ -1226,8 +1296,8 @@ def build_parser():
         help="esegue un comando locale ed esce, senza contattare il server",
     )
     parser.add_argument(
-        "--timeout", type=int, default=JOB_TIMEOUT,
-        help=f"secondi massimi per un'attività (predefinito {JOB_TIMEOUT})",
+        "--timeout", type=int, default=None,
+        help=f"secondi massimi per un'attività (predefinito {JOB_TIMEOUT} o dal file di configurazione)",
     )
     parser.add_argument("--config", help="percorso del file di configurazione")
     parser.add_argument(
@@ -1246,7 +1316,10 @@ def main(argv=None):
         else default_config_path()
     )
     try:
-        cwd = resolve_working_directory(args.cwd)
+        config = read_config(config_path)
+        cwd = resolve_working_directory(
+            args.cwd or config.initial_cwd or None
+        )
         if args.exec is not None:
             password = prompt_sudo_password(args.exec)
             if password is None:
@@ -1260,7 +1333,6 @@ def main(argv=None):
             print(color(f"exit {result.exit_code}"))
             return min(255, max(0, result.exit_code))
 
-        config = read_config(config_path)
         if os.environ.get("NOKK_URL"):
             config.base_url = normalize_base_url(os.environ["NOKK_URL"])
         if args.url:
@@ -1273,14 +1345,24 @@ def main(argv=None):
             config.agent = args.agent
 
         client = NokkClient(config.base_url, config.api_key)
+        job_timeout = max(
+            MIN_JOB_TIMEOUT,
+            args.timeout if args.timeout is not None else config.job_timeout,
+        )
         session = Session(
             client,
             config_path,
             mode=normalize_mode(config.mode),
             agent=config.agent,
-            auto_yes=args.yes,
+            auto_yes=args.yes or config.auto_approve,
+            auto_approve=config.auto_approve,
             interactive=sys.stdin.isatty() and not args.prompt,
-            job_timeout=max(10, args.timeout),
+            job_timeout=job_timeout,
+            max_rounds=config.max_rounds,
+            stream=config.stream,
+            save_sessions=config.save_sessions,
+            bell_on_finish=config.bell_on_finish,
+            show_banner=config.show_banner,
             cwd=cwd,
         )
         if args.prompt:
@@ -1323,8 +1405,8 @@ def main(argv=None):
                 return run_tui(
                     config,
                     config_path,
-                    auto_yes=args.yes,
-                    job_timeout=max(10, args.timeout),
+                    auto_yes=args.yes or config.auto_approve,
+                    job_timeout=job_timeout,
                     cwd=cwd,
                 )
         run_repl(session)

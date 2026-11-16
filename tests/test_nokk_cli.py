@@ -128,6 +128,41 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(loaded.hosting_url, "https://nokk.example.com")
             self.assertEqual(loaded.hosting_api_key, "hosting-key")
 
+    def test_round_trips_terminal_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cli.json"
+            nokk_cli.save_config(nokk_cli.Config(
+                base_url="http://127.0.0.1:8000",
+                initial_cwd=directory,
+                job_timeout=45,
+                auto_approve=True,
+                stream=False,
+                save_sessions=False,
+                max_rounds=3,
+                bell_on_finish=True,
+                show_banner=False,
+            ), path)
+            loaded = nokk_cli.read_config(path)
+        self.assertEqual(loaded.initial_cwd, directory)
+        self.assertEqual(loaded.job_timeout, 45)
+        self.assertTrue(loaded.auto_approve)
+        self.assertFalse(loaded.stream)
+        self.assertFalse(loaded.save_sessions)
+        self.assertEqual(loaded.max_rounds, 3)
+        self.assertTrue(loaded.bell_on_finish)
+        self.assertFalse(loaded.show_banner)
+
+    def test_invalid_numeric_settings_are_bounded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cli.json"
+            path.write_text(json.dumps({
+                "job_timeout": 1,
+                "max_rounds": 999,
+            }), encoding="utf-8")
+            loaded = nokk_cli.read_config(path)
+        self.assertEqual(loaded.job_timeout, nokk_cli.MIN_JOB_TIMEOUT)
+        self.assertEqual(loaded.max_rounds, nokk_cli.MAX_AGENT_ROUNDS_LIMIT)
+
     def test_missing_file_uses_defaults(self):
         with tempfile.TemporaryDirectory() as directory:
             config = nokk_cli.read_config(Path(directory) / "missing.json")

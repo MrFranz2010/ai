@@ -60,6 +60,7 @@ from nokk_cli import (
     needs_sudo_password,
     normalize_base_url,
     normalize_mode,
+    resolve_working_directory,
     run_local,
     save_config,
     truncate,
@@ -510,7 +511,7 @@ class SettingsScreen(ModalScreen[dict | None]):
         Binding("ctrl+s", "save", "Salva"),
     ]
 
-    def __init__(self, profile, profiles, mode, agent):
+    def __init__(self, profile, profiles, mode, agent, options):
         super().__init__()
         self.profile = profile if profile in {"local", "hosting"} else "local"
         self.profiles = {
@@ -525,6 +526,7 @@ class SettingsScreen(ModalScreen[dict | None]):
         self.profiles.setdefault("hosting", {"url": "", "key": ""})
         self.mode = mode
         self.agent = bool(agent)
+        self.options = dict(options)
         self._ready = False
 
     def compose(self) -> ComposeResult:
@@ -568,6 +570,58 @@ class SettingsScreen(ModalScreen[dict | None]):
             )
             yield Label("Comandi locali proposti dall'agente")
             yield Switch(value=self.agent, id="settings-agent")
+            yield Static("Terminale e sessioni", classes="section-title")
+            yield Label("Cartella iniziale (vuota = quella attuale)")
+            yield Input(
+                value=str(self.options.get("initial_cwd") or ""),
+                placeholder="/home/utente/progetti",
+                compact=True,
+                id="settings-cwd",
+            )
+            yield Label("Timeout attività in secondi (10–3600)")
+            yield Input(
+                value=str(self.options.get("job_timeout") or JOB_TIMEOUT),
+                type="integer",
+                compact=True,
+                id="settings-timeout",
+            )
+            yield Label("Round massimi dell'agente (1–20)")
+            yield Input(
+                value=str(self.options.get("max_rounds") or MAX_AGENT_ROUNDS),
+                type="integer",
+                compact=True,
+                id="settings-rounds",
+            )
+            yield Label("Esegui i comandi locali senza conferma")
+            yield Switch(
+                value=bool(self.options.get("auto_approve")),
+                id="settings-auto-approve",
+            )
+            yield Static(
+                "Automatico: l'agente può eseguire subito i comandi locali. "
+                "Usalo solo in un ambiente fidato.",
+                classes="field-help",
+            )
+            yield Label("Mostra la risposta mentre viene generata")
+            yield Switch(
+                value=bool(self.options.get("stream", True)),
+                id="settings-stream",
+            )
+            yield Label("Salva le sessioni su disco")
+            yield Switch(
+                value=bool(self.options.get("save_sessions", True)),
+                id="settings-save-sessions",
+            )
+            yield Label("Segnale acustico a fine risposta")
+            yield Switch(
+                value=bool(self.options.get("bell_on_finish")),
+                id="settings-bell",
+            )
+            yield Label("Mostra il pannello di benvenuto")
+            yield Switch(
+                value=bool(self.options.get("show_banner", True)),
+                id="settings-banner",
+            )
             yield Static(id="settings-status")
             with Horizontal(classes="dialog-buttons"):
                 yield Button("Prova connessione", id="settings-test", variant="default")
@@ -600,6 +654,18 @@ class SettingsScreen(ModalScreen[dict | None]):
         self._load_profile()
         self.query_one("#settings-url", Input).focus()
 
+    def _int_setting(self, selector, label, minimum, maximum):
+        raw = self.query_one(selector, Input).value.strip()
+        try:
+            value = int(raw)
+        except ValueError:
+            raise CliError(f"{label}: inserisci un numero intero.") from None
+        if not minimum <= value <= maximum:
+            raise CliError(
+                f"{label}: usa un valore tra {minimum} e {maximum}."
+            )
+        return value
+
     def collect(self):
         self._capture_current()
         values = self.profiles[self.profile]
@@ -608,6 +674,23 @@ class SettingsScreen(ModalScreen[dict | None]):
         mode_value = self.query_one("#settings-mode", Select).value
         mode = normalize_mode(mode_value if mode_value not in (None, Select.BLANK) else None)
         agent = self.query_one("#settings-agent", Switch).value
+        initial_cwd = self.query_one("#settings-cwd", Input).value.strip()
+        if initial_cwd:
+            initial_cwd = str(resolve_working_directory(initial_cwd))
+        options = {
+            "initial_cwd": initial_cwd,
+            "job_timeout": self._int_setting(
+                "#settings-timeout", "Timeout", 10, 3600,
+            ),
+            "max_rounds": self._int_setting(
+                "#settings-rounds", "Round dell'agente", 1, 20,
+            ),
+            "auto_approve": self.query_one("#settings-auto-approve", Switch).value,
+            "stream": self.query_one("#settings-stream", Switch).value,
+            "save_sessions": self.query_one("#settings-save-sessions", Switch).value,
+            "bell_on_finish": self.query_one("#settings-bell", Switch).value,
+            "show_banner": self.query_one("#settings-banner", Switch).value,
+        }
         self.profiles[self.profile] = {"url": url, "key": key}
         return {
             "profile": self.profile,
@@ -616,6 +699,7 @@ class SettingsScreen(ModalScreen[dict | None]):
             },
             "mode": mode,
             "agent": bool(agent),
+            "options": options,
         }
 
     def _set_status(self, text, color="#7d8b9a"):
@@ -834,8 +918,15 @@ class NokkTuiApp(App):
         }
         self.mode = normalize_mode(config.mode)
         self.agent = bool(config.agent)
-        self.auto_yes = bool(auto_yes)
+        self.auto_approve = bool(config.auto_approve)
+        self.auto_yes = bool(auto_yes or self.auto_approve)
         self.job_timeout = job_timeout
+        self.stream = bool(config.stream)
+        self.save_sessions_enabled = bool(config.save_sessions)
+        self.max_rounds = config.max_rounds
+        self.bell_on_finish = bool(config.bell_on_finish)
+        self.show_banner = bool(config.show_banner)
+        self.initial_cwd = config.initial_cwd
         self.runner = runner or run_local
         self.cwd = Path(cwd or Path.cwd()).expanduser().resolve()
         self.model_override = None
@@ -901,7 +992,8 @@ class NokkTuiApp(App):
         self.refresh_sidebar()
         self.refresh_widgets()
         self.set_interval(2.0, self.refresh_widgets)
-        self.write_banner()
+        if self.show_banner:
+            self.write_banner()
         self.activity_log().write(Text("sessione avviata", style="dim"))
         self.run_worker(self.check_health(), group="health")
 
@@ -938,7 +1030,22 @@ class NokkTuiApp(App):
             self.notify("Attendi la risposta di NOKK.", severity="warning")
             return
         self.push_screen(
-            SettingsScreen(self.profile, self.profiles, self.mode, self.agent),
+            SettingsScreen(
+                self.profile,
+                self.profiles,
+                self.mode,
+                self.agent,
+                {
+                    "initial_cwd": self.initial_cwd,
+                    "job_timeout": self.job_timeout,
+                    "max_rounds": self.max_rounds,
+                    "auto_approve": self.auto_approve,
+                    "stream": self.stream,
+                    "save_sessions": self.save_sessions_enabled,
+                    "bell_on_finish": self.bell_on_finish,
+                    "show_banner": self.show_banner,
+                },
+            ),
             callback=self.apply_settings,
         )
 
@@ -989,6 +1096,19 @@ class NokkTuiApp(App):
         self.profiles = data["profiles"]
         self.mode = data["mode"]
         self.agent = bool(data["agent"])
+        options = data.get("options") or {}
+        self.initial_cwd = str(options.get("initial_cwd") or "")
+        if self.initial_cwd:
+            self.cwd = Path(self.initial_cwd).expanduser().resolve()
+            self._branch = git_branch(self.cwd)
+        self.job_timeout = int(options.get("job_timeout") or JOB_TIMEOUT)
+        self.max_rounds = int(options.get("max_rounds") or MAX_AGENT_ROUNDS)
+        self.auto_approve = bool(options.get("auto_approve"))
+        self.auto_yes = self.auto_approve
+        self.stream = bool(options.get("stream", True))
+        self.save_sessions_enabled = bool(options.get("save_sessions", True))
+        self.bell_on_finish = bool(options.get("bell_on_finish"))
+        self.show_banner = bool(options.get("show_banner", True))
         self.model_override = None
         active = self.profiles[self.profile]
         self.client.base_url = active["url"]
@@ -1295,6 +1415,8 @@ class NokkTuiApp(App):
         return self.chats[self.active_index]
 
     def _persist_sessions(self):
+        if not self.save_sessions_enabled:
+            return
         try:
             save_sessions(self.session_path, self.chats)
         except OSError as error:
@@ -1307,7 +1429,8 @@ class NokkTuiApp(App):
         self.messages = self.active_chat.messages
         self.refresh_chat_list()
         self.query_one("#transcript", RichLog).clear()
-        self.write_banner()
+        if self.show_banner:
+            self.write_banner()
         self.refresh_widgets()
         self.query_one("#prompt", Input).focus()
         self._persist_sessions()
@@ -1330,7 +1453,8 @@ class NokkTuiApp(App):
         log = self.query_one("#transcript", RichLog)
         log.clear()
         if not self.active_chat.messages:
-            self.write_banner()
+            if self.show_banner:
+                self.write_banner()
             return
         for message in self.active_chat.messages:
             if message.get("hidden"):
@@ -1375,7 +1499,7 @@ class NokkTuiApp(App):
         chat.messages.append({"role": "user", "content": text})
         self.set_busy(True, "NOKK sta pensando…")
         try:
-            for round_number in range(MAX_AGENT_ROUNDS + 1):
+            for round_number in range(self.max_rounds + 1):
                 job = await self.run_job(self.wire_messages(file_context))
                 reply = job.get("reply")
                 reply = reply.strip() if isinstance(reply, str) else ""
@@ -1383,9 +1507,11 @@ class NokkTuiApp(App):
                 chat.messages.append({"role": "assistant", "content": reply})
                 commands = extract_run_commands(reply) if self.agent else []
                 if not commands:
+                    if self.bell_on_finish:
+                        self.bell()
                     self.set_busy(False, "pronto")
                     return
-                if round_number >= MAX_AGENT_ROUNDS:
+                if round_number >= self.max_rounds:
                     self.write_system("Limite di comandi locali raggiunto.")
                     self.set_busy(False, "pronto")
                     return
@@ -1477,7 +1603,7 @@ class NokkTuiApp(App):
             self.mode,
             model.get("provider"),
             model.get("model"),
-            stream=True,
+            stream=self.stream,
         )
         self.current_job_id = job_id
         self.last_latency = time.monotonic() - started
@@ -1735,6 +1861,10 @@ class NokkTuiApp(App):
             f"modalità: {self.mode or 'predefinita'}\n"
             f"agente: {'on' if self.agent else 'off'}\n"
             f"cwd: {self.cwd}\n"
+            f"cartella iniziale: {self.initial_cwd or '—'}\n"
+            f"timeout: {self.job_timeout}s · round agente: {self.max_rounds}\n"
+            f"auto-approva: {'on' if self.auto_yes else 'off'} · streaming: {'on' if self.stream else 'off'}\n"
+            f"sessioni salvate: {'on' if self.save_sessions_enabled else 'off'} · campanello: {'on' if self.bell_on_finish else 'off'}\n"
             f"config: {self.config_path}"
         )
 
@@ -1992,6 +2122,14 @@ class NokkTuiApp(App):
                 local_api_key=self.profiles["local"]["key"],
                 hosting_url=self.profiles["hosting"]["url"],
                 hosting_api_key=self.profiles["hosting"]["key"],
+                initial_cwd=self.initial_cwd,
+                job_timeout=self.job_timeout,
+                auto_approve=self.auto_approve,
+                stream=self.stream,
+                save_sessions=self.save_sessions_enabled,
+                max_rounds=self.max_rounds,
+                bell_on_finish=self.bell_on_finish,
+                show_banner=self.show_banner,
             ), self.config_path)
         except CliError as error:
             self.write_error(error)

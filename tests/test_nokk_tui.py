@@ -262,6 +262,43 @@ class NokkTuiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(saved.hosting_api_key, "new-key")
                 self.assertEqual(saved.local_url, "http://127.0.0.1:8000")
 
+    async def test_settings_persist_terminal_options(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cli.json"
+            app = NokkTuiApp(Config(), path, client=FakeClient())
+            async with app.run_test(size=(120, 44)) as pilot:
+                await pilot.pause()
+                app.action_settings()
+                await pilot.pause()
+                screen = app.screen
+                screen.query_one("#settings-cwd").value = directory
+                screen.query_one("#settings-timeout").value = "45"
+                screen.query_one("#settings-rounds").value = "3"
+                screen.query_one("#settings-auto-approve").value = True
+                screen.query_one("#settings-stream").value = False
+                screen.query_one("#settings-save-sessions").value = False
+                screen.query_one("#settings-bell").value = True
+                screen.query_one("#settings-banner").value = False
+                screen.query_one("#settings-save").focus()
+                await pilot.press("enter")
+                self.assertTrue(
+                    await wait_until(pilot, lambda: not isinstance(app.screen, SettingsScreen))
+                )
+            saved = nokk_cli.read_config(path)
+        self.assertEqual(saved.initial_cwd, str(Path(directory).resolve()))
+        self.assertEqual(saved.job_timeout, 45)
+        self.assertEqual(saved.max_rounds, 3)
+        self.assertTrue(saved.auto_approve)
+        self.assertFalse(saved.stream)
+        self.assertFalse(saved.save_sessions)
+        self.assertTrue(saved.bell_on_finish)
+        self.assertFalse(saved.show_banner)
+        self.assertEqual(app.job_timeout, 45)
+        self.assertEqual(app.max_rounds, 3)
+        self.assertTrue(app.auto_yes)
+        self.assertFalse(app.stream)
+        self.assertFalse(app.save_sessions_enabled)
+
     async def test_export_writes_the_chat_as_markdown(self):
         with tempfile.TemporaryDirectory() as directory:
             app = NokkTuiApp(

@@ -54,6 +54,12 @@ la passa a sudo tramite stdin (`sudo -S`); nella modalità a righe la password
 viene chiesta con `getpass`. La password resta solo in memoria, non viene
 salvata, non compare nel transcript e non viene inviata al modello.
 
+Da `F2` (`/settings`) configuri anche: cartella iniziale, timeout delle attività,
+numero massimo di round dell'agente, esecuzione automatica dei comandi locali,
+streaming della risposta, salvataggio delle sessioni, segnale acustico finale e
+pannello di benvenuto. Le stesse impostazioni restano nel file `cli.json` e
+valgono anche per la CLI:
+
 Nella TUI puoi scrivere normalmente all'assistente, usare `!comando` per
 eseguire subito un comando locale e `/help` per gli altri comandi (`/cd`,
 `/run`, `/agent`, `/mode`, `/url`, `/key`, `/server`, `/status`, `/export`,
