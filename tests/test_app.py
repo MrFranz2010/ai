@@ -1463,6 +1463,32 @@ class AppRouteTests(unittest.TestCase):
         self.assertEqual(job["reply"], "Fatto.")
         self.assertEqual(job["tool_events"][0]["command"], "pwd")
 
+    def test_chat_stream_falls_back_to_json(self):
+        self.request_json("/api/config", {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "api_key": "test-secret",
+            "terminal_enabled": False,
+            "approval_mode": "manual",
+            "workspace": str(Path(app.APP_DIR).resolve()),
+        })
+        payload = {
+            "choices": [{
+                "message": {"role": "assistant", "content": "Risposta JSON."},
+            }],
+        }
+        responses = [
+            FakeResponse(payload),
+            FakeStreamResponse([json.dumps(payload).encode("utf-8")]),
+        ]
+        for response in responses:
+            with self.subTest(response=type(response).__name__):
+                with patch("app.urlopen", return_value=response):
+                    job = self.run_chat(
+                        [{"role": "user", "content": "Saluta"}], stream=True,
+                    )
+                self.assertEqual(job["reply"], "Risposta JSON.")
+
     def test_chat_streams_partial_text(self):
         self.request_json("/api/config", {
             "provider": "openai",
