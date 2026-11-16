@@ -288,6 +288,51 @@ class SessionTests(unittest.TestCase):
         self.assertIs(client.start_options["terminal_enabled"], False)
         self.assertIs(client.start_options["local_terminal"], True)
 
+    def test_update_command_installs_a_safe_update(self):
+        client = FakeClient([])
+        with tempfile.TemporaryDirectory() as directory:
+            lines = []
+            session = nokk_cli.Session(
+                client,
+                Path(directory) / "cli.json",
+                auto_yes=True,
+                interactive=False,
+                cwd=directory,
+                out=lines.append,
+            )
+            status = nokk_cli.updater.UpdateStatus(
+                root=directory,
+                branch="main",
+                remote="origin",
+                local_sha="a" * 40,
+                remote_sha="b" * 40,
+                behind=1,
+                ahead=0,
+                dirty=False,
+                changed_files=("nokk_cli.py",),
+                commits=("abc1234\tNuova versione",),
+            )
+            result = nokk_cli.updater.UpdateResult(
+                branch="main",
+                previous_sha=status.local_sha,
+                new_sha=status.remote_sha,
+                changed_files=status.changed_files,
+                requirements_changed=False,
+            )
+            with (
+                patch.object(
+                    nokk_cli.updater, "check_for_update", return_value=status,
+                ),
+                patch.object(
+                    nokk_cli.updater, "apply_update", return_value=result,
+                ),
+            ):
+                self.assertTrue(session.handle_slash("/update"))
+        output = "\n".join(lines)
+        self.assertIn("Aggiornamento disponibile", output)
+        self.assertIn("Aggiornato a bbbbbbbb", output)
+        self.assertIn("Riavvia NOKK", output)
+
     def test_sudo_command_uses_the_password_prompt(self):
         client = FakeClient([])
         with tempfile.TemporaryDirectory() as directory:

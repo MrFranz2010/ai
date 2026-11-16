@@ -172,6 +172,21 @@ Con una chiave API usa sempre `/api/v1/*`; senza chiave usa le rotte del
 browser, comode su un NOKK locale. Le approvazioni dal terminale richiedono una
 versione del server che esponga la rotta `/api/v1/jobs/<id>/approval`.
 
+## Aggiornamenti automatici
+
+Il client controlla all'avvio il branch Git corrente e confronta `HEAD` con
+`origin`. Se ci sono nuovi commit applica solo un **fast-forward**, senza merge e
+senza perdere lavoro locale.
+
+L'aggiornamento viene saltato quando ci sono modifiche non committate, commit
+locali non pubblicati, un branch senza remote, Git o rete non disponibili, o
+quando cambiano `requirements.txt`/`requirements-tui.txt`. In quel caso
+reinstalla le dipendenze e riavvia.
+
+Per controllare o installare manualmente usa `/update` nella CLI o nella TUI.
+L'avvio automatico si disattiva con `NOKK_AUTO_UPDATE=0` oppure con
+`--no-update`.
+
 ## Attività persistenti
 
 Il server conserva i metadati delle richieste in `jobs.json` (o in Supabase

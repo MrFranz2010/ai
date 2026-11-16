@@ -29,6 +29,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+import updater
+
 VERSION = "0.1.0"
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 DEFAULT_TIMEOUT = 30
@@ -1288,6 +1290,9 @@ class Session:
             except CliError as error:
                 self.error(error)
             return True
+        if name == "/update":
+            self.update_nokk()
+            return True
         if name == "/config":
             self._write(f"server:   {self.client.base_url}")
             self._write(f"api key:  {mask_key(self.client.api_key)}")
@@ -1300,6 +1305,52 @@ class Session:
             f"Comando sconosciuto: {name}. Scrivi /help per l'elenco."
         ))
         return True
+
+    def update_nokk(self):
+        try:
+            status = updater.check_for_update()
+        except updater.UpdateError as error:
+            self._write(self.ansi.yellow(f"Aggiornamento non disponibile: {error}"))
+            return
+        if not status.available:
+            self._write(self.ansi.dim("NOKK è già aggiornato."))
+            return
+        self._write(self.ansi.bold(
+            f"Aggiornamento disponibile: {status.behind} commit su "
+            f"{status.remote}/{status.branch}."
+        ))
+        for line in status.commits:
+            self._write(self.ansi.dim(f"  {line}"))
+        if status.dirty:
+            self._write(self.ansi.yellow(
+                "Ci sono modifiche locali: aggiornamento annullato."
+            ))
+            return
+        if status.ahead:
+            self._write(self.ansi.yellow(
+                "Il branch locale ha commit non pubblicati: aggiornamento annullato."
+            ))
+            return
+        if not self.auto_yes and not self._ask_yes_no(
+            "Scaricare e applicare l'aggiornamento? [y/N] "
+        ):
+            self._write(self.ansi.dim("Aggiornamento annullato."))
+            return
+        try:
+            result = updater.apply_update(status)
+        except updater.UpdateError as error:
+            self._write(self.ansi.red(f"Aggiornamento non riuscito: {error}"))
+            return
+        self._write(self.ansi.green(
+            f"Aggiornato a {result.new_sha[:8]} ({len(result.changed_files)} file)."
+        ))
+        if result.requirements_changed:
+            self._write(self.ansi.yellow(
+                "Dipendenze cambiate: esegui "
+                "python -m pip install -r requirements.txt "
+                "(e requirements-tui.txt per la TUI)."
+            ))
+        self._write(self.ansi.dim("Riavvia NOKK per usare la nuova versione."))
 
     def _set_key(self):
         try:
@@ -1334,6 +1385,7 @@ Comandi del terminale NOKK
   /key                  imposta (in modo nascosto) la chiave API
   /server               stato del server
   /jobs                 attività recenti, provider, durata ed errori
+  /update               controlla il repository e installa gli aggiornamenti
   /config               configurazione attuale
   /exit                 esci
 
@@ -1461,6 +1513,10 @@ def build_parser():
         "--no-check", action="store_true",
         help="non controlla il server all'avvio",
     )
+    parser.add_argument(
+        "--no-update", action="store_true",
+        help="non controlla gli aggiornamenti Git all'avvio",
+    )
     parser.add_argument("--version", action="version", version=f"nokk {VERSION}")
     return parser
 
@@ -1489,6 +1545,14 @@ def main(argv=None):
             color = ansi.green if result.exit_code == 0 else ansi.red
             print(color(f"exit {result.exit_code}"))
             return min(255, max(0, result.exit_code))
+
+        if not args.no_update:
+            updater.auto_update(
+                notify=lambda message: print(
+                    Ansi(ansi_enabled(sys.stderr)).dim(message),
+                    file=sys.stderr,
+                )
+            )
 
         if os.environ.get("NOKK_URL"):
             config.base_url = normalize_base_url(os.environ["NOKK_URL"])
