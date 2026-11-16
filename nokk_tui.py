@@ -640,6 +640,13 @@ class NokkTuiApp(App):
         padding: 0 1;
         background: #0b0f14;
     }
+    #streamline {
+        height: auto;
+        max-height: 4;
+        padding: 0 1;
+        background: #0d1319;
+        color: #8b949e;
+    }
     #statusline {
         height: 1;
         padding: 0 1;
@@ -809,6 +816,7 @@ class NokkTuiApp(App):
                     min_width=1,
                     max_lines=2000,
                 )
+                yield Static("", id="streamline")
                 yield Static(id="statusline")
                 yield Input(
                     placeholder=(
@@ -836,6 +844,7 @@ class NokkTuiApp(App):
         yield Footer()
 
     def on_mount(self):
+        self.query_one("#streamline", Static).display = False
         self.query_one("#prompt", Input).focus()
         self.refresh_chat_list()
         self.refresh_sidebar()
@@ -1157,6 +1166,16 @@ class NokkTuiApp(App):
         self.refresh_statusline()
         self.refresh_sidebar()
 
+    def show_stream(self, text):
+        line = self.query_one("#streamline", Static)
+        text = (text or "").strip()
+        if not text:
+            line.display = False
+            line.update("")
+            return
+        line.display = True
+        line.update(Text(text[-1200:], style="#8b949e"))
+
     def refresh_statusline(self):
         color = "#3fb950" if self.online else ("#f85149" if self.online is False else "#8b949e")
         label = "online" if self.online else ("offline" if self.online is False else "connessione…")
@@ -1348,6 +1367,7 @@ class NokkTuiApp(App):
             raise
         finally:
             self.current_job_id = None
+            self.show_stream("")
             if self.busy:
                 self.set_busy(False, "pronto")
             self.refresh_widgets()
@@ -1394,6 +1414,7 @@ class NokkTuiApp(App):
             self.mode,
             model.get("provider"),
             model.get("model"),
+            stream=True,
         )
         self.current_job_id = job_id
         self.last_latency = time.monotonic() - started
@@ -1408,8 +1429,13 @@ class NokkTuiApp(App):
                 for event in events[seen_events:]:
                     self.write_tool_event(event)
                 seen_events = len(events)
+            partial = job.get("partial_reply")
+            if isinstance(partial, str) and partial:
+                self.show_stream(partial)
+                self.set_busy(True, f"NOKK sta scrivendo… {len(partial)} caratteri")
             status = job.get("status")
             if status == "complete":
+                self.show_stream("")
                 self.current_job_id = None
                 return job
             if status == "cancelled":

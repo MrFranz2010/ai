@@ -65,8 +65,10 @@ risposta precedente o tutto il transcript, mentre `/status` riassume profilo,
 connessione, provider, modello, directory e configurazione. Le sessioni sono
 salvate in `sessions.json`: `/sessions`, `/resume <n>` e `/rename <titolo>`;
 `/model <provider>/<modello>` cambia modello per la sessione, `@file` allega
-file al contesto e `/diff`/`/git status` mostrano il repository. `Ctrl+X` o
-`/cancel` annulla il job in corso. Su terminali stretti la barra laterale si
+file al contesto e `/diff`/`/git status` mostrano il repository. Con i provider
+OpenAI-compatibili la risposta compare mentre viene generata; gli altri
+provider restano in modalità non-streaming. `Ctrl+X` o `/cancel` annulla il job
+in corso. Su terminali stretti la barra laterale si
 nasconde da sola. Se Textual non è installato, il client ripiega sul
 terminale a righe; `--plain` lo forza e `--tui` richiede esplicitamente la TUI.
 

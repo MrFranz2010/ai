@@ -30,7 +30,7 @@ Ogni chiave accetta al massimo **60 richieste al minuto**; oltre si riceve
 | --- | --- | --- |
 | GET | `/api/v1/health` | Stato del servizio, senza chiave |
 | POST | `/api/v1/chat` | Avvia una conversazione |
-| GET | `/api/v1/jobs/<id>` | Legge l'esito di una conversazione |
+| GET | `/api/v1/jobs/<id>` | Legge l'esito e il testo parziale di una conversazione |
 | POST | `/api/v1/jobs/<id>/approval` | Approva o rifiuta un comando in attesa |
 | POST | `/api/v1/jobs/<id>/cancel` | Annulla un job in corso |
 | POST | `/api/v1/reminders` | Crea un promemoria da testo italiano |
@@ -54,7 +54,9 @@ curl -sS https://tuo-nokk.onrender.com/api/v1/chat \
 {"job_id": "8f2c..."}
 ```
 
-`mode` è facoltativo e accetta `codice`, `studio`, `analista`.
+`mode` è facoltativo e accetta `codice`, `studio`, `analista`. Sono
+facoltativi anche `provider`/`model` e `stream: true`: lo streaming è
+supportato dai provider OpenAI-compatibili, mentre gli altri lo ignorano.
 
 ### Leggere l'esito
 
@@ -64,8 +66,8 @@ curl -sS https://tuo-nokk.onrender.com/api/v1/jobs/8f2c... \
 ```
 
 La risposta contiene `status` (`running`, `awaiting_approval`, `complete`,
-`failed`, `cancelled`) e, quando la conversazione è finita, `reply` con il testo e
-`tool_events` con gli strumenti usati.
+`failed`, `cancelled`). Durante lo streaming include `partial_reply`; al termine
+`reply` con il testo e `tool_events` con gli strumenti usati.
 
 ### Approvare un comando
 
