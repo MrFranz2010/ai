@@ -128,6 +128,12 @@ server fidati e limita gli argomenti alla cartella che vuoi rendere accessibile.
 Le chiamate MCP non passano dalla conferma dei comandi del terminale, quindi il
 contenuto a cui il server può accedere dipende dai suoi permessi.
 
+Il terminale della pagina web agisce sulla macchina che ospita NOKK. Un client
+che esegue i comandi sul proprio computer può inviare `terminal_enabled: false`
+e `local_terminal: true` nella richiesta di chat: il server toglie il tool
+terminale e lascia che sia il client a proporre ed eseguire i comandi locali.
+La configurazione salvata del server non viene modificata.
+
 ## Consapevolezza operativa
 
 NOKK riceve nel system prompt una descrizione del proprio stato: identità di
