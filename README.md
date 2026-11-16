@@ -46,7 +46,8 @@ python nokk_cli.py
 Nella TUI puoi scrivere normalmente all'assistente, usare `!comando` per
 eseguire subito un comando locale e `/help` per gli altri comandi (`/cd`,
 `/run`, `/agent`, `/mode`, `/url`, `/key`, `/server`, `/status`, `/export`,
-`/copy`, `/retry`). Con l'agente attivo,
+`/copy`, `/retry`, `/sessions`, `/resume`, `/rename`, `/model`, `/diff`,
+`/git`, `/cancel`). Con l'agente attivo,
 se NOKK propone un comando in un blocco `nokk-run`, il client chiede conferma,
 lo esegue **sulla macchina locale** e restituisce l'output al modello; i comandi
 che NOKK vuole eseguire sul server restano soggetti alle approvazioni del server.
@@ -61,10 +62,13 @@ separatamente nello stesso file di configurazione. `/export [file]` salva la
 conversazione in Markdown (per impostazione predefinita in
 `nokk-chat-<data>.md`), `/copy [numero|all]` copia l'ultima risposta, una
 risposta precedente o tutto il transcript, mentre `/status` riassume profilo,
-connessione, provider, modello, directory e configurazione. Su terminali stretti la
-barra laterale si nasconde da sola. Se Textual non è installato, il
-client ripiega sul terminale a righe; `--plain` lo forza e `--tui` richiede
-esplicitamente la TUI.
+connessione, provider, modello, directory e configurazione. Le sessioni sono
+salvate in `sessions.json`: `/sessions`, `/resume <n>` e `/rename <titolo>`;
+`/model <provider>/<modello>` cambia modello per la sessione, `@file` allega
+file al contesto e `/diff`/`/git status` mostrano il repository. `Ctrl+X` o
+`/cancel` annulla il job in corso. Su terminali stretti la barra laterale si
+nasconde da sola. Se Textual non è installato, il client ripiega sul
+terminale a righe; `--plain` lo forza e `--tui` richiede esplicitamente la TUI.
 
 ```bash
 python nokk_cli.py --plain
@@ -74,6 +78,14 @@ python nokk_cli.py --exec "git status"
 
 Nelle esecuzioni one-shot i comandi sono bloccati per sicurezza: aggiungi `--yes`
 per approvarli automaticamente.
+
+### MCP
+
+`nokk_mcp.py` espone NOKK come server MCP su stdio con i tool `nokk_health` e
+`nokk_chat`; un client MCP può avviarlo con `python3 nokk_mcp.py` e le normali
+variabili `NOKK_URL`/`NOKK_API_KEY`. Non approva automaticamente i comandi del
+server: se un job è in attesa, restituisce un errore e invita ad approvarlo
+dalla web o dalla TUI.
 
 ### Client unificato
 

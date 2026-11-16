@@ -32,6 +32,7 @@ Ogni chiave accetta al massimo **60 richieste al minuto**; oltre si riceve
 | POST | `/api/v1/chat` | Avvia una conversazione |
 | GET | `/api/v1/jobs/<id>` | Legge l'esito di una conversazione |
 | POST | `/api/v1/jobs/<id>/approval` | Approva o rifiuta un comando in attesa |
+| POST | `/api/v1/jobs/<id>/cancel` | Annulla un job in corso |
 | POST | `/api/v1/reminders` | Crea un promemoria da testo italiano |
 | GET | `/api/v1/planner` | Elenca eventi e attività |
 
@@ -63,7 +64,7 @@ curl -sS https://tuo-nokk.onrender.com/api/v1/jobs/8f2c... \
 ```
 
 La risposta contiene `status` (`running`, `awaiting_approval`, `complete`,
-`failed`) e, quando la conversazione è finita, `reply` con il testo e
+`failed`, `cancelled`) e, quando la conversazione è finita, `reply` con il testo e
 `tool_events` con gli strumenti usati.
 
 ### Approvare un comando
