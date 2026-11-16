@@ -125,6 +125,14 @@ terminale, le operazioni sui file e le richieste di codice non possono creare
 eventi. La modifica richiede una richiesta esplicita dell'utente nell'ultimo
 messaggio; in caso contrario il tool viene rifiutato e NOKK chiede conferma.
 
+## Aggiornamenti
+
+L'hosting non esegue aggiornamenti Git a runtime: il codice viene aggiornato
+solo con un nuovo deploy del repository, così un riavvio o un deploy non
+modificano file mentre il servizio è in esecuzione. La variante desktop può
+controllare il branch e applicare fast-forward sicuri all'avvio con
+`NOKK_AUTO_UPDATE=0` come opt-out.
+
 ## Attività persistenti
 
 I metadati delle richieste vengono salvati in `jobs.json` nella tabella privata
