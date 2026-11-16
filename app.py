@@ -3493,13 +3493,41 @@ def build_provider_request(
 def parse_stream_response(provider, response, job_id):
     """Read an OpenAI-compatible SSE stream and expose partial text.
 
+    Some compatible gateways ignore ``stream`` and answer with a normal JSON
+    object. In that case the response is handed to ``parse_tool_response`` so
+    the request still completes with the full reply.
+
     Returns the same ``(assistant_message, tool_calls)`` pair as
     ``parse_tool_response``, or ``None`` when the job was cancelled.
     """
     if provider not in OPENAI_COMPATIBLE_PROVIDERS:
         raise ValueError("Streaming non supportato per questo provider.")
+    if _job_cancelled(job_id):
+        return None
+
+    def json_result(payload):
+        if not isinstance(payload, dict):
+            raise ValueError("Risposta del provider non valida.")
+        if "error" in payload:
+            message = payload["error"]
+            if isinstance(message, dict):
+                message = message.get("message") or str(message)
+            raise ValueError(str(message))
+        return parse_tool_response(provider, payload)
+
+    if not hasattr(response, "__iter__"):
+        body = response.read()
+        if isinstance(body, bytes):
+            body = body.decode("utf-8", errors="replace")
+        try:
+            return json_result(json.loads(body))
+        except json.JSONDecodeError:
+            raise ValueError("Risposta del provider non valida.") from None
+
     content_parts = []
     pending_calls = {}
+    json_lines = []
+    json_mode = None
     for raw_line in response:
         if _job_cancelled(job_id):
             return None
@@ -3508,6 +3536,13 @@ def parse_stream_response(provider, response, job_id):
         else:
             line = str(raw_line)
         line = line.strip()
+        if json_mode is None:
+            if not line:
+                continue
+            json_mode = line.startswith("{")
+        if json_mode:
+            json_lines.append(line)
+            continue
         if not line or line.startswith(":") or line.startswith("event:"):
             continue
         if line.startswith("data:"):
@@ -3551,6 +3586,11 @@ def parse_stream_response(provider, response, job_id):
                 entry["name"] = str(function["name"])
             if function.get("arguments"):
                 entry["arguments"] += str(function["arguments"])
+    if json_mode:
+        try:
+            return json_result(json.loads("\n".join(json_lines)))
+        except json.JSONDecodeError:
+            raise ValueError("Risposta del provider non valida.") from None
     normalized_calls = []
     raw_calls = []
     for index in sorted(pending_calls):
