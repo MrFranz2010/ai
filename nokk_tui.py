@@ -248,13 +248,16 @@ I comandi che NOKK vuole eseguire sul server passano da una conferma separata.
 | `/url [indirizzo]` | cambia server |
 | `/key` | imposta la chiave API |
 | `/server` | stato del server |
+| `/status` | sessione, connessione e configurazione |
 | `/config` | configurazione attuale |
 | `/settings` | profili locale/hosting e chiavi |
+| `/export [file]` | esporta la chat in Markdown |
+| `/retry` | ripete l'ultima domanda |
 | `/clear` | pulisce il transcript |
 
 `!comando` esegue subito un comando locale. `Ctrl+Q` esce, `Ctrl+N` apre una
-nuova chat, `Ctrl+B` mostra o nasconde la barra laterale, `F1` apre l'aiuto
-e `F2` le impostazioni.
+nuova chat, `Ctrl+B` mostra o nasconde la barra laterale, `Ctrl+E` esporta la
+chat, `Ctrl+R` ripete l'ultima domanda, `F1` apre l'aiuto e `F2` le impostazioni.
 """
 
 
@@ -561,6 +564,8 @@ class NokkTuiApp(App):
         Binding("ctrl+q", "quit", "Esci", show=True),
         Binding("ctrl+n", "new_chat", "Nuova chat", show=True),
         Binding("ctrl+b", "toggle_sidebar", "Sidebar", show=True),
+        Binding("ctrl+e", "export_chat", "Esporta", show=True),
+        Binding("ctrl+r", "retry", "Riprova", show=True),
         Binding("ctrl+l", "clear_view", "Pulisci", show=True),
         Binding("f1", "help", "Aiuto", show=True),
         Binding("f2", "settings", "Impostazioni", show=True),
@@ -696,6 +701,20 @@ class NokkTuiApp(App):
         self.push_screen(
             SettingsScreen(self.profile, self.profiles, self.mode, self.agent),
             callback=self.apply_settings,
+        )
+
+    def action_export_chat(self):
+        self.export_chat("")
+
+    def action_retry(self):
+        if self.busy:
+            self.notify("Attendi la risposta di NOKK.", severity="warning")
+            return
+        self.run_worker(
+            self.retry_last(),
+            group="chat",
+            name="chat",
+            exclusive=True,
         )
 
     def apply_settings(self, data):
@@ -848,6 +867,10 @@ class NokkTuiApp(App):
         visible_messages = sum(
             1 for message in self.active_chat.messages if not message.get("hidden")
         )
+        turns = sum(
+            1 for message in self.active_chat.messages
+            if message.get("role") == "user" and not message.get("hidden")
+        )
         context_chars = sum(
             len(message.get("content", ""))
             for message in self.active_chat.messages
@@ -901,6 +924,10 @@ class NokkTuiApp(App):
         widgets.append(("locale" if self.profile == "local" else "hosting") + "\n")
         widgets.append("Chat    ", style="dim")
         widgets.append(f"{title} · {visible_messages} msg\n")
+        widgets.append("Turni   ", style="dim")
+        widgets.append(f"{turns}\n")
+        widgets.append("API key ", style="dim")
+        widgets.append(("configurata" if self.client.api_key else "assente") + "\n")
         widgets.append("Mode    ", style="dim")
         widgets.append(f"{self.mode or 'predefinita'}\n")
         widgets.append("Agente  ", style="dim")
@@ -1269,8 +1296,14 @@ class NokkTuiApp(App):
             self.action_settings()
         elif name == "/server":
             await self.show_server()
+        elif name == "/status":
+            self.show_status()
         elif name == "/config":
             self.show_config()
+        elif name == "/export":
+            self.export_chat(argument)
+        elif name in {"/retry", "/again"}:
+            await self.retry_last()
         else:
             self.write_system(f"Comando sconosciuto: {name}. Premi F1 per l'aiuto.")
 
@@ -1354,6 +1387,107 @@ class NokkTuiApp(App):
             f"cwd: {self.cwd}\n"
             f"config: {self.config_path}"
         )
+
+    def show_status(self):
+        connection = "online" if self.online else ("offline" if self.online is False else "connessione…")
+        turns = sum(
+            1 for message in self.active_chat.messages
+            if message.get("role") == "user" and not message.get("hidden")
+        )
+        latency = f"{self.last_latency * 1000:.0f} ms" if self.last_latency else "—"
+        self.write_system(
+            "Stato sessione\n"
+            f"profilo: {self.profile}\n"
+            f"server: {self.client.base_url} · {connection}\n"
+            f"provider: {self.health.get('provider') or '—'}\n"
+            f"modello: {self.health.get('model') or '—'}\n"
+            f"api key: {mask_key(self.client.api_key) or '—'}\n"
+            f"modalità: {self.mode or 'predefinita'}\n"
+            f"agente: {'on' if self.agent else 'off'}\n"
+            f"turni: {turns} · richieste: {self.requests} · latenza: {latency}\n"
+            f"cwd: {self.cwd}\n"
+            f"git: {self._branch or '—'}\n"
+            f"config: {self.config_path}"
+        )
+
+    def chat_markdown(self):
+        chat = self.active_chat
+        lines = [
+            f"# NOKK · {chat.title}",
+            "",
+            f"- Data: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"- Profilo: {self.profile}",
+            f"- Server: {self.client.base_url}",
+            f"- Modalità: {self.mode or 'predefinita'}",
+            f"- Directory: {self.cwd}",
+            "",
+        ]
+        for message in chat.messages:
+            if message.get("hidden"):
+                continue
+            content = message.get("content")
+            if not isinstance(content, str):
+                continue
+            if message.get("role") == "user":
+                heading = "Tu"
+            elif message.get("role") == "assistant":
+                heading = "NOKK"
+            else:
+                continue
+            lines.extend([f"## {heading}", "", content.rstrip() or "(vuoto)", ""])
+        return "\n".join(lines).rstrip() + "\n"
+
+    def export_chat(self, argument):
+        visible = [
+            message for message in self.active_chat.messages
+            if not message.get("hidden")
+            and isinstance(message.get("content"), str)
+            and message.get("role") in {"user", "assistant"}
+        ]
+        if not visible:
+            self.write_system("Non c'è ancora niente da esportare.")
+            return
+        if argument:
+            target = Path(argument).expanduser()
+        else:
+            target = Path(f"nokk-chat-{time.strftime('%Y%m%d-%H%M%S')}.md")
+        if not target.is_absolute():
+            target = self.cwd / target
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(self.chat_markdown(), encoding="utf-8")
+        except OSError as error:
+            self.write_error(CliError(f"Esportazione non riuscita: {error}"))
+            return
+        self.write_system(f"Chat esportata in {target}")
+        self.activity_log().write(
+            Text(f"export: {target}", style="#3fb950")
+        )
+
+    async def retry_last(self):
+        if self.busy:
+            self.notify("Attendi la risposta di NOKK.", severity="warning")
+            return
+        chat = self.active_chat
+        index = None
+        for position in range(len(chat.messages) - 1, -1, -1):
+            message = chat.messages[position]
+            if message.get("role") == "user" and not message.get("hidden"):
+                index = position
+                break
+        if index is None:
+            self.write_system("Nessuna domanda da ripetere.")
+            return
+        text = chat.messages[index].get("content") or ""
+        if not text.strip():
+            self.write_system("L'ultima domanda è vuota.")
+            return
+        del chat.messages[index:]
+        self.messages = chat.messages
+        self.render_chat()
+        self.write_system("Ripeto l'ultima domanda…")
+        self.activity_log().write(Text("retry dell'ultima domanda", style="#58a6ff"))
+        await self.ask(text)
 
     def save(self):
         try:

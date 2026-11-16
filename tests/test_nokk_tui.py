@@ -202,6 +202,47 @@ class NokkTuiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(saved.hosting_api_key, "new-key")
                 self.assertEqual(saved.local_url, "http://127.0.0.1:8000")
 
+    async def test_export_writes_the_chat_as_markdown(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = NokkTuiApp(
+                Config(),
+                Path(directory) / "cli.json",
+                client=FakeClient(),
+                cwd=directory,
+            )
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                app.active_chat.messages.extend([
+                    {"role": "user", "content": "Ciao"},
+                    {"role": "assistant", "content": "**Risposta**"},
+                    {"role": "user", "content": "nascosto", "hidden": True},
+                ])
+                await app.handle_command("/export chat.md")
+                exported = (Path(directory) / "chat.md").read_text(encoding="utf-8")
+                self.assertIn("# NOKK · Chat 1", exported)
+                self.assertIn("## Tu\n\nCiao", exported)
+                self.assertIn("## NOKK\n\n**Risposta**", exported)
+                self.assertNotIn("nascosto", exported)
+
+    async def test_retry_replaces_the_last_answer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = NokkTuiApp(
+                Config(),
+                Path(directory) / "cli.json",
+                client=FakeClient(["prima risposta", "seconda risposta"]),
+            )
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                await app.ask("domanda")
+                await app.handle_command("/retry")
+                self.assertEqual(
+                    app.active_chat.messages,
+                    [
+                        {"role": "user", "content": "domanda"},
+                        {"role": "assistant", "content": "seconda risposta"},
+                    ],
+                )
+
     async def test_narrow_terminal_hides_the_sidebar(self):
         with tempfile.TemporaryDirectory() as directory:
             app = NokkTuiApp(
