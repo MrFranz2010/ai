@@ -95,6 +95,39 @@ né nella chat:
 In locale esporta le variabili prima di avviare `python linux_start.py`. Senza
 `GITHUB_TOKEN` restano disponibili solo la lettura del codice e l'elenco dei file.
 
+## Server MCP esterni
+
+NOKK può avviare server MCP locali via stdio e usarne i tool durante una chat.
+I server si configurano nel file di configurazione, nella chiave `mcp_servers`:
+
+```json
+{
+  "mcp_servers": [
+    {
+      "name": "filesystem",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/home/tuo-utente/progetti"
+      ],
+      "enabled": true
+    }
+  ]
+}
+```
+
+I tool vengono esposti al modello come `mcp_<server>_<tool>`; NOKK scopre la
+lista all'avvio di ogni richiesta e inoltra le chiamate allo stesso processo.
+`env` può aggiungere variabili d'ambiente, mentre quelle del server non
+necessarie non vengono ereditate. Un server che non parte viene saltato senza
+bloccare la chat.
+
+Il comando del server esegue codice sulla macchina di NOKK: configura solo
+server fidati e limita gli argomenti alla cartella che vuoi rendere accessibile.
+Le chiamate MCP non passano dalla conferma dei comandi del terminale, quindi il
+contenuto a cui il server può accedere dipende dai suoi permessi.
+
 ## Note sulla cronologia chat
 
 Sono supportate fino a 100 chat, con fino a 500 messaggi testuali per chat. Gli

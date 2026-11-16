@@ -61,6 +61,7 @@ from reminders import (
     parse_reminder as _parse_reminder,
 )
 from search import make_document, rank_documents, tokens as search_tokens
+from mcp_client import McpError, load_mcp_registry, normalize_mcp_servers
 from api_access import (
     MAX_API_KEYS,
     RateLimiter,
@@ -2284,6 +2285,7 @@ def validate_config(
     alerts_enabled=False,
     alerts_disk_percent=ALERT_DISK_PERCENT_DEFAULT,
     alerts_memory_percent=ALERT_MEMORY_PERCENT_DEFAULT,
+    mcp_servers=None,
 ):
     if not isinstance(provider, str) or provider not in PROVIDERS:
         raise ValueError("Provider non supportato nel file di configurazione.")
@@ -2374,6 +2376,7 @@ def validate_config(
                 f"La soglia {label} deve essere un numero tra "
                 f"{ALERT_PERCENT_MIN} e {ALERT_PERCENT_MAX}."
             )
+    saved_mcp_servers = normalize_mcp_servers(mcp_servers)
     workspace_path = Path(workspace).expanduser()
     if not workspace_path.is_absolute() or not workspace_path.is_dir():
         raise ValueError("La cartella di lavoro deve esistere ed essere assoluta.")
@@ -2398,6 +2401,7 @@ def validate_config(
         "alerts_enabled": alerts_enabled,
         "alerts_disk_percent": alerts_disk_percent,
         "alerts_memory_percent": alerts_memory_percent,
+        "mcp_servers": saved_mcp_servers,
     }
 
 
@@ -2423,6 +2427,7 @@ def default_config():
         "alerts_enabled": False,
         "alerts_disk_percent": ALERT_DISK_PERCENT_DEFAULT,
         "alerts_memory_percent": ALERT_MEMORY_PERCENT_DEFAULT,
+        "mcp_servers": [],
     }
 
 
@@ -2466,6 +2471,7 @@ def load_config_file():
             alerts_memory_percent=saved.get(
                 "alerts_memory_percent", ALERT_MEMORY_PERCENT_DEFAULT
             ),
+            mcp_servers=saved.get("mcp_servers", []),
         )
     except ValueError as error:
         raise RuntimeError(f"File di configurazione non valido: {error}") from error
@@ -3613,13 +3619,15 @@ def transcribe_audio(active_config, audio, mime_type):
 def build_provider_request(
     provider, model, api_key, messages, system_prompt=None, enable_tools=False,
     enable_app_tools=False, base_url=None, merge_system_prompt=False,
-    stream=False,
+    stream=False, extra_tools=None,
 ):
     tool_definitions = []
     if enable_tools:
         tool_definitions.append(TERMINAL_TOOL)
     if enable_app_tools:
         tool_definitions.extend(ALL_APP_TOOLS)
+    if extra_tools:
+        tool_definitions.extend(extra_tools)
     headers = {"Content-Type": "application/json"}
     tool_messages = []
     for message in messages:
@@ -4333,6 +4341,14 @@ def _wait_for_approval(job_id, command):
 
 def run_chat_job(job_id, messages, active_config, mode=None):
     tool_events = []
+    mcp_registry = None
+    try:
+        mcp_registry = load_mcp_registry(
+            active_config.get("mcp_servers") or []
+        )
+    except (McpError, ValueError) as error:
+        print(f"MCP non disponibile: {error}")
+    mcp_tools = mcp_registry.definitions() if mcp_registry else []
     system_prompt = "\n\n".join(
         prompt for prompt in (
             DEFAULT_SYSTEM_PROMPT,
@@ -4418,6 +4434,13 @@ def run_chat_job(job_id, messages, active_config, mode=None):
         system_prompt = "\n\n".join(
             part for part in (system_prompt, app_prompt) if part
         )
+    if mcp_tools:
+        system_prompt = "\n\n".join((
+            system_prompt,
+            "Puoi usare i tool MCP configurati dall'utente quando sono utili. "
+            "Sono server esterni fidati: non inventare risultati e riporta gli "
+            "errori restituiti dal tool.",
+        ))
     system_prompt = "\n\n".join(
         part for part in (system_prompt, build_current_datetime_context()) if part
     )
@@ -4438,6 +4461,7 @@ def run_chat_job(job_id, messages, active_config, mode=None):
                 base_url=active_config.get("base_url", ""),
                 merge_system_prompt=merge_system_prompt,
                 stream=bool(active_config.get("stream")),
+                extra_tools=mcp_tools,
             )
             try:
                 with urlopen(request, timeout=60) as response:
@@ -4533,6 +4557,34 @@ def run_chat_job(job_id, messages, active_config, mode=None):
                         f"Exit code: {tool_result['exit_code']}\n"
                         f"{tool_result['output']}"
                     )
+                elif mcp_registry is not None and mcp_registry.has(call["name"]):
+                    try:
+                        app_result = mcp_registry.call(
+                            call["name"], arguments,
+                        )
+                        tool_result = {
+                            "exit_code": 0,
+                            "output": app_result,
+                            "executed": True,
+                        }
+                    except McpError as error:
+                        tool_result = {
+                            "exit_code": 1,
+                            "output": str(error),
+                            "executed": False,
+                        }
+                    command = (
+                        f'{call["name"]}({json.dumps(arguments, ensure_ascii=False)})'
+                    )
+                    tool_event = {
+                        "tool": call["name"],
+                        "command": command,
+                        "exit_code": tool_result["exit_code"],
+                        "output": tool_result["output"],
+                        "executed": tool_result["executed"],
+                        "automatic": False,
+                    }
+                    tool_content = tool_result["output"]
                 elif (
                     active_config.get("app_tools_enabled", True)
                     and call["name"] in {tool["name"] for tool in ALL_APP_TOOLS}
@@ -4653,6 +4705,9 @@ def run_chat_job(job_id, messages, active_config, mode=None):
             "failed",
             error=f"Errore inatteso durante la richiesta: {error}",
         )
+    finally:
+        if mcp_registry is not None:
+            mcp_registry.close()
 
 
 CHAT_JOB_STALE_SECONDS = 300
@@ -6820,6 +6875,9 @@ class AppHandler(BaseHTTPRequestHandler):
                 current_config.get(
                     "alerts_memory_percent", ALERT_MEMORY_PERCENT_DEFAULT
                 ),
+            ),
+            mcp_servers=data.get(
+                "mcp_servers", current_config.get("mcp_servers", [])
             ),
         )
         with config_lock:
