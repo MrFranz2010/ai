@@ -65,10 +65,16 @@ cronologia della shell. Usa `F2` o `/key`.
 
 ```bash
 python nokk_cli.py                 # TUI
+python nokk_cli.py --cwd /         # TUI partendo dalla radice
 python nokk_cli.py --plain         # terminale a righe
 python nokk_cli.py "domanda"       # one-shot
 python nokk_cli.py --exec "git status"
 ```
+
+La cartella indicata con `--cwd` è solo il punto di partenza: i comandi locali
+girano con i permessi del tuo utente e possono leggere o modificare tutto il
+sistema, anche con percorsi assoluti fuori da quella cartella. Nella TUI puoi
+cambiarla con `/cd /` (Linux/macOS), `/cd C:\` (Windows) o `/cd ~`.
 
 - `!comando` esegue subito un comando locale e aggiunge l'output al contesto.
 - Con l'agente attivo, se NOKK propone un comando nel blocco `nokk-run`, il
