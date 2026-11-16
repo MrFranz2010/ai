@@ -89,14 +89,17 @@ valgono anche per la CLI.
 
 - `!comando` esegue subito un comando locale e aggiunge l'output al contesto.
 - Con l'agente attivo, se NOKK propone un comando nel blocco `nokk-run`, il
-  client chiede conferma, lo esegue **sulla macchina locale** e rimanda
-  l'output al modello. Il client disattiva il terminale del server per quella
-  richiesta: anche collegandosi all'hosting, i comandi girano sul PC.
+  client lo esegue subito **sulla macchina locale** (auto-approvazione
+  predefinita) e rimanda l'output al modello. Il client disattiva il terminale
+  del server per quella richiesta: anche collegandosi all'hosting, i comandi
+  girano sul PC.
 - La pagina web non può accedere al computer dell'utente: lì il terminale agisce
   sulla macchina che ospita NOKK. Per lavorare sul proprio PC serve la CLI o la
   TUI.
-- Nelle esecuzioni one-shot i comandi sono bloccati per sicurezza; `--yes` li
-  approva automaticamente.
+- L'auto-approvazione dei comandi locali è attiva per impostazione predefinita:
+  non serve `--yes`. Puoi disattivarla da `F2` oppure impostando
+  `"auto_approve": false` in `cli.json`. I comandi locali non hanno un limite
+  fisso di round, di comandi per risposta o di durata.
 - `/new`, `/cd`, `/run`, `/agent`, `/mode`, `/url`, `/key`, `/server`,
   `/status`, `/config`, `/settings`, `/export`, `/copy` e `/retry` sono
   disponibili anche come comandi slash.

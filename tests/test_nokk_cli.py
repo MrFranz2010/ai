@@ -192,6 +192,9 @@ class ConfigTests(unittest.TestCase):
             config = nokk_cli.read_config(Path(directory) / "missing.json")
             self.assertEqual(config.base_url, nokk_cli.DEFAULT_BASE_URL)
             self.assertEqual(config.api_key, "")
+            self.assertTrue(config.auto_approve)
+            self.assertEqual(config.max_rounds, 0)
+            self.assertIsNone(nokk_cli.LOCAL_TIMEOUT)
 
 
 class ClientTests(unittest.TestCase):

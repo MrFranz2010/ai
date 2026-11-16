@@ -50,7 +50,6 @@ from nokk_cli import (
     DEFAULT_BASE_URL,
     JOB_TIMEOUT,
     MAX_AGENT_ROUNDS,
-    MAX_COMMANDS_PER_REPLY,
     POLL_INTERVAL,
     CliError,
     Config,
@@ -611,7 +610,7 @@ class SettingsScreen(ModalScreen[dict | None]):
                 compact=True,
                 id="settings-timeout",
             )
-            yield Label("Round massimi dell'agente (1–20)")
+            yield Label("Round massimi dell'agente (0 = illimitato)")
             yield Input(
                 value=str(self.options.get("max_rounds") or MAX_AGENT_ROUNDS),
                 type="integer",
@@ -709,7 +708,7 @@ class SettingsScreen(ModalScreen[dict | None]):
                 "#settings-timeout", "Timeout", 10, 3600,
             ),
             "max_rounds": self._int_setting(
-                "#settings-rounds", "Round dell'agente", 1, 20,
+                "#settings-rounds", "Round dell'agente", 0, 20,
             ),
             "auto_approve": self.query_one("#settings-auto-approve", Switch).value,
             "stream": self.query_one("#settings-stream", Switch).value,
@@ -1610,7 +1609,8 @@ class NokkTuiApp(App):
         chat.messages.append({"role": "user", "content": text})
         self.set_busy(True, "NOKK sta pensando…")
         try:
-            for round_number in range(self.max_rounds + 1):
+            round_number = 0
+            while True:
                 job = await self.run_job(self.wire_messages(file_context))
                 reply = job.get("reply")
                 reply = reply.strip() if isinstance(reply, str) else ""
@@ -1622,11 +1622,11 @@ class NokkTuiApp(App):
                         self.bell()
                     self.set_busy(False, "pronto")
                     return
-                if round_number >= self.max_rounds:
+                if self.max_rounds and round_number >= self.max_rounds:
                     self.write_system("Limite di comandi locali raggiunto.")
                     self.set_busy(False, "pronto")
                     return
-                for command in commands[:MAX_COMMANDS_PER_REPLY]:
+                for command in commands:
                     approved = self.auto_yes or await self.confirm_local(command)
                     if not approved:
                         self.write_system("Comando locale rifiutato.")
@@ -1642,6 +1642,7 @@ class NokkTuiApp(App):
                         "content": self.result_context(result),
                         "hidden": True,
                     })
+                round_number += 1
                 self.set_busy(True, "NOKK sta pensando…")
         except CliError as error:
             self.write_error(error)
@@ -2041,7 +2042,8 @@ class NokkTuiApp(App):
             f"agente: {'on' if self.agent else 'off'}\n"
             f"cwd: {self.cwd}\n"
             f"cartella iniziale: {self.initial_cwd or '—'}\n"
-            f"timeout: {self.job_timeout}s · round agente: {self.max_rounds}\n"
+            f"timeout: {self.job_timeout}s · round agente: "
+            f"{self.max_rounds if self.max_rounds else 'illimitati'}\n"
             f"auto-approva: {'on' if self.auto_yes else 'off'} · streaming: {'on' if self.stream else 'off'}\n"
             f"sessioni salvate: {'on' if self.save_sessions_enabled else 'off'} · campanello: {'on' if self.bell_on_finish else 'off'}\n"
             f"config: {self.config_path}"
