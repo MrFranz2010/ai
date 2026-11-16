@@ -2996,6 +2996,10 @@ google_oauth_states = {}
 google_access_token_cache = {"token": None, "expires_at": 0.0}
 chat_jobs = {}
 chat_jobs_lock = threading.Lock()
+MAX_ACTIVE_CHAT_JOBS = 20
+MAX_STORED_CHAT_JOBS = 200
+CHAT_JOB_RETENTION_SECONDS = 3600
+TERMINAL_JOB_STATUSES = {"complete", "failed", "cancelled"}
 
 
 TOOL_LIMIT_REPLY = (
@@ -3916,6 +3920,45 @@ def execute_terminal_command(command, workspace, automatic=False):
     if len(output) > MAX_COMMAND_OUTPUT:
         output = f"{output[:MAX_COMMAND_OUTPUT]}\n… output troncato."
     return {"exit_code": result.returncode, "output": output}
+
+
+def _prune_chat_jobs_locked(now=None):
+    """Rimuove le attività concluse e segna quelle rimaste bloccate."""
+    now = time.time() if now is None else now
+    for job in chat_jobs.values():
+        if (
+            job.get("status") not in TERMINAL_JOB_STATUSES
+            and now - job.get("updated_at", now) > CHAT_JOB_STALE_SECONDS
+        ):
+            job["status"] = "failed"
+            job["error"] = "Attività interrotta senza risposta. Riprova."
+            job["updated_at"] = now
+    expired = [
+        key for key, job in chat_jobs.items()
+        if job.get("status") in TERMINAL_JOB_STATUSES
+        and now - job.get("updated_at", now) > CHAT_JOB_RETENTION_SECONDS
+    ]
+    for key in expired:
+        del chat_jobs[key]
+    if len(chat_jobs) > MAX_STORED_CHAT_JOBS:
+        finished = sorted(
+            (
+                (job.get("updated_at", 0), key)
+                for key, job in chat_jobs.items()
+                if job.get("status") in TERMINAL_JOB_STATUSES
+            )
+        )
+        for _, key in finished[: len(chat_jobs) - MAX_STORED_CHAT_JOBS]:
+            del chat_jobs[key]
+
+
+def _active_chat_job_count_locked(now=None):
+    now = time.time() if now is None else now
+    return sum(
+        1 for job in chat_jobs.values()
+        if job.get("status") not in TERMINAL_JOB_STATUSES
+        and now - job.get("updated_at", now) <= CHAT_JOB_STALE_SECONDS
+    )
 
 
 def _finish_job(job_id, status, **updates):
@@ -7054,14 +7097,8 @@ class AppHandler(BaseHTTPRequestHandler):
             )
         job_id = uuid.uuid4().hex
         with chat_jobs_lock:
-            expired = [
-                key for key, job in chat_jobs.items()
-                if time.time() - job["updated_at"] > 3600
-                and job["status"] in {"complete", "failed"}
-            ]
-            for key in expired:
-                del chat_jobs[key]
-            if len(chat_jobs) >= 20:
+            _prune_chat_jobs_locked()
+            if _active_chat_job_count_locked() >= MAX_ACTIVE_CHAT_JOBS:
                 self._send_json(503, {
                     "error": "Troppe attività in corso. Riprova tra poco.",
                 })

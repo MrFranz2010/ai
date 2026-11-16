@@ -131,5 +131,51 @@ class StaleJobEndpointTests(unittest.TestCase):
         self.assertEqual(payload["status"], "running")
 
 
+class ChatJobAccountingTests(unittest.TestCase):
+    def setUp(self):
+        with app.chat_jobs_lock:
+            app.chat_jobs.clear()
+
+    def tearDown(self):
+        with app.chat_jobs_lock:
+            app.chat_jobs.clear()
+
+    def add_job(self, status, age=0):
+        with app.chat_jobs_lock:
+            app.chat_jobs[uuid.uuid4().hex] = {
+                "status": status,
+                "updated_at": time.time() - age,
+            }
+
+    def test_completed_jobs_do_not_block_new_requests(self):
+        for _ in range(30):
+            self.add_job("complete")
+        with app.chat_jobs_lock:
+            app._prune_chat_jobs_locked()
+            self.assertEqual(app._active_chat_job_count_locked(), 0)
+
+    def test_only_fresh_running_jobs_are_counted(self):
+        for _ in range(4):
+            self.add_job("running", age=1)
+        self.add_job("awaiting_approval", age=1)
+        with app.chat_jobs_lock:
+            self.assertEqual(app._active_chat_job_count_locked(), 5)
+
+    def test_stale_running_jobs_are_closed_and_ignored(self):
+        self.add_job("running", age=app.CHAT_JOB_STALE_SECONDS + 10)
+        with app.chat_jobs_lock:
+            app._prune_chat_jobs_locked()
+            job = next(iter(app.chat_jobs.values()))
+            self.assertEqual(job["status"], "failed")
+            self.assertEqual(app._active_chat_job_count_locked(), 0)
+
+    def test_finished_jobs_are_capped(self):
+        for _ in range(app.MAX_STORED_CHAT_JOBS + 10):
+            self.add_job("failed")
+        with app.chat_jobs_lock:
+            app._prune_chat_jobs_locked()
+            self.assertEqual(len(app.chat_jobs), app.MAX_STORED_CHAT_JOBS)
+
+
 if __name__ == "__main__":
     unittest.main()
