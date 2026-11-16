@@ -72,6 +72,20 @@ MAX_SESSIONS = 30
 MAX_SESSION_MESSAGES = 400
 
 
+class ChatListView(ListView):
+    """ListView che ignora i click su righe rimosse da un refresh concorrente."""
+
+    def _on_list_item_child_clicked(self, event) -> None:
+        event.stop()
+        self.focus()
+        try:
+            index = self._nodes.index(event.item)
+        except ValueError:
+            return
+        self.index = index
+        self.post_message(self.Selected(self, event.item, index))
+
+
 @dataclass
 class ChatSession:
     title: str
@@ -972,7 +986,7 @@ class NokkTuiApp(App):
                 yield Static("AGENTI", classes="section-title")
                 yield Static(id="agents")
                 yield Static("CHAT", classes="section-title")
-                yield ListView(id="chats")
+                yield ChatListView(id="chats")
                 yield Static("RISORSE", classes="section-title")
                 yield Static(id="resources")
                 yield Static("WIDGET", classes="section-title")
@@ -1443,7 +1457,6 @@ class NokkTuiApp(App):
         self.active_index = index
         self.messages = self.active_chat.messages
         self.render_chat()
-        self.refresh_chat_list()
         self.refresh_widgets()
         self.query_one("#prompt", Input).focus()
         self._persist_sessions()

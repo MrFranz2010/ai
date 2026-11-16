@@ -3,6 +3,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import nokk_cli
 from nokk_cli import Config
@@ -126,6 +127,20 @@ class NokkTuiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("CPU", app.query_one("#resources").render().plain)
                 self.assertIn("Chat", app.query_one("#widgets").render().plain)
                 self.assertIn("online", app.query_one("#statusline").render().plain)
+
+    async def test_clicking_an_item_removed_by_refresh_is_ignored(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cli.json"
+            app = NokkTuiApp(Config(), path, client=FakeClient())
+            async with app.run_test(size=(120, 44)) as pilot:
+                await pilot.pause()
+                listview = app.query_one("#chats")
+                item = next(iter(listview.children))
+                listview.clear()
+                await pilot.pause()
+                listview._on_list_item_child_clicked(
+                    SimpleNamespace(item=item, stop=lambda: None)
+                )
 
     async def test_chat_reply_is_rendered(self):
         with tempfile.TemporaryDirectory() as directory:
