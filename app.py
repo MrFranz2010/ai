@@ -3613,6 +3613,7 @@ def transcribe_audio(active_config, audio, mime_type):
 def build_provider_request(
     provider, model, api_key, messages, system_prompt=None, enable_tools=False,
     enable_app_tools=False, base_url=None, merge_system_prompt=False,
+    stream=False,
 ):
     tool_definitions = []
     if enable_tools:
@@ -3719,6 +3720,8 @@ def build_provider_request(
                     0, {"role": "system", "content": system_prompt}
                 )
         payload = {"model": model, "messages": openai_messages}
+        if stream:
+            payload["stream"] = True
         if tool_definitions:
             payload["tools"] = [
                 {"type": "function", "function": tool}
@@ -3807,6 +3810,8 @@ def build_provider_request(
             "model": OPENROUTER_FREE_MODEL,
             "messages": openrouter_messages,
         }
+        if stream:
+            payload["stream"] = True
         if tool_definitions:
             payload["tools"] = [
                 {"type": "function", "function": tool}
@@ -3832,6 +3837,8 @@ def build_provider_request(
                     0, {"role": "system", "content": system_prompt}
                 )
         payload = {"model": model, "messages": compatible_messages}
+        if stream:
+            payload["stream"] = True
         if tool_definitions:
             payload["tools"] = [
                 {"type": "function", "function": tool}
@@ -3847,6 +3854,102 @@ def build_provider_request(
         headers=headers,
         method="POST",
     )
+
+
+def parse_stream_response(provider, response, job_id):
+    """Read an OpenAI-compatible SSE stream and expose partial text.
+
+    Returns the same ``(assistant_message, tool_calls)`` pair as
+    ``parse_tool_response``, or ``None`` when the job was cancelled.
+    """
+    if provider not in OPENAI_COMPATIBLE_PROVIDERS:
+        raise ValueError("Streaming non supportato per questo provider.")
+    content_parts = []
+    pending_calls = {}
+    for raw_line in response:
+        if _job_cancelled(job_id):
+            return None
+        if isinstance(raw_line, bytes):
+            line = raw_line.decode("utf-8", errors="replace")
+        else:
+            line = str(raw_line)
+        line = line.strip()
+        if not line or line.startswith(":") or line.startswith("event:"):
+            continue
+        if line.startswith("data:"):
+            data = line[len("data:"):].strip()
+        else:
+            data = line
+        if not data or data == "[DONE]":
+            continue
+        try:
+            event = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+        if "error" in event:
+            message = event["error"]
+            if isinstance(message, dict):
+                message = message.get("message") or str(message)
+            raise ValueError(str(message))
+        choices = event.get("choices") or []
+        if not choices:
+            continue
+        choice = choices[0] if isinstance(choices[0], dict) else {}
+        delta = choice.get("delta") or {}
+        text = delta.get("content")
+        if isinstance(text, str) and text:
+            content_parts.append(text)
+            _set_job_partial(job_id, "".join(content_parts))
+        for call in delta.get("tool_calls") or []:
+            if not isinstance(call, dict):
+                continue
+            index = call.get("index")
+            if not isinstance(index, int):
+                index = 0
+            entry = pending_calls.setdefault(
+                index,
+                {"id": "", "name": "", "arguments": ""},
+            )
+            if call.get("id"):
+                entry["id"] = str(call["id"])
+            function = call.get("function") or {}
+            if function.get("name"):
+                entry["name"] = str(function["name"])
+            if function.get("arguments"):
+                entry["arguments"] += str(function["arguments"])
+    normalized_calls = []
+    raw_calls = []
+    for index in sorted(pending_calls):
+        entry = pending_calls[index]
+        if not entry["name"]:
+            continue
+        try:
+            arguments = json.loads(entry["arguments"] or "{}")
+        except json.JSONDecodeError:
+            raise ValueError("Argomenti dello strumento non validi.") from None
+        if not isinstance(arguments, dict):
+            raise ValueError("Argomenti dello strumento non validi.")
+        call_id = entry["id"] or uuid.uuid4().hex
+        normalized_calls.append({
+            "id": call_id,
+            "name": entry["name"],
+            "arguments": arguments,
+        })
+        raw_calls.append({
+            "id": call_id,
+            "type": "function",
+            "function": {
+                "name": entry["name"],
+                "arguments": json.dumps(arguments),
+            },
+        })
+    assistant_message = {
+        "role": "assistant",
+        "content": "".join(content_parts),
+    }
+    if raw_calls:
+        assistant_message["tool_calls"] = raw_calls
+    return assistant_message, normalized_calls
 
 
 def extract_reply(provider, response):
@@ -4142,6 +4245,14 @@ def _job_cancelled(job_id):
         return bool(chat_jobs.get(job_id, {}).get("cancelled"))
 
 
+def _set_job_partial(job_id, text):
+    with chat_jobs_lock:
+        job = chat_jobs.get(job_id)
+        if job and not job.get("cancelled"):
+            job["partial_reply"] = text[-100_000:]
+            job["updated_at"] = time.time()
+
+
 def _wait_for_approval(job_id, command):
     action_id = uuid.uuid4().hex
     event = threading.Event()
@@ -4286,10 +4397,22 @@ def run_chat_job(job_id, messages, active_config, mode=None):
                 enable_app_tools=active_config.get("app_tools_enabled", True),
                 base_url=active_config.get("base_url", ""),
                 merge_system_prompt=merge_system_prompt,
+                stream=bool(active_config.get("stream")),
             )
             try:
                 with urlopen(request, timeout=60) as response:
-                    result = json.loads(response.read().decode("utf-8"))
+                    if active_config.get("stream"):
+                        parsed = parse_stream_response(
+                            active_config["provider"], response, job_id,
+                        )
+                        if parsed is None:
+                            return
+                        assistant_message, tool_calls = parsed
+                    else:
+                        result = json.loads(response.read().decode("utf-8"))
+                        assistant_message, tool_calls = parse_tool_response(
+                            active_config["provider"], result
+                        )
             except HTTPError as error:
                 body = _read_http_body(error)
                 if (
@@ -4305,9 +4428,6 @@ def run_chat_job(job_id, messages, active_config, mode=None):
                     merge_system_prompt = True
                     continue
                 raise _replayed_http_error(error, body)
-            assistant_message, tool_calls = parse_tool_response(
-                active_config["provider"], result
-            )
             if not tool_calls:
                 reply = assistant_message["content"]
                 if not isinstance(reply, str) or not reply.strip():
@@ -6426,8 +6546,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 public_job = {
                     key: job[key]
                     for key in (
-                        "status", "action", "reply", "tool_events", "error",
-                        "details", "hint", "artifacts",
+                        "status", "action", "reply", "partial_reply",
+                        "tool_events", "error", "details", "hint", "artifacts",
                     )
                     if key in job
                 }
@@ -7001,8 +7121,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 public_job = {
                     key: job[key]
                     for key in (
-                        "status", "action", "reply", "tool_events", "error",
-                        "details", "hint", "artifacts",
+                        "status", "action", "reply", "partial_reply",
+                        "tool_events", "error", "details", "hint", "artifacts",
                     )
                     if key in job
                 }
@@ -7137,6 +7257,11 @@ class AppHandler(BaseHTTPRequestHandler):
             active_config["provider"] = requested_provider
             active_config["model"] = requested_model
             active_config["api_key"] = requested_key
+        active_config = dict(active_config)
+        active_config["stream"] = (
+            data.get("stream") is True
+            and active_config["provider"] in OPENAI_COMPATIBLE_PROVIDERS
+        )
         if not active_config["api_key"]:
             self._send_json(409, {"error": "Configura prima provider e chiave API."})
             return
