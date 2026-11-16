@@ -128,6 +128,14 @@ server fidati e limita gli argomenti alla cartella che vuoi rendere accessibile.
 Le chiamate MCP non passano dalla conferma dei comandi del terminale, quindi il
 contenuto a cui il server può accedere dipende dai suoi permessi.
 
+## Consapevolezza operativa
+
+NOKK riceve nel system prompt una descrizione del proprio stato: identità di
+assistente software, provider e modello in uso, modalità, numero di attività
+attive, terminale e strumenti disponibili. La descrizione include anche i limiti:
+NOKK non ha sensi, non percepisce file o rete senza uno strumento e non deve
+dichiarare azioni non confermate. Non vengono esposte chiavi API o altri segreti.
+
 ## Attività persistenti
 
 I metadati delle richieste vengono salvati in `jobs.json` accanto alla
