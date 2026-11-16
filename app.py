@@ -364,6 +364,15 @@ def build_self_awareness_context(
             f"{approval_label}."
         )
         capabilities.append("esecuzione di comandi nel terminale")
+    elif config.get("local_terminal"):
+        environment = (
+            "Il terminale del server è disattivato. Il client NOKK è collegato "
+            "dal computer dell'utente e può eseguire i comandi locali proposti "
+            "in blocchi nokk-run."
+        )
+        capabilities.append(
+            "esecuzione di comandi sul computer locale tramite il client NOKK"
+        )
     else:
         environment = "Il terminale non è disponibile in questa sessione."
     if mcp_tools:
@@ -7426,6 +7435,11 @@ class AppHandler(BaseHTTPRequestHandler):
             data.get("stream") is True
             and active_config["provider"] in OPENAI_COMPATIBLE_PROVIDERS
         )
+        if data.get("terminal_enabled") is False:
+            active_config["terminal_enabled"] = False
+        if data.get("local_terminal") is True:
+            active_config["terminal_enabled"] = False
+            active_config["local_terminal"] = True
         if not active_config["api_key"]:
             self._send_json(409, {"error": "Configura prima provider e chiave API."})
             return

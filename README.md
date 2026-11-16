@@ -106,6 +106,12 @@ a Internet. `/api/config` non restituisce mai la chiave al browser.
 Il token Telegram viene salvato separatamente in `telegram.json`, accanto alla
 configurazione, con le stesse protezioni locali.
 
+Il terminale della pagina web agisce sulla macchina che ospita NOKK. Un client
+che esegue i comandi sul proprio computer può inviare `terminal_enabled: false`
+e `local_terminal: true` nella richiesta di chat: il server toglie il tool
+terminale e lascia che sia il client a proporre ed eseguire i comandi locali.
+La configurazione salvata del server non viene modificata.
+
 ## Consapevolezza operativa
 
 NOKK riceve nel system prompt una descrizione del proprio stato: identità di

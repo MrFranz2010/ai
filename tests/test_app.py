@@ -364,10 +364,15 @@ class AppRouteTests(unittest.TestCase):
         self.assertEqual(weather["city"], "Roma")
         self.assertEqual(weather["temperature"], 18)
 
-    def run_chat(self, messages, approve=True, expect_failure=False, stream=False):
+    def run_chat(
+        self, messages, approve=True, expect_failure=False, stream=False,
+        extra_payload=None,
+    ):
         payload = {"messages": messages}
         if stream:
             payload["stream"] = True
+        if extra_payload:
+            payload.update(extra_payload)
         response = self.request_json("/api/chat", payload)
         job_id = response["job_id"]
         deadline = time.monotonic() + 5
@@ -1557,6 +1562,28 @@ class AppRouteTests(unittest.TestCase):
         self.assertTrue(approved)
         self.assertEqual(job["reply"], "Fatto.")
         self.assertEqual(job["tool_events"][0]["command"], "pwd")
+
+    def test_local_client_disables_the_server_terminal(self):
+        self.request_json("/api/config", {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "api_key": "test-secret",
+            "terminal_enabled": True,
+            "approval_mode": "manual",
+            "workspace": str(Path(app.APP_DIR).resolve()),
+        })
+        with patch("app.urlopen", return_value=FakeResponse()) as provider_call:
+            job = self.run_chat(
+                [{"role": "user", "content": "sistema il test"}],
+                extra_payload={"terminal_enabled": False, "local_terminal": True},
+            )
+        self.assertEqual(job["reply"], "Ciao dal modello.")
+        payload = json.loads(provider_call.call_args.args[0].data)
+        self.assertIn("computer locale", payload["messages"][0]["content"])
+        tool_names = {
+            tool["function"]["name"] for tool in payload.get("tools", [])
+        }
+        self.assertNotIn("run_terminal_command", tool_names)
 
     def test_chat_uses_a_configured_mcp_tool(self):
         script = (
