@@ -287,6 +287,22 @@ class ChatJobAccountingTests(unittest.TestCase):
         self.assertEqual(restored["duration_seconds"], 8.0)
         self.assertEqual(restored["attempts"], 2)
 
+    def test_internal_telegram_and_workflow_jobs_are_not_persisted(self):
+        job_id = uuid.uuid4().hex
+        with app.chat_jobs_lock:
+            app.chat_jobs[job_id] = {
+                "status": "running",
+                "created_at": time.time(),
+                "updated_at": time.time(),
+                "ephemeral": True,
+            }
+            app._save_chat_jobs_locked()
+        self.assertNotIn(job_id, {
+            item.get("id") for item in app.load_chat_jobs()
+        })
+        listed = app.list_chat_jobs()
+        self.assertNotIn(job_id, {item["id"] for item in listed})
+
     def test_an_active_job_is_closed_after_a_restart(self):
         job_id = uuid.uuid4().hex
         with app.chat_jobs_lock:

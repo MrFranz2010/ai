@@ -4385,6 +4385,7 @@ def _save_chat_jobs_locked():
     try:
         save_chat_jobs([
             _job_metadata(job_id, job) for job_id, job in chat_jobs.items()
+            if not job.get("ephemeral")
         ])
     except (OSError, RuntimeError, ValueError) as error:
         print(f"Impossibile salvare le attività: {error}")
@@ -4462,6 +4463,7 @@ def list_chat_jobs(limit=50):
         _prune_chat_jobs_locked()
         jobs = [
             _job_summary(job_id, job) for job_id, job in chat_jobs.items()
+            if not job.get("ephemeral")
         ]
     jobs.sort(
         key=lambda item: item.get("created_at") or 0,
@@ -6032,6 +6034,7 @@ def _handle_telegram_update(update):
             "tool_events": [],
             "workspace": active_config["workspace"],
             "approved": None,
+            "ephemeral": True,
         }
     run_chat_job(job_id, messages, active_config)
     with chat_jobs_lock:
@@ -6283,6 +6286,7 @@ def run_scheduled_workflow(workflow):
             "tool_events": [],
             "workspace": active_config["workspace"],
             "approved": None,
+            "ephemeral": True,
         }
     try:
         run_chat_job(
