@@ -3864,6 +3864,17 @@ def build_provider_request(
     )
 
 
+def _provider_error_message(payload):
+    if not isinstance(payload, dict):
+        return "Risposta del provider non valida."
+    if "error" not in payload:
+        return None
+    message = payload["error"]
+    if isinstance(message, dict):
+        message = message.get("message") or str(message)
+    return str(message)
+
+
 def parse_stream_response(provider, response, job_id):
     """Read an OpenAI-compatible SSE stream and expose partial text.
 
@@ -3880,13 +3891,9 @@ def parse_stream_response(provider, response, job_id):
         return None
 
     def json_result(payload):
-        if not isinstance(payload, dict):
-            raise ValueError("Risposta del provider non valida.")
-        if "error" in payload:
-            message = payload["error"]
-            if isinstance(message, dict):
-                message = message.get("message") or str(message)
-            raise ValueError(str(message))
+        error = _provider_error_message(payload)
+        if error:
+            raise ValueError(error)
         return parse_tool_response(provider, payload)
 
     if not hasattr(response, "__iter__"):
@@ -3929,11 +3936,9 @@ def parse_stream_response(provider, response, job_id):
             event = json.loads(data)
         except json.JSONDecodeError:
             continue
-        if "error" in event:
-            message = event["error"]
-            if isinstance(message, dict):
-                message = message.get("message") or str(message)
-            raise ValueError(str(message))
+        error = _provider_error_message(event)
+        if error:
+            raise ValueError(error)
         choices = event.get("choices") or []
         if not choices:
             continue
@@ -4342,13 +4347,14 @@ def _wait_for_approval(job_id, command):
 def run_chat_job(job_id, messages, active_config, mode=None):
     tool_events = []
     mcp_registry = None
-    try:
-        mcp_registry = load_mcp_registry(
-            active_config.get("mcp_servers") or []
-        )
-    except (McpError, ValueError) as error:
-        print(f"MCP non disponibile: {error}")
-    mcp_tools = mcp_registry.definitions() if mcp_registry else []
+    mcp_tools = []
+    if active_config.get("mcp_servers"):
+        try:
+            mcp_registry = load_mcp_registry(active_config["mcp_servers"])
+        except (McpError, ValueError) as error:
+            print(f"MCP non disponibile: {error}")
+        if mcp_registry:
+            mcp_tools = mcp_registry.definitions()
     system_prompt = "\n\n".join(
         prompt for prompt in (
             DEFAULT_SYSTEM_PROMPT,
