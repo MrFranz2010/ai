@@ -65,8 +65,9 @@ eseguire subito un comando locale e `/help` per gli altri comandi (`/cd`,
 `/run`, `/agent`, `/mode`, `/url`, `/key`, `/server`, `/status`, `/export`,
 `/copy`, `/retry`, `/sessions`, `/delete`, `/resume`, `/rename`, `/model`, `/diff`,
 `/git`, `/cancel`). Con l'agente attivo,
-se NOKK propone un comando in un blocco `nokk-run`, il client chiede conferma,
-lo esegue **sulla macchina locale** e restituisce l'output al modello. Con
+se NOKK propone un comando in un blocco `nokk-run`, il client lo esegue subito
+**sulla macchina locale** (auto-approvazione predefinita) e restituisce l'output
+al modello. Con
 l'agente attivo il client disattiva il terminale del server per quella
 richiesta: anche collegandosi all'hosting, i comandi vengono eseguiti sul PC,
 non sul server. La pagina web invece non può accedere al computer dell'utente:
@@ -101,8 +102,10 @@ python nokk_cli.py --cwd "$HOME" "controlla perché il test fallisce"
 python nokk_cli.py --cwd / --exec "git status"
 ```
 
-Nelle esecuzioni one-shot i comandi sono bloccati per sicurezza: aggiungi `--yes`
-per approvarli automaticamente.
+L'auto-approvazione dei comandi locali è attiva per impostazione predefinita:
+non serve `--yes`. Puoi disattivarla da `F2` oppure impostando
+`"auto_approve": false` in `cli.json`. I comandi locali non hanno un limite
+fisso di round, di comandi per risposta o di durata.
 
 ### Consapevolezza operativa
 

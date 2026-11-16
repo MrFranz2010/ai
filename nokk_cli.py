@@ -37,14 +37,13 @@ DEFAULT_TIMEOUT = 30
 JOB_TIMEOUT = 300
 MIN_JOB_TIMEOUT = 10
 MAX_JOB_TIMEOUT = 3600
-MIN_AGENT_ROUNDS = 1
+MIN_AGENT_ROUNDS = 0
 MAX_AGENT_ROUNDS_LIMIT = 20
-LOCAL_TIMEOUT = 120
+LOCAL_TIMEOUT = None
 POLL_INTERVAL = 1.5
 MAX_OUTPUT = 20_000
 MAX_CONTEXT_OUTPUT = 10_000
-MAX_AGENT_ROUNDS = 6
-MAX_COMMANDS_PER_REPLY = 3
+MAX_AGENT_ROUNDS = 0
 
 RUN_BLOCK_RE = re.compile(
     r"```nokk-run[^\n]*\n(.*?)(?:\n?```|</parameter>)",
@@ -116,7 +115,7 @@ class Config:
     hosting_api_key: str = ""
     initial_cwd: str = ""
     job_timeout: int = JOB_TIMEOUT
-    auto_approve: bool = False
+    auto_approve: bool = True
     stream: bool = True
     save_sessions: bool = True
     max_rounds: int = MAX_AGENT_ROUNDS
@@ -270,7 +269,7 @@ def read_config(path):
         saved.get("job_timeout"), JOB_TIMEOUT, MIN_JOB_TIMEOUT, MAX_JOB_TIMEOUT,
     )
     for name, default in (
-        ("auto_approve", False),
+        ("auto_approve", True),
         ("stream", True),
         ("save_sessions", True),
         ("bell_on_finish", False),
@@ -726,7 +725,7 @@ def _run_sudo_with_tty(command, cwd, timeout, password):
         except OSError:
             pass
         chunks = []
-        deadline = time.monotonic() + timeout
+        deadline = None if timeout is None else time.monotonic() + timeout
         timed_out = False
         while True:
             if process.poll() is not None:
@@ -742,12 +741,13 @@ def _run_sudo_with_tty(command, cwd, timeout, password):
                         break
                     chunks.append(data)
                 break
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
                 timed_out = True
                 process.kill()
                 break
-            ready, _, _ = select.select([master], [], [], min(0.1, remaining))
+            wait = 0.1 if remaining is None else min(0.1, remaining)
+            ready, _, _ = select.select([master], [], [], wait)
             if not ready:
                 continue
             try:
@@ -789,7 +789,7 @@ def resolve_working_directory(value=None):
     return target
 
 
-def run_local(command, cwd, timeout=LOCAL_TIMEOUT, sudo_password=None):
+def run_local(command, cwd, timeout=None, sudo_password=None):
     """Esegue un comando nella directory locale dell'utente."""
     command = (command or "").strip()
     if not command:
@@ -818,7 +818,8 @@ def run_local(command, cwd, timeout=LOCAL_TIMEOUT, sudo_password=None):
         output = error.output or ""
         if isinstance(output, bytes):
             output = output.decode("utf-8", "replace")
-        output += f"\n[comando interrotto dopo {timeout} secondi]"
+        limit = f" dopo {timeout} secondi" if timeout is not None else ""
+        output += f"\n[comando interrotto{limit}]"
         return LocalResult(command, 124, output, True)
     except OSError as error:
         raise CliError(f"Non riesco a eseguire il comando: {error}") from None
@@ -832,7 +833,8 @@ def run_local(command, cwd, timeout=LOCAL_TIMEOUT, sudo_password=None):
             pass
         else:
             if timed_out:
-                tty_output += f"\n[comando interrotto dopo {timeout} secondi]"
+                limit = f" dopo {timeout} secondi" if timeout is not None else ""
+                tty_output += f"\n[comando interrotto{limit}]"
             return LocalResult(command, returncode, tty_output, timed_out)
     return LocalResult(command, completed.returncode, output)
 
@@ -1046,7 +1048,8 @@ class Session:
         conversation = list(self.messages[-38:])
         conversation.append({"role": "user", "content": self._wire_text(text)})
         try:
-            for round_number in range(self.max_rounds + 1):
+            round_number = 0
+            while True:
                 job = self._chat(conversation)
                 reply = job.get("reply")
                 reply = reply.strip() if isinstance(reply, str) else ""
@@ -1066,14 +1069,14 @@ class Session:
                     "role": "assistant",
                     "content": truncate(reply, 12_000),
                 })
-                if round_number >= self.max_rounds:
+                if self.max_rounds and round_number >= self.max_rounds:
                     self._write(self.ansi.yellow(
                         "Limite di comandi locali raggiunto: riprendi tu."
                     ))
                     self.messages = conversation[-40:]
                     return True
                 outputs = []
-                for command in commands[:MAX_COMMANDS_PER_REPLY]:
+                for command in commands:
                     self._write("")
                     self._write(
                         self.ansi.bold("Comando locale proposto:")
@@ -1100,7 +1103,7 @@ class Session:
                         12_000,
                     ),
                 })
-            return True
+                round_number += 1
         except CliError as error:
             self.error(error)
             return False

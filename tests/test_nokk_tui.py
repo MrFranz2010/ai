@@ -80,6 +80,18 @@ class AgentClient(FakeClient):
         return {"status": "complete", "reply": "Fatto."}
 
 
+class ManyCommandsAgentClient(FakeClient):
+    def __init__(self):
+        super().__init__([
+            "Eseguo.\n"
+            "```nokk-run\necho uno\n```\n"
+            "```nokk-run\necho due\n```\n"
+            "```nokk-run\necho tre\n```\n"
+            "```nokk-run\necho quattro\n```",
+            "Fatto.",
+        ])
+
+
 class TaggedAgentClient(FakeClient):
     def job(self, job_id):
         self.jobs += 1
@@ -243,6 +255,29 @@ class NokkTuiTests(unittest.IsolatedAsyncioTestCase):
                     for message in app.active_chat.messages
                 ))
 
+    async def test_agent_runs_every_command_in_a_reply(self):
+        with tempfile.TemporaryDirectory() as directory:
+            calls = []
+
+            def runner(command, cwd, sudo_password=None):
+                calls.append(command)
+                return nokk_cli.LocalResult(command, 0, "ok")
+
+            app = NokkTuiApp(
+                Config(),
+                Path(directory) / "cli.json",
+                client=ManyCommandsAgentClient(),
+                auto_yes=True,
+                cwd=directory,
+                runner=runner,
+            )
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                app.query_one("#prompt").value = "esegui tutto"
+                await pilot.press("enter")
+                self.assertTrue(await wait_until(pilot, lambda: not app.busy))
+        self.assertEqual(calls, ["echo uno", "echo due", "echo tre", "echo quattro"])
+
     async def test_agent_runs_a_block_closed_by_parameter_tag(self):
         with tempfile.TemporaryDirectory() as directory:
             calls = []
@@ -302,7 +337,7 @@ class NokkTuiTests(unittest.IsolatedAsyncioTestCase):
         client = ServerClient()
         with tempfile.TemporaryDirectory() as directory:
             app = NokkTuiApp(
-                Config(),
+                Config(auto_approve=False),
                 Path(directory) / "cli.json",
                 client=client,
                 auto_yes=False,
