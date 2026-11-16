@@ -3766,7 +3766,14 @@ def _finish_job(job_id, status, **updates):
     with chat_jobs_lock:
         job = chat_jobs.get(job_id)
         if job:
+            if job.get("cancelled") and status != "cancelled":
+                return
             job.update(status=status, updated_at=time.time(), **updates)
+
+
+def _job_cancelled(job_id):
+    with chat_jobs_lock:
+        return bool(chat_jobs.get(job_id, {}).get("cancelled"))
 
 
 def _wait_for_approval(job_id, command):
@@ -3885,6 +3892,8 @@ def run_chat_job(job_id, messages, active_config, mode=None):
         round_index = 0
         merge_system_prompt = False
         while round_index <= MAX_TOOL_ROUNDS:
+            if _job_cancelled(job_id):
+                return
             request = build_provider_request(
                 active_config["provider"],
                 active_config["model"],
@@ -6069,12 +6078,15 @@ class AppHandler(BaseHTTPRequestHandler):
         approval_match = re.fullmatch(
             r"/api/jobs/([a-f0-9]{32})/approval", self.path
         )
+        cancel_match = re.fullmatch(
+            r"/api/jobs/([a-f0-9]{32})/cancel", self.path
+        )
         if self.path not in {
             "/api/config", "/api/chat", "/api/workflows", "/api/extract",
             "/api/planner", "/api/reminders", "/api/telegram",
             "/api/google-calendar", "/api/api-keys", "/api/transcribe",
             "/api/hub",
-        } and not approval_match:
+        } and not approval_match and not cancel_match:
             self._send_json(404, {"error": "Endpoint non trovato."})
             return
         try:
@@ -6103,6 +6115,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 self._save_google_calendar(data)
             elif self.path == "/api/api-keys":
                 self._save_api_keys(data)
+            elif cancel_match:
+                self._cancel_job(cancel_match.group(1))
             else:
                 self._approve_action(approval_match.group(1), data)
         except ValueError as error:
@@ -6611,16 +6625,24 @@ class AppHandler(BaseHTTPRequestHandler):
             if not isinstance(data, dict):
                 raise ValueError("Il corpo della richiesta deve essere un oggetto JSON.")
             approval_job = None
+            approval_job = None
+            cancel_job = None
             if path.startswith("/api/v1/jobs/") and path.endswith("/approval"):
                 candidate = path[len("/api/v1/jobs/"):-len("/approval")]
                 if re.fullmatch(r"[a-f0-9]{32}", candidate):
                     approval_job = candidate
+            if path.startswith("/api/v1/jobs/") and path.endswith("/cancel"):
+                candidate = path[len("/api/v1/jobs/"):-len("/cancel")]
+                if re.fullmatch(r"[a-f0-9]{32}", candidate):
+                    cancel_job = candidate
             if path == "/api/v1/chat":
                 self._start_chat(data)
             elif path == "/api/v1/reminders":
                 self._save_reminder(data)
             elif approval_job:
                 self._approve_action(approval_job, data)
+            elif cancel_job:
+                self._cancel_job(cancel_job)
             else:
                 self._send_json(404, {"error": "Endpoint non trovato."})
         except ValueError as error:
@@ -6686,6 +6708,40 @@ class AppHandler(BaseHTTPRequestHandler):
             raise ValueError("Modalità di risposta non supportata.")
         with config_lock:
             active_config = config.copy()
+        requested_provider = data.get("provider")
+        requested_model = data.get("model")
+        if requested_provider is not None or requested_model is not None:
+            if (
+                not isinstance(requested_provider, str)
+                or not isinstance(requested_model, str)
+                or not requested_provider.strip()
+                or not requested_model.strip()
+            ):
+                raise ValueError("Provider e modello devono essere indicati insieme.")
+            requested_provider = requested_provider.strip()
+            requested_model = requested_model.strip()
+            if requested_provider not in PROVIDERS:
+                raise ValueError("Provider non supportato.")
+            if not MODEL_PATTERN.fullmatch(requested_model):
+                raise ValueError("Nome modello non valido.")
+            if (
+                requested_provider == "openrouter"
+                and requested_model != OPENROUTER_FREE_MODEL
+            ):
+                raise ValueError(
+                    "OpenRouter usa il router gratuito automatico; "
+                    "il modello deve essere openrouter/free."
+                )
+            api_keys = active_config.get("api_keys") or {}
+            requested_key = api_keys.get(requested_provider)
+            if not requested_key:
+                raise ValueError("Nessuna chiave salvata per il provider richiesto.")
+            active_config = dict(active_config)
+            if requested_provider != active_config["provider"]:
+                active_config["base_url"] = ""
+            active_config["provider"] = requested_provider
+            active_config["model"] = requested_model
+            active_config["api_key"] = requested_key
         if not active_config["api_key"]:
             self._send_json(409, {"error": "Configura prima provider e chiave API."})
             return
@@ -6785,6 +6841,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 "status": "running",
                 "updated_at": time.time(),
                 "workspace": active_config["workspace"],
+                "cancelled": False,
             }
         worker = threading.Thread(
             target=_run_chat_job_safely,
@@ -6818,6 +6875,24 @@ class AppHandler(BaseHTTPRequestHandler):
             active_config = dict(config)
         text = transcribe_audio(active_config, audio, base_type)
         self._send_json(200, {"text": text})
+
+    def _cancel_job(self, job_id):
+        with chat_jobs_lock:
+            job = chat_jobs.get(job_id)
+            if job is None:
+                self._send_json(404, {"error": "Attività non trovata o scaduta."})
+                return
+            if job.get("status") in {"complete", "failed", "cancelled"}:
+                self._send_json(409, {"error": "Attività già conclusa."})
+                return
+            job["cancelled"] = True
+            job["status"] = "cancelled"
+            job["updated_at"] = time.time()
+            job["approved"] = False
+            event = job.get("approval_event")
+            if event is not None:
+                event.set()
+        self._send_json(200, {"ok": True, "status": "cancelled"})
 
     def _approve_action(self, job_id, data):
         action_id = data.get("action_id")
