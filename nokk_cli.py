@@ -433,10 +433,14 @@ class NokkClient:
             return self._request("GET", "/api/v1/health")
         return self._request("GET", "/api/config")
 
-    def start_chat(self, messages, mode=None):
+    def start_chat(self, messages, mode=None, provider=None, model=None):
         payload = {"messages": messages}
         if mode:
             payload["mode"] = mode
+        if provider:
+            payload["provider"] = provider
+        if model:
+            payload["model"] = model
         path = "/api/v1/chat" if self.versioned else "/api/chat"
         data = self._request("POST", path, payload)
         job_id = data.get("job_id")
@@ -468,6 +472,15 @@ class NokkClient:
             "action_id": action_id,
             "approved": bool(approved),
         })
+
+    def cancel(self, job_id):
+        if not isinstance(job_id, str) or not JOB_ID_RE.fullmatch(job_id):
+            raise CliError("Identificativo di attività non valido.")
+        path = (
+            f"/api/v1/jobs/{job_id}/cancel" if self.versioned
+            else f"/api/jobs/{job_id}/cancel"
+        )
+        return self._request("POST", path, {})
 
 
 def run_local(command, cwd, timeout=LOCAL_TIMEOUT):

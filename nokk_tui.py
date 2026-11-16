@@ -9,7 +9,9 @@ qui c'è solo la UI, con la chat a sinistra e la barra laterale a destra.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -70,6 +72,132 @@ class ChatSession:
     title: str
     messages: list[dict[str, Any]] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
+
+
+def load_sessions(path):
+    """Load the small session store used by the TUI."""
+    try:
+        saved = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return []
+    items = saved.get("chats") if isinstance(saved, dict) else saved
+    if not isinstance(items, list):
+        return []
+    sessions = []
+    for item in items[:30]:
+        if not isinstance(item, dict):
+            continue
+        title = item.get("title")
+        if not isinstance(title, str) or not title.strip():
+            title = "Chat"
+        messages = []
+        raw_messages = item.get("messages")
+        if isinstance(raw_messages, list):
+            for message in raw_messages[-400:]:
+                if not isinstance(message, dict):
+                    continue
+                role = message.get("role")
+                content = message.get("content")
+                if role not in {"user", "assistant"} or not isinstance(content, str):
+                    continue
+                clean = {"role": role, "content": content}
+                if message.get("hidden"):
+                    clean["hidden"] = True
+                messages.append(clean)
+        created_at = item.get("created_at")
+        if not isinstance(created_at, (int, float)):
+            created_at = time.time()
+        sessions.append(ChatSession(title.strip()[:80], messages, float(created_at)))
+    return sessions
+
+
+def save_sessions(path, chats):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    payload = {
+        "version": 1,
+        "chats": [
+            {
+                "title": chat.title,
+                "created_at": chat.created_at,
+                "messages": chat.messages[-400:],
+            }
+            for chat in chats[:30]
+        ],
+    }
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+FILE_CONTEXT_LIMIT = 40_000
+FILE_CONTEXT_TOTAL = 100_000
+FILE_MENTION_RE = re.compile(r"(?<![\w@])@([^\s@]+)")
+
+
+def collect_file_context(text, cwd):
+    """Read @file mentions into a compact system context."""
+    cwd = Path(cwd).expanduser().resolve()
+    seen = set()
+    blocks = []
+    total = 0
+    for match in FILE_MENTION_RE.finditer(text or ""):
+        raw = match.group(1).rstrip(".,;:!?)]}")
+        if not raw:
+            continue
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = cwd / path
+        try:
+            path = path.resolve()
+        except OSError:
+            continue
+        if path in seen or not path.is_file():
+            continue
+        seen.add(path)
+        try:
+            if path.stat().st_size > FILE_CONTEXT_LIMIT:
+                blocks.append(f"File: {path}\n(file troppo grande, non incluso)")
+                continue
+            content = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as error:
+            blocks.append(f"File: {path}\n(impossibile leggerlo: {error})")
+            continue
+        if "\x00" in content:
+            blocks.append(f"File: {path}\n(file binario, non incluso)")
+            continue
+        if total + len(content) > FILE_CONTEXT_TOTAL:
+            blocks.append("(limite complessivo del contesto file raggiunto)")
+            break
+        total += len(content)
+        try:
+            label = str(path.relative_to(cwd))
+        except ValueError:
+            label = str(path)
+        blocks.append(f"File: {label}\n```\n{content.rstrip()}\n```")
+    if not blocks:
+        return ""
+    return "Contesto dei file citati dall'utente:\n\n" + "\n\n".join(blocks)
+
+
+def git_output(cwd, args, timeout=8):
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(cwd), *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return 1, f"git non disponibile: {error}"
+    output = (completed.stdout or completed.stderr or "").strip()
+    return completed.returncode, output
 
 
 def _memory_usage():
@@ -286,6 +414,12 @@ I comandi che NOKK vuole eseguire sul server passano da una conferma separata.
 | `/export [file]` | esporta la chat in Markdown |
 | `/copy [n|all]` | copia l'ultima risposta, una precedente o tutto |
 | `/retry` | ripete l'ultima domanda |
+| `/sessions` | elenca le sessioni salvate |
+| `/resume <n>` | riapre una sessione salvata |
+| `/rename <titolo>` | rinomina la sessione attiva |
+| `/model [provider/modello]` | cambia modello per questa sessione |
+| `/diff`, `/git status` | mostra modifiche e stato Git |
+| `/cancel` | annulla il job in corso |
 | `/clear` | pulisce il transcript |
 
 `!comando` esegue subito un comando locale. `Ctrl+Q` esce, `Ctrl+N` apre una
@@ -601,6 +735,7 @@ class NokkTuiApp(App):
         Binding("ctrl+e", "export_chat", "Esporta", show=True, priority=True),
         Binding("ctrl+y", "copy_last", "Copia", show=True, priority=True),
         Binding("ctrl+r", "retry", "Riprova", show=True, priority=True),
+        Binding("ctrl+x", "cancel_job", "Annulla", show=True, priority=True),
         Binding("ctrl+l", "clear_view", "Pulisci", show=True),
         Binding("f1", "help", "Aiuto", show=True),
         Binding("f2", "settings", "Impostazioni", show=True),
@@ -615,10 +750,16 @@ class NokkTuiApp(App):
         auto_yes=False,
         job_timeout=JOB_TIMEOUT,
         cwd=None,
+        session_path=None,
     ):
         super().__init__()
         self.client = client or NokkClient(config.base_url, config.api_key)
         self.config_path = Path(config_path)
+        self.session_path = (
+            Path(session_path)
+            if session_path
+            else self.config_path.with_name("sessions.json")
+        )
         self.profile = config.profile if config.profile in {"local", "hosting"} else infer_profile(config.base_url)
         self.profiles = {
             "local": {
@@ -639,9 +780,12 @@ class NokkTuiApp(App):
         self.auto_yes = bool(auto_yes)
         self.job_timeout = job_timeout
         self.cwd = Path(cwd or Path.cwd()).expanduser().resolve()
-        self.chats = [ChatSession("Chat 1")]
-        self.active_index = 0
-        self.messages: list[dict[str, Any]] = self.chats[0].messages
+        self.model_override = None
+        self.current_job_id = None
+        saved_chats = load_sessions(self.session_path)
+        self.chats = saved_chats or [ChatSession("Chat 1")]
+        self.active_index = len(self.chats) - 1 if saved_chats else 0
+        self.messages: list[dict[str, Any]] = self.active_chat.messages
         self.busy = False
         self.online = None
         self.health: dict[str, Any] = {}
@@ -755,6 +899,29 @@ class NokkTuiApp(App):
             exclusive=True,
         )
 
+    def action_cancel_job(self):
+        if not self.busy or not self.current_job_id:
+            self.notify("Nessuna attività da annullare.")
+            return
+        self.run_worker(
+            self.cancel_job(),
+            group="cancel",
+            name="cancel",
+            exclusive=True,
+        )
+
+    async def cancel_job(self):
+        job_id = self.current_job_id
+        if not job_id:
+            return
+        try:
+            await asyncio.to_thread(self.client.cancel, job_id)
+        except CliError as error:
+            self.write_error(error)
+            return
+        self.write_system("Richiesta di annullamento inviata.")
+        self.activity_log().write(Text("annullamento richiesto", style="#d29922"))
+
     def apply_settings(self, data):
         if not data:
             return
@@ -762,6 +929,7 @@ class NokkTuiApp(App):
         self.profiles = data["profiles"]
         self.mode = data["mode"]
         self.agent = bool(data["agent"])
+        self.model_override = None
         active = self.profiles[self.profile]
         self.client.base_url = active["url"]
         self.client.api_key = active["key"]
@@ -968,6 +1136,16 @@ class NokkTuiApp(App):
         widgets.append(("configurata" if self.client.api_key else "assente") + "\n")
         widgets.append("Mode    ", style="dim")
         widgets.append(f"{self.mode or 'predefinita'}\n")
+        widgets.append("Modello ", style="dim")
+        if self.model_override:
+            widgets.append(
+                f"{self.model_override['provider']}/{self.model_override['model']}\n"
+            )
+        else:
+            widgets.append(
+                f"{self.health.get('provider') or '—'}/"
+                f"{self.health.get('model') or '—'}\n"
+            )
         widgets.append("Agente  ", style="dim")
         widgets.append(("on" if self.agent else "off") + "\n")
         widgets.append("CWD     ", style="dim")
@@ -1046,6 +1224,12 @@ class NokkTuiApp(App):
     def active_chat(self):
         return self.chats[self.active_index]
 
+    def _persist_sessions(self):
+        try:
+            save_sessions(self.session_path, self.chats)
+        except OSError as error:
+            self.notify(f"Sessioni non salvate: {error}", severity="warning")
+
     def new_chat(self):
         if self.active_chat.messages:
             self.chats.append(ChatSession(f"Chat {len(self.chats) + 1}"))
@@ -1056,6 +1240,7 @@ class NokkTuiApp(App):
         self.write_banner()
         self.refresh_widgets()
         self.query_one("#prompt", Input).focus()
+        self._persist_sessions()
 
     def select_chat(self, index):
         if index is None or not 0 <= index < len(self.chats) or index == self.active_index:
@@ -1066,6 +1251,7 @@ class NokkTuiApp(App):
         self.refresh_chat_list()
         self.refresh_widgets()
         self.query_one("#prompt", Input).focus()
+        self._persist_sessions()
 
     def on_list_view_selected(self, event: ListView.Selected):
         self.select_chat(event.index)
@@ -1092,7 +1278,7 @@ class NokkTuiApp(App):
             return text
         return f"{text}\n\n---\n{AGENT_RULES.format(cwd=self.cwd)}"
 
-    def wire_messages(self):
+    def wire_messages(self, extra_context=""):
         wire = []
         for message in self.active_chat.messages[-38:]:
             role = message.get("role")
@@ -1102,6 +1288,12 @@ class NokkTuiApp(App):
             wire.append({"role": role, "content": truncate(content, 12_000)})
         if self.agent and wire and wire[-1]["role"] == "user":
             wire[-1]["content"] = self._wire(wire[-1]["content"])
+        if extra_context and wire and wire[-1]["role"] == "user":
+            wire[-1]["content"] = (
+                truncate(extra_context, 100_000)
+                + "\n\n"
+                + wire[-1]["content"]
+            )
         return wire
 
     async def ask(self, text):
@@ -1109,12 +1301,15 @@ class NokkTuiApp(App):
         if not chat.messages:
             chat.title = text if len(text) <= 30 else text[:29] + "…"
             self.refresh_chat_list()
+        file_context = collect_file_context(text, self.cwd)
+        if file_context:
+            self.write_system("Contesto file incluso nella richiesta.")
         self.write_user(text)
         chat.messages.append({"role": "user", "content": text})
         self.set_busy(True, "NOKK sta pensando…")
         try:
             for round_number in range(MAX_AGENT_ROUNDS + 1):
-                job = await self.run_job(self.wire_messages())
+                job = await self.run_job(self.wire_messages(file_context))
                 reply = job.get("reply")
                 reply = reply.strip() if isinstance(reply, str) else ""
                 self.write_assistant(reply)
@@ -1152,9 +1347,11 @@ class NokkTuiApp(App):
             self.set_busy(False, "annullato")
             raise
         finally:
+            self.current_job_id = None
             if self.busy:
                 self.set_busy(False, "pronto")
             self.refresh_widgets()
+            self._persist_sessions()
 
     def result_context(self, result: LocalResult):
         output = truncate(result.output.strip(), 10_000)
@@ -1185,13 +1382,20 @@ class NokkTuiApp(App):
         finally:
             self.set_busy(False, "pronto")
             self.refresh_widgets()
+            self._persist_sessions()
 
     async def run_job(self, messages):
         started = time.monotonic()
         self.requests += 1
+        model = self.model_override or {}
         job_id = await asyncio.to_thread(
-            self.client.start_chat, messages, self.mode,
+            self.client.start_chat,
+            messages,
+            self.mode,
+            model.get("provider"),
+            model.get("model"),
         )
+        self.current_job_id = job_id
         self.last_latency = time.monotonic() - started
         seen_events = 0
         deadline = time.monotonic() + self.job_timeout
@@ -1206,8 +1410,13 @@ class NokkTuiApp(App):
                 seen_events = len(events)
             status = job.get("status")
             if status == "complete":
+                self.current_job_id = None
                 return job
+            if status == "cancelled":
+                self.current_job_id = None
+                raise CliError("Attività annullata.")
             if status == "failed":
+                self.current_job_id = None
                 raise CliError(
                     job.get("error") or "Attività fallita sul server.",
                     job.get("hint") or job.get("details"),
@@ -1336,6 +1545,18 @@ class NokkTuiApp(App):
             await self.show_server()
         elif name == "/status":
             self.show_status()
+        elif name == "/sessions":
+            self.list_sessions()
+        elif name == "/resume":
+            self.resume_session(argument)
+        elif name == "/rename":
+            self.rename_session(argument)
+        elif name == "/model":
+            self.change_model(argument)
+        elif name in {"/diff", "/git"}:
+            self.show_git("diff" if name == "/diff" else argument)
+        elif name == "/cancel":
+            self.action_cancel_job()
         elif name == "/config":
             self.show_config()
         elif name == "/export":
@@ -1426,6 +1647,109 @@ class NokkTuiApp(App):
             f"agente: {'on' if self.agent else 'off'}\n"
             f"cwd: {self.cwd}\n"
             f"config: {self.config_path}"
+        )
+
+    def list_sessions(self):
+        lines = []
+        for index, chat in enumerate(self.chats[:30], start=1):
+            marker = "→" if index - 1 == self.active_index else " "
+            count = sum(
+                1 for message in chat.messages if not message.get("hidden")
+            )
+            when = time.strftime("%d/%m %H:%M", time.localtime(chat.created_at))
+            lines.append(f"{marker} {index}. {chat.title} · {count} msg · {when}")
+        self.write_system(
+            "Sessioni salvate\n" + "\n".join(lines)
+            + "\n\nUsa /resume <numero> per riaprirne una."
+        )
+
+    def resume_session(self, argument):
+        try:
+            number = int(argument)
+        except (TypeError, ValueError):
+            self.write_system("Uso: /resume <numero> (vedi /sessions)")
+            return
+        if not 1 <= number <= len(self.chats):
+            self.write_system("Numero di sessione non valido.")
+            return
+        self.select_chat(number - 1)
+        self.write_system(f"Sessione: {self.active_chat.title}")
+
+    def rename_session(self, argument):
+        title = (argument or "").strip()
+        if not title:
+            self.write_system("Uso: /rename <titolo>")
+            return
+        self.active_chat.title = title[:60]
+        self.refresh_chat_list()
+        self._persist_sessions()
+        self.write_system(f"Sessione rinominata: {self.active_chat.title}")
+
+    def change_model(self, argument):
+        argument = (argument or "").strip()
+        if not argument:
+            current = self.model_override
+            if current:
+                self.write_system(
+                    f"Modello sessione: {current['provider']}/{current['model']}\n"
+                    "Usa /model reset per tornare al modello del server."
+                )
+            else:
+                self.write_system(
+                    "Modello del server: "
+                    f"{self.health.get('provider') or '—'}/"
+                    f"{self.health.get('model') or '—'}\n"
+                    "Uso: /model <provider>/<modello>"
+                )
+            return
+        if argument.lower() in {"reset", "auto", "server"}:
+            self.model_override = None
+            self.write_system("Modello della sessione: quello configurato sul server.")
+            self.refresh_widgets()
+            return
+        parts = argument.replace("/", " ", 1).split()
+        if len(parts) != 2 or not all(parts):
+            self.write_system("Uso: /model <provider>/<modello>")
+            return
+        self.model_override = {"provider": parts[0], "model": parts[1]}
+        self.write_system(
+            f"Modello della sessione: {parts[0]}/{parts[1]}"
+        )
+        self.refresh_widgets()
+
+    def show_git(self, argument):
+        mode = (argument or "").strip().lower()
+        if mode in {"", "status", "st"}:
+            code, output = git_output(self.cwd, ["status", "--short", "--branch"])
+            title = "git status"
+        elif mode in {"diff", "d", "staged", "--staged", "--cached"}:
+            args = ["diff", "--stat"]
+            if mode in {"staged", "--staged", "--cached"}:
+                args.append("--cached")
+            code, summary = git_output(self.cwd, args)
+            patch_args = ["diff"]
+            if mode in {"staged", "--staged", "--cached"}:
+                patch_args.append("--cached")
+            _, patch = git_output(self.cwd, patch_args)
+            output = "\n".join(part for part in (summary, patch) if part)
+            title = "git diff"
+        elif mode == "log":
+            code, output = git_output(self.cwd, ["log", "--oneline", "-10"])
+            title = "git log"
+        else:
+            self.write_system("Uso: /diff [--staged] oppure /git status|diff|log")
+            return
+        if code != 0:
+            self.write_error(CliError(output or "Comando Git non riuscito."))
+            return
+        self.transcript().write(
+            Panel(
+                Text(truncate(output or "(nessuna modifica)", 6000)),
+                title=title,
+                title_align="left",
+                border_style="#8b949e",
+                padding=(0, 1),
+            )
         )
 
     def show_status(self):

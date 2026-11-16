@@ -1,4 +1,5 @@
 import asyncio
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,7 +8,7 @@ import nokk_cli
 from nokk_cli import Config
 
 try:
-    from nokk_tui import NokkTuiApp, SettingsScreen
+    from nokk_tui import NokkTuiApp, SettingsScreen, collect_file_context, git_output
     HAS_TUI = True
 except ImportError:
     HAS_TUI = False
@@ -21,6 +22,8 @@ class FakeClient:
         self.replies = list(replies or ["Ciao dalla TUI."])
         self.jobs = 0
         self.approvals = []
+        self.cancelled = []
+        self.last_model = None
 
     def health(self):
         return {
@@ -31,7 +34,8 @@ class FakeClient:
             "approval_mode": "manual",
         }
 
-    def start_chat(self, messages, mode=None):
+    def start_chat(self, messages, mode=None, provider=None, model=None):
+        self.last_model = (provider, model)
         return "a" * 32
 
     def job(self, job_id):
@@ -43,6 +47,10 @@ class FakeClient:
     def approve(self, job_id, action_id, approved):
         self.approvals.append((job_id, action_id, approved))
         return {"ok": True}
+
+    def cancel(self, job_id):
+        self.cancelled.append(job_id)
+        return {"ok": True, "status": "cancelled"}
 
 
 class AgentClient(FakeClient):
@@ -285,6 +293,55 @@ class NokkTuiTests(unittest.IsolatedAsyncioTestCase):
                         {"role": "assistant", "content": "seconda risposta"},
                     ],
                 )
+
+    async def test_sessions_survive_a_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cli.json"
+            first = NokkTuiApp(Config(), path, client=FakeClient(["memorizzata"]))
+            async with first.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                await first.ask("domanda persistente")
+            second = NokkTuiApp(Config(), path, client=FakeClient())
+            async with second.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                self.assertEqual(second.chats[0].title, "domanda persistente")
+                self.assertEqual(
+                    second.chats[0].messages[-1]["content"], "memorizzata"
+                )
+
+    async def test_model_override_is_sent_with_the_chat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            client = FakeClient()
+            app = NokkTuiApp(Config(), Path(directory) / "cli.json", client=client)
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                app.change_model("openai/gpt-test")
+                await app.ask("ciao")
+                self.assertEqual(client.last_model, ("openai", "gpt-test"))
+
+    def test_file_mentions_become_context(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nota.txt"
+            path.write_text("contenuto importante", encoding="utf-8")
+            context = collect_file_context("leggi @nota.txt", directory)
+            self.assertIn("File: nota.txt", context)
+            self.assertIn("contenuto importante", context)
+
+    def test_git_output_reports_a_dirty_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            subprocess.run(["git", "init", "-q"], cwd=directory, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.com"],
+                cwd=directory, check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test"],
+                cwd=directory, check=True,
+            )
+            Path(directory, "file.txt").write_text("x", encoding="utf-8")
+            code, output = git_output(directory, ["status", "--short"])
+            self.assertEqual(code, 0)
+            self.assertIn("file.txt", output)
 
     async def test_narrow_terminal_hides_the_sidebar(self):
         with tempfile.TemporaryDirectory() as directory:

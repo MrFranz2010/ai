@@ -85,6 +85,12 @@ python nokk_cli.py --exec "git status"
   copia l'ultima risposta, una risposta precedente o tutto il transcript,
   `/retry` ripete l'ultima domanda e `/status` riassume connessione, provider,
   modello, directory e configurazione.
+- Le sessioni sono salvate in `sessions.json` accanto a `cli.json`:
+  `/sessions`, `/resume <n>` e `/rename <titolo>`.
+- `/model <provider>/<modello>` sceglie il modello per la sessione;
+  `@file` allega file al contesto; `/diff`, `/git status` e `/git log`
+  mostrano il repository.
+- `/cancel` o `Ctrl+X` annulla il job in corso.
 
 ### Tasti della TUI
 
@@ -101,6 +107,26 @@ python nokk_cli.py --exec "git status"
 | `F2` | impostazioni |
 
 Su terminali stretti la barra laterale si nasconde automaticamente.
+
+## MCP
+
+`nokk_mcp.py` espone NOKK come server MCP su stdio con i tool `nokk_health` e
+`nokk_chat`.
+
+```json
+{
+  "mcpServers": {
+    "nokk": {
+      "command": "python3",
+      "args": ["/percorso/nokk_mcp.py"],
+      "env": {"NOKK_URL": "https://tuo-nokk.onrender.com"}
+    }
+  }
+}
+```
+
+Se un job richiede approvazione, il tool restituisce un errore: l'approvazione
+resta un'azione esplicita nella web o nella TUI.
 
 ## Rami
 
