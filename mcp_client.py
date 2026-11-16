@@ -336,7 +336,7 @@ class McpServer:
         try:
             if process.stdin:
                 process.stdin.close()
-        except OSError:
+        except (OSError, ValueError):
             pass
         try:
             process.terminate()
