@@ -947,7 +947,11 @@ class AppRouteTests(unittest.TestCase):
             "Verbale della riunione\nConsegna venerdì.",
         )
         self.assertEqual(
-            {path.name for path in Path(self.config_directory.name).iterdir()},
+            {
+                path.name
+                for path in Path(self.config_directory.name).iterdir()
+                if path.name != "jobs.json"
+            },
             set(),
         )
 

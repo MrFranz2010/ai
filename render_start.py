@@ -78,6 +78,19 @@ def _configure_supabase_storage():
     def save_json(path, data):
         storage.save(path.name, data)
 
+    def load_jobs():
+        saved = load_json(app.CONFIG_FILE.with_name("jobs.json"))
+        if saved is MISSING:
+            return []
+        items = saved.get("jobs") if isinstance(saved, dict) else saved
+        return items if isinstance(items, list) else []
+
+    def save_jobs(jobs):
+        save_json(
+            app.CONFIG_FILE.with_name("jobs.json"),
+            {"version": 1, "jobs": list(jobs)},
+        )
+
     def load_config():
         saved = load_json(app.CONFIG_FILE)
         if saved is MISSING:
@@ -210,6 +223,8 @@ def _configure_supabase_storage():
     )
     app.save_api_file = lambda data: save_json(app.API_FILE, data)
     app.save_hub_file = lambda data: save_json(app.HUB_FILE, data)
+    app.load_chat_jobs = load_jobs
+    app.save_chat_jobs = save_jobs
     return storage
 
 

@@ -2996,10 +2996,15 @@ google_oauth_states = {}
 google_access_token_cache = {"token": None, "expires_at": 0.0}
 chat_jobs = {}
 chat_jobs_lock = threading.Lock()
+_chat_jobs_loaded = False
 MAX_ACTIVE_CHAT_JOBS = 20
 MAX_STORED_CHAT_JOBS = 200
 CHAT_JOB_RETENTION_SECONDS = 3600
 TERMINAL_JOB_STATUSES = {"complete", "failed", "cancelled"}
+PROVIDER_RETRY_ATTEMPTS = 3
+PROVIDER_RETRY_BASE_SECONDS = 1.0
+PROVIDER_RETRY_MAX_SECONDS = 8.0
+TRANSIENT_HTTP_CODES = {408, 425, 429, 500, 502, 503, 504}
 
 
 TOOL_LIMIT_REPLY = (
@@ -3925,6 +3930,7 @@ def execute_terminal_command(command, workspace, automatic=False):
 def _prune_chat_jobs_locked(now=None):
     """Rimuove le attività concluse e segna quelle rimaste bloccate."""
     now = time.time() if now is None else now
+    dirty = False
     for job in chat_jobs.values():
         if (
             job.get("status") not in TERMINAL_JOB_STATUSES
@@ -3932,7 +3938,13 @@ def _prune_chat_jobs_locked(now=None):
         ):
             job["status"] = "failed"
             job["error"] = "Attività interrotta senza risposta. Riprova."
+            job["last_error"] = job["error"]
+            job["finished_at"] = now
+            started = job.get("started_at") or job.get("created_at")
+            if isinstance(started, (int, float)):
+                job["duration_seconds"] = round(max(0.0, now - started), 1)
             job["updated_at"] = now
+            dirty = True
     expired = [
         key for key, job in chat_jobs.items()
         if job.get("status") in TERMINAL_JOB_STATUSES
@@ -3940,6 +3952,7 @@ def _prune_chat_jobs_locked(now=None):
     ]
     for key in expired:
         del chat_jobs[key]
+        dirty = True
     if len(chat_jobs) > MAX_STORED_CHAT_JOBS:
         finished = sorted(
             (
@@ -3950,6 +3963,9 @@ def _prune_chat_jobs_locked(now=None):
         )
         for _, key in finished[: len(chat_jobs) - MAX_STORED_CHAT_JOBS]:
             del chat_jobs[key]
+            dirty = True
+    if dirty:
+        _save_chat_jobs_locked()
 
 
 def _active_chat_job_count_locked(now=None):
@@ -3961,13 +3977,213 @@ def _active_chat_job_count_locked(now=None):
     )
 
 
+JOB_METADATA_FIELDS = (
+    "status", "created_at", "started_at", "finished_at", "updated_at",
+    "duration_seconds", "provider", "model", "attempts", "error",
+    "last_error", "hint", "cancelled",
+)
+
+
+def _chat_jobs_path():
+    return CONFIG_FILE.with_name("jobs.json")
+
+
+def load_chat_jobs():
+    """Legge i metadati delle attività salvati su disco."""
+    try:
+        raw = json.loads(_chat_jobs_path().read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError, UnicodeDecodeError):
+        return []
+    items = raw.get("jobs") if isinstance(raw, dict) else raw
+    if not isinstance(items, list):
+        return []
+    return items[:MAX_STORED_CHAT_JOBS]
+
+
+def save_chat_jobs(jobs):
+    """Salva i metadati delle attività; l'hosting sostituisce questa funzione."""
+    save_json_file(_chat_jobs_path(), {"version": 1, "jobs": list(jobs)})
+
+
+def _job_metadata(job_id, job):
+    metadata = {"id": job_id}
+    for key in JOB_METADATA_FIELDS:
+        if key in job:
+            metadata[key] = job[key]
+    return metadata
+
+
+def _save_chat_jobs_locked():
+    try:
+        save_chat_jobs([
+            _job_metadata(job_id, job) for job_id, job in chat_jobs.items()
+            if not job.get("ephemeral")
+        ])
+    except (OSError, RuntimeError, ValueError) as error:
+        print(f"Impossibile salvare le attività: {error}")
+
+
+def _ensure_chat_jobs_loaded_locked():
+    global _chat_jobs_loaded
+    if _chat_jobs_loaded:
+        return
+    _chat_jobs_loaded = True
+    restored = False
+    for item in load_chat_jobs():
+        if not isinstance(item, dict):
+            continue
+        job_id = item.get("id")
+        if not isinstance(job_id, str) or not re.fullmatch(r"[a-f0-9]{32}", job_id):
+            continue
+        job = {key: item[key] for key in JOB_METADATA_FIELDS if key in item}
+        if not isinstance(job.get("created_at"), (int, float)):
+            continue
+        job.setdefault("updated_at", job["created_at"])
+        if job.get("status") not in TERMINAL_JOB_STATUSES:
+            now = time.time()
+            started = job.get("started_at") or job.get("created_at")
+            job.update(
+                status="failed",
+                finished_at=now,
+                updated_at=now,
+                error=(
+                    "Il server è stato riavviato mentre l'attività era in "
+                    "corso. Riprova."
+                ),
+                last_error=(
+                    "Il server è stato riavviato mentre l'attività era in "
+                    "corso. Riprova."
+                ),
+            )
+            if isinstance(started, (int, float)):
+                job["duration_seconds"] = round(max(0.0, now - started), 1)
+        job["cancelled"] = bool(job.get("cancelled"))
+        chat_jobs[job_id] = job
+        restored = True
+    if restored:
+        _save_chat_jobs_locked()
+
+
+def _job_summary(job_id, job):
+    started = job.get("started_at") or job.get("created_at")
+    finished = job.get("finished_at")
+    now = time.time()
+    end = finished if isinstance(finished, (int, float)) else now
+    duration = None
+    if isinstance(started, (int, float)):
+        duration = round(max(0.0, end - started), 1)
+    return {
+        "id": job_id,
+        "status": job.get("status"),
+        "provider": job.get("provider"),
+        "model": job.get("model"),
+        "created_at": job.get("created_at"),
+        "started_at": started,
+        "finished_at": finished,
+        "duration_seconds": duration,
+        "attempts": job.get("attempts", 0),
+        "error": job.get("error"),
+        "last_error": job.get("last_error"),
+        "hint": job.get("hint"),
+        "cancelled": bool(job.get("cancelled")),
+    }
+
+
+def list_chat_jobs(limit=50):
+    with chat_jobs_lock:
+        _ensure_chat_jobs_loaded_locked()
+        _prune_chat_jobs_locked()
+        jobs = [
+            _job_summary(job_id, job) for job_id, job in chat_jobs.items()
+            if not job.get("ephemeral")
+        ]
+    jobs.sort(
+        key=lambda item: item.get("created_at") or 0,
+        reverse=True,
+    )
+    return jobs[: max(1, min(int(limit), MAX_STORED_CHAT_JOBS))]
+
+
+def _wait_for_provider_retry(job_id, attempt, reason):
+    delay = min(
+        PROVIDER_RETRY_MAX_SECONDS,
+        PROVIDER_RETRY_BASE_SECONDS * (2 ** max(0, attempt - 1)),
+    )
+    now = time.time()
+    with chat_jobs_lock:
+        job = chat_jobs.get(job_id)
+        if job is None or job.get("cancelled"):
+            return False
+        job.update(
+            status="retrying",
+            attempts=attempt,
+            last_error=reason,
+            retry_at=now + delay,
+            updated_at=now,
+        )
+        _save_chat_jobs_locked()
+    deadline = time.monotonic() + delay
+    while time.monotonic() < deadline:
+        if _job_cancelled(job_id):
+            return False
+        time.sleep(min(0.2, max(0.0, deadline - time.monotonic())))
+    with chat_jobs_lock:
+        job = chat_jobs.get(job_id)
+        if job is None or job.get("cancelled"):
+            return False
+        job.update(status="running", retry_at=None, updated_at=time.time())
+        _save_chat_jobs_locked()
+    return True
+
+
+def _open_provider_response(request, job_id):
+    attempt = 1
+    while True:
+        if _job_cancelled(job_id):
+            return None
+        with chat_jobs_lock:
+            job = chat_jobs.get(job_id)
+            if job is not None:
+                job["attempts"] = attempt
+        try:
+            return urlopen(request, timeout=60)
+        except HTTPError as error:
+            if error.code not in TRANSIENT_HTTP_CODES or attempt >= PROVIDER_RETRY_ATTEMPTS:
+                raise
+            reason = f"HTTP {error.code} dal provider."
+            error.close()
+            if not _wait_for_provider_retry(job_id, attempt, reason):
+                return None
+            attempt += 1
+        except (URLError, TimeoutError) as error:
+            if attempt >= PROVIDER_RETRY_ATTEMPTS:
+                raise
+            reason = f"Provider non raggiungibile: {error}"
+            if not _wait_for_provider_retry(job_id, attempt, reason):
+                return None
+            attempt += 1
+
+
 def _finish_job(job_id, status, **updates):
     with chat_jobs_lock:
         job = chat_jobs.get(job_id)
         if job:
             if job.get("cancelled") and status != "cancelled":
                 return
-            job.update(status=status, updated_at=time.time(), **updates)
+            now = time.time()
+            job.update(status=status, updated_at=now, **updates)
+            if status in TERMINAL_JOB_STATUSES:
+                job.setdefault("finished_at", now)
+                started = job.get("started_at") or job.get("created_at")
+                if isinstance(started, (int, float)):
+                    job["duration_seconds"] = round(
+                        max(0.0, job["finished_at"] - started), 1,
+                    )
+                if status == "failed" and job.get("error"):
+                    job["last_error"] = job["error"]
+            _save_chat_jobs_locked()
 
 
 def _job_cancelled(job_id):
@@ -3999,6 +4215,7 @@ def _wait_for_approval(job_id, command):
             approved=None,
             updated_at=time.time(),
         )
+        _save_chat_jobs_locked()
     if not event.wait(120):
         approved = False
     else:
@@ -4010,6 +4227,7 @@ def _wait_for_approval(job_id, command):
         job["approval_event"] = None
         job["status"] = "running"
         job["updated_at"] = time.time()
+        _save_chat_jobs_locked()
     if not approved:
         return {
             "exit_code": 125,
@@ -4131,7 +4349,10 @@ def run_chat_job(job_id, messages, active_config, mode=None):
                 extra_tools=mcp_tools,
             )
             try:
-                with urlopen(request, timeout=60) as response:
+                response = _open_provider_response(request, job_id)
+                if response is None:
+                    return
+                with response:
                     if active_config.get("stream"):
                         parsed = parse_stream_response(
                             active_config["provider"], response, job_id,
@@ -4394,15 +4615,22 @@ def _run_chat_job_safely(job_id, messages, active_config, mode=None):
     finally:
         with chat_jobs_lock:
             job = chat_jobs.get(job_id)
-            if job is not None and job.get("status") == "running":
+            if job is not None and job.get("status") in {"running", "retrying"}:
+                now = time.time()
                 job.update(
                     status="failed",
-                    updated_at=time.time(),
+                    updated_at=now,
+                    finished_at=now,
                     error=(
                         "La richiesta non ha prodotto una risposta. "
                         "Controlla il provider e riprova."
                     ),
                 )
+                started = job.get("started_at") or job.get("created_at")
+                if isinstance(started, (int, float)):
+                    job["duration_seconds"] = round(max(0.0, now - started), 1)
+                job["last_error"] = job["error"]
+                _save_chat_jobs_locked()
 
 
 def _send_telegram_message(token, chat_id, text):
@@ -5424,6 +5652,7 @@ def _handle_telegram_update(update):
             "tool_events": [],
             "workspace": active_config["workspace"],
             "approved": None,
+            "ephemeral": True,
         }
     run_chat_job(job_id, messages, active_config)
     with chat_jobs_lock:
@@ -5675,6 +5904,7 @@ def run_scheduled_workflow(workflow):
             "tool_events": [],
             "workspace": active_config["workspace"],
             "approved": None,
+            "ephemeral": True,
         }
     try:
         run_chat_job(
@@ -6273,6 +6503,9 @@ class AppHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(artifact["content"])
             return
+        if self.path.split("?", 1)[0] == "/api/jobs":
+            self._send_json(200, {"jobs": list_chat_jobs()})
+            return
         job_match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})", self.path)
         if job_match:
             with chat_jobs_lock:
@@ -6851,6 +7084,9 @@ class AppHandler(BaseHTTPRequestHandler):
                 }
             self._send_json(200, payload)
             return
+        if path == "/api/v1/jobs":
+            self._send_json(200, {"jobs": list_chat_jobs()})
+            return
         job_match = re.fullmatch(r"/api/v1/jobs/([a-f0-9]{32})", path)
         if job_match:
             with chat_jobs_lock:
@@ -7103,12 +7339,20 @@ class AppHandler(BaseHTTPRequestHandler):
                     "error": "Troppe attività in corso. Riprova tra poco.",
                 })
                 return
+            _ensure_chat_jobs_loaded_locked()
+            now = time.time()
             chat_jobs[job_id] = {
                 "status": "running",
-                "updated_at": time.time(),
+                "created_at": now,
+                "started_at": now,
+                "updated_at": now,
                 "workspace": active_config["workspace"],
+                "provider": active_config.get("provider"),
+                "model": active_config.get("model"),
+                "attempts": 0,
                 "cancelled": False,
             }
+            _save_chat_jobs_locked()
         worker = threading.Thread(
             target=_run_chat_job_safely,
             args=(job_id, messages, active_config, mode),

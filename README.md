@@ -106,6 +106,21 @@ a Internet. `/api/config` non restituisce mai la chiave al browser.
 Il token Telegram viene salvato separatamente in `telegram.json`, accanto alla
 configurazione, con le stesse protezioni locali.
 
+## Attività persistenti
+
+I metadati delle richieste vengono salvati in `jobs.json` nella tabella privata
+`app_state` di Supabase e sopravvivono ai riavvii. Se applichi lo schema su un
+database esistente, esegui anche
+[`supabase/migrations/2026-11-16_jobs_key.sql`](supabase/migrations/2026-11-16_jobs_key.sql).
+Al riavvio le attività rimaste in corso vengono chiuse come fallite.
+
+Gli errori transitori del provider (`408`, `425`, `429`, `5xx`, timeout e
+connessione interrotta) vengono ritentati fino a tre volte con attesa crescente.
+Gli errori di autenticazione, modello o richiesta non vengono ritentati.
+
+`GET /api/v1/jobs` restituisce attività recenti, provider, modello, durata,
+tentativi e ultimo errore.
+
 ## Cosa fa e cosa non fa ancora
 
 - La pagina web permette di configurare provider e modello e mantenere una
