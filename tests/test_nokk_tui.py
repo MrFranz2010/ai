@@ -127,6 +127,11 @@ class NokkTuiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("CPU", app.query_one("#resources").render().plain)
                 self.assertIn("Chat", app.query_one("#widgets").render().plain)
                 self.assertIn("online", app.query_one("#statusline").render().plain)
+                topbar = app.query_one("#topbar").render().plain
+                self.assertIn("NOKK", topbar)
+                self.assertIn("agente", topbar)
+                self.assertTrue(app.query_one("#composer"))
+                self.assertTrue(app.query_one("#prompt"))
 
     async def test_clicking_an_item_removed_by_refresh_is_ignored(self):
         with tempfile.TemporaryDirectory() as directory:

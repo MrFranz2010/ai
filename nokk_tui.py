@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from rich.markdown import Markdown as RichMarkdown
+from rich.padding import Padding
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -31,7 +32,6 @@ from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
     Footer,
-    Header,
     Input,
     Label,
     ListItem,
@@ -70,6 +70,7 @@ from nokk_cli import (
 SIDEBAR_MIN_WIDTH = 96
 MAX_SESSIONS = 30
 MAX_SESSION_MESSAGES = 400
+SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 
 class ChatListView(ListView):
@@ -276,6 +277,11 @@ def meter(percent, width=10):
         return "░" * width
     filled = max(0, min(width, round(percent / 100 * width)))
     return "█" * filled + "░" * (width - filled)
+
+
+def ellipsis(text, limit):
+    text = str(text)
+    return text if len(text) <= limit else text[: max(1, limit - 1)] + "…"
 
 
 def short_path(path, limit=34):
@@ -767,16 +773,26 @@ class NokkTuiApp(App):
     SUB_TITLE = "terminale"
     CSS = """
     Screen {
-        background: #0b0f14;
-        color: #d7e0ea;
+        background: #0d1117;
+        color: #e6edf3;
     }
-    Header {
-        background: #111820;
-        color: #d7e0ea;
+    #topbar {
+        height: 1;
+        padding: 0 1;
+        background: #0d1117;
+        color: #8b949e;
     }
     Footer {
-        background: #111820;
-        color: #7d8b9a;
+        height: 1;
+        background: #0d1117;
+        color: #6e7681;
+    }
+    Footer > .footer--key {
+        background: #161b22;
+        color: #8b949e;
+    }
+    Footer > .footer--description {
+        color: #6e7681;
     }
     #main {
         height: 1fr;
@@ -786,60 +802,89 @@ class NokkTuiApp(App):
     }
     #transcript {
         height: 1fr;
-        padding: 0 1;
-        background: #0b0f14;
+        padding: 1 2 0 2;
+        background: #0d1117;
+        scrollbar-color: #30363d;
+        scrollbar-background: #0d1117;
     }
     #streamline {
         height: auto;
-        max-height: 4;
+        max-height: 6;
+        margin: 0 2;
         padding: 0 1;
-        background: #0d1319;
+        background: #0d1117;
         color: #8b949e;
+        border-top: solid #21262d;
     }
     #statusline {
         height: 1;
         padding: 0 1;
-        background: #111820;
-        color: #7d8b9a;
+        background: #161b22;
+        color: #8b949e;
     }
-    #prompt {
+    #composer {
         height: 3;
         margin: 0 1 1 1;
-        border: tall #2f81f7;
-        background: #0f141a;
+        padding: 0 1;
+        border: round #30363d;
+        background: #161b22;
+    }
+    #prompt {
+        height: 1;
+        margin: 1 0;
+        padding: 0;
+        border: none;
+        background: #161b22;
+        color: #e6edf3;
+    }
+    #prompt:focus {
+        border: none;
+        background: #161b22;
+    }
+    #prompt > .input--placeholder {
+        color: #6e7681;
     }
     #sidebar {
-        width: 42;
+        width: 36;
         padding: 0 1;
-        background: #0f141a;
-        border-left: solid #263241;
+        background: #0d1117;
+        border-left: solid #21262d;
+        scrollbar-color: #30363d;
+        scrollbar-background: #0d1117;
     }
     .section-title {
-        color: #58a6ff;
+        color: #6e7681;
         text-style: bold;
         margin-top: 1;
     }
     #agents, #resources, #widgets {
         height: auto;
+        color: #c9d1d9;
     }
     #chats {
-        height: 3;
-        background: #0f141a;
+        height: auto;
+        max-height: 6;
+        min-height: 1;
+        background: #0d1117;
         border: none;
     }
     #chats > ListItem {
         padding: 0 1;
-        color: #d7e0ea;
+        color: #8b949e;
+    }
+    #chats > ListItem.-highlight {
+        background: #161b22;
+        color: #e6edf3;
     }
     #activity {
-        height: 6;
-        background: #0f141a;
+        height: 5;
+        background: #0d1117;
         border: none;
     }
     Screen.narrow #sidebar {
         display: none;
     }
-    ConfirmScreen, SecretScreen, HelpScreen {
+    ConfirmScreen, SecretScreen, HelpScreen, SettingsScreen {
         align: center middle;
         background: #000000 65%;
     }
@@ -848,12 +893,12 @@ class NokkTuiApp(App):
         max-width: 92%;
         height: auto;
         max-height: 82%;
-        border: thick #2f81f7;
-        background: #111820;
+        border: round #30363d;
+        background: #161b22;
         padding: 1 2;
     }
     #dialog-title {
-        color: #58a6ff;
+        color: #e6edf3;
         text-style: bold;
         margin-bottom: 1;
     }
@@ -872,7 +917,7 @@ class NokkTuiApp(App):
         width: 84;
     }
     .settings-dialog Label {
-        color: #7d8b9a;
+        color: #8b949e;
         margin-top: 1;
     }
     .settings-dialog Input, .settings-dialog Select {
@@ -888,11 +933,11 @@ class NokkTuiApp(App):
         Binding("ctrl+q", "quit", "Esci", show=True),
         Binding("ctrl+n", "new_chat", "Nuova chat", show=True),
         Binding("ctrl+b", "toggle_sidebar", "Sidebar", show=True),
-        Binding("ctrl+e", "export_chat", "Esporta", show=True, priority=True),
-        Binding("ctrl+y", "copy_last", "Copia", show=True, priority=True),
-        Binding("ctrl+r", "retry", "Riprova", show=True, priority=True),
-        Binding("ctrl+x", "cancel_job", "Annulla", show=True, priority=True),
-        Binding("ctrl+l", "clear_view", "Pulisci", show=True),
+        Binding("ctrl+e", "export_chat", "Esporta", show=False, priority=True),
+        Binding("ctrl+y", "copy_last", "Copia", show=False, priority=True),
+        Binding("ctrl+r", "retry", "Riprova", show=False, priority=True),
+        Binding("ctrl+x", "cancel_job", "Annulla", show=False, priority=True),
+        Binding("ctrl+l", "clear_view", "Pulisci", show=False),
         Binding("f1", "help", "Aiuto", show=True),
         Binding("f2", "settings", "Impostazioni", show=True),
     ]
@@ -960,10 +1005,11 @@ class NokkTuiApp(App):
         self.started_at = time.time()
         self._sidebar_hidden = False
         self._branch = git_branch(self.cwd)
+        self._spinner_frame = 0
 
     # ------------------------------------------------------------------ layout
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
+        yield Static(id="topbar")
         with Horizontal(id="main"):
             with Vertical(id="left"):
                 yield RichLog(
@@ -976,20 +1022,19 @@ class NokkTuiApp(App):
                 )
                 yield Static("", id="streamline")
                 yield Static(id="statusline")
-                yield Input(
-                    placeholder=(
-                        "Scrivi a NOKK…   !comando per il terminale locale   /help"
-                    ),
-                    id="prompt",
-                )
+                with Horizontal(id="composer"):
+                    yield Input(
+                        placeholder="›  Chiedi a NOKK…   /help comandi   ! shell",
+                        id="prompt",
+                    )
             with VerticalScroll(id="sidebar"):
                 yield Static("AGENTI", classes="section-title")
                 yield Static(id="agents")
                 yield Static("CHAT", classes="section-title")
                 yield ChatListView(id="chats")
-                yield Static("RISORSE", classes="section-title")
+                yield Static("CONTESTO", classes="section-title")
                 yield Static(id="resources")
-                yield Static("WIDGET", classes="section-title")
+                yield Static("SESSIONE", classes="section-title")
                 yield Static(id="widgets")
                 yield Static("ATTIVITÀ", classes="section-title")
                 yield RichLog(
@@ -1008,6 +1053,7 @@ class NokkTuiApp(App):
         self.refresh_sidebar()
         self.refresh_widgets()
         self.set_interval(2.0, self.refresh_widgets)
+        self.set_interval(0.12, self._tick_spinner)
         if self.show_banner:
             self.write_banner()
         self.activity_log().write(Text("sessione avviata", style="dim"))
@@ -1145,78 +1191,73 @@ class NokkTuiApp(App):
 
     def write_banner(self):
         banner = Text()
-        banner.append("NOKK", style="bold #58a6ff")
-        banner.append("  terminale\n", style="bold #d7e0ea")
-        banner.append(
-            "Chat a sinistra, agenti e risorse a destra. "
-            "I comandi locali chiedono conferma.\n",
-            style="#7d8b9a",
-        )
-        banner.append("!comando", style="bold")
-        banner.append(" esegue qui · ", style="#7d8b9a")
-        banner.append("/help", style="bold")
-        banner.append(" mostra i comandi · ", style="#7d8b9a")
-        banner.append("F1", style="bold")
-        banner.append(" aiuto", style="#7d8b9a")
-        self.transcript().write(
-            Panel(
-                banner,
-                title="benvenuto",
-                border_style="#263241",
-                padding=(0, 1),
-            )
-        )
+        banner.append("  ✦ ", style="#58a6ff")
+        banner.append("NOKK", style="bold #e6edf3")
+        banner.append("  terminal assistant\n", style="dim")
+        banner.append(f"  {short_path(self.cwd, 64)}\n", style="#8b949e")
+        banner.append("  Scrivi un messaggio", style="#8b949e")
+        banner.append("  ·  ", style="dim")
+        banner.append("/help", style="bold #58a6ff")
+        banner.append(" comandi", style="dim")
+        banner.append("  ·  ", style="dim")
+        banner.append("!", style="bold #58a6ff")
+        banner.append(" shell locale\n", style="dim")
+        self.transcript().write(banner)
+        self.transcript().write(Text(""))
 
     def write_user(self, text):
-        self.transcript().write(
-            Panel(
-                Text(text),
-                title="tu",
-                title_align="left",
-                border_style="#2f81f7",
-                padding=(0, 1),
-            )
-        )
+        line = Text()
+        line.append("› ", style="bold #58a6ff")
+        line.append(text, style="#e6edf3")
+        self.transcript().write(line)
+        self.transcript().write(Text(""))
 
     def write_assistant(self, text):
-        renderable = RichMarkdown(text) if text.strip() else Text("(nessun testo)")
-        self.transcript().write(
-            Panel(
-                renderable,
-                title="NOKK",
-                title_align="left",
-                border_style="#238636",
-                padding=(0, 1),
+        self.transcript().write(Text("✦ NOKK", style="bold #bc8cff"))
+        if text.strip():
+            self.transcript().write(
+                Padding(
+                    RichMarkdown(text, code_theme="github-dark"),
+                    (0, 0, 0, 2),
+                )
             )
-        )
+        else:
+            self.transcript().write(
+                Padding(Text("(nessun testo)", style="dim"), (0, 0, 0, 2))
+            )
+        self.transcript().write(Text(""))
 
     def write_system(self, text):
         self.transcript().write(
-            Text.assemble(("· ", "dim"), (text, "dim"))
+            Text.assemble(("  · ", "dim"), (text, "dim"))
         )
 
     def write_error(self, error):
-        body = Text(str(error), style="bold #f85149")
+        body = Text(str(error), style="#f85149")
         hint = getattr(error, "hint", None)
         if hint:
             body.append("\n" + str(hint), style="dim")
         self.transcript().write(
-            Panel(body, title="errore", border_style="#f85149", padding=(0, 1))
+            Text.assemble(("✖ ", "bold #f85149"), ("errore", "bold #f85149"))
         )
+        self.transcript().write(Padding(body, (0, 0, 0, 2)))
+        self.transcript().write(Text(""))
         self.activity_log().write(Text(f"errore: {error}", style="#f85149"))
 
     def write_command(self, result: LocalResult):
         color = "#3fb950" if result.exit_code == 0 else "#f85149"
         output = result.output.rstrip() or "(nessun output)"
         self.transcript().write(
-            Panel(
-                Text(truncate(output, 6000)),
-                title=f"shell · exit {result.exit_code}",
-                title_align="left",
-                border_style=color,
-                padding=(0, 1),
+            Text.assemble(
+                ("● ", f"bold {color}"),
+                ("shell", f"bold {color}"),
+                (f"  exit {result.exit_code}", "dim"),
             )
         )
+        self.transcript().write(
+            Padding(Text(truncate(output, 6000), style="#8b949e"), (0, 0, 0, 2))
+        )
+        self.transcript().write(Text(""))
         self.activity_log().write(
             Text.assemble(
                 ("shell ", f"bold {color}"),
@@ -1231,16 +1272,23 @@ class NokkTuiApp(App):
         executed = event.get("executed")
         color = "#3fb950" if executed is not False and exit_code in (0, None) else "#f85149"
         line = Text.assemble(
-            ("server ", f"bold {color}"),
-            (f"· exit {exit_code} · " if exit_code is not None else "· ", "dim"),
-            (str(command), ""),
+            ("● ", f"bold {color}"),
+            ("server", f"bold {color}"),
+            ("  ", ""),
+            (str(command), "#e6edf3"),
         )
+        if exit_code is not None:
+            line.append(f"  exit {exit_code}", style="dim")
         self.transcript().write(line)
         output = event.get("output")
         if isinstance(output, str) and output.strip():
             self.transcript().write(
-                Text(truncate(output.rstrip(), 1500), style="dim")
+                Padding(
+                    Text(truncate(output.rstrip(), 1500), style="#8b949e"),
+                    (0, 0, 0, 2),
+                )
             )
+        self.transcript().write(Text(""))
         self.activity_log().write(line)
 
     # ------------------------------------------------------------------ status
@@ -1318,9 +1366,7 @@ class NokkTuiApp(App):
         )
         self.query_one("#resources", Static).update(resources_text)
 
-        title = self.active_chat.title
-        if len(title) > 28:
-            title = title[:27] + "…"
+        title = ellipsis(self.active_chat.title, 24)
         widgets = Text()
         widgets.append("Profilo ", style="dim")
         widgets.append(("locale" if self.profile == "local" else "hosting") + "\n")
@@ -1345,13 +1391,45 @@ class NokkTuiApp(App):
         widgets.append("Agente  ", style="dim")
         widgets.append(("on" if self.agent else "off") + "\n")
         widgets.append("CWD     ", style="dim")
-        widgets.append(short_path(self.cwd, 30) + "\n")
+        widgets.append(short_path(self.cwd, 20) + "\n")
         widgets.append("Git     ", style="dim")
-        widgets.append(self._branch or "—")
+        widgets.append(ellipsis(self._branch, 20) if self._branch else "—")
         self.query_one("#widgets", Static).update(widgets)
 
+        self.refresh_topbar()
         self.refresh_statusline()
         self.refresh_sidebar()
+
+    def refresh_topbar(self):
+        if self.model_override:
+            model = (
+                f"{self.model_override['provider']}/"
+                f"{self.model_override['model']}"
+            )
+        else:
+            model = (
+                f"{self.health.get('provider') or '—'}/"
+                f"{self.health.get('model') or '—'}"
+            )
+        connection = (
+            "online" if self.online else ("offline" if self.online is False else "connessione…")
+        )
+        color = (
+            "#3fb950" if self.online else ("#f85149" if self.online is False else "#8b949e")
+        )
+        bar = Text()
+        bar.append("✦ ", style="#58a6ff")
+        bar.append("NOKK", style="bold #e6edf3")
+        bar.append("  terminal", style="dim")
+        bar.append("  ·  ", style="dim")
+        bar.append(ellipsis(model, 42), style="#8b949e")
+        bar.append("  ·  ", style="dim")
+        bar.append(connection, style=color)
+        bar.append("  ·  ", style="dim")
+        bar.append(f"agente {'on' if self.agent else 'off'}", style="dim")
+        bar.append("  ·  ", style="dim")
+        bar.append(self.profile, style="#8b949e")
+        self.query_one("#topbar", Static).update(bar)
 
     def show_stream(self, text):
         line = self.query_one("#streamline", Static)
@@ -1361,24 +1439,38 @@ class NokkTuiApp(App):
             line.update("")
             return
         line.display = True
-        line.update(Text(text[-1200:], style="#8b949e"))
+        line.update(Text.assemble(
+            ("✦ ", "bold #bc8cff"),
+            (text[-1200:], "#8b949e"),
+        ))
 
     def refresh_statusline(self):
         color = "#3fb950" if self.online else ("#f85149" if self.online is False else "#8b949e")
         label = "online" if self.online else ("offline" if self.online is False else "connessione…")
-        status = Text.assemble(
-            ("● ", color),
-            (label, color),
-            (" · ", "dim"),
-            (self.client.base_url, "dim"),
-            (" · ", "dim"),
-            (self.mode or "predefinita", ""),
-            (" · ", "dim"),
-            (self.status_detail, "#d7e0ea"),
-        )
+        status = Text()
+        status.append("● ", style=color)
+        status.append(label, style=color)
+        status.append("  ", style="")
+        status.append(short_path(self.cwd, 30), style="#8b949e")
+        if self._branch:
+            status.append("  ", style="")
+            status.append(f"git:{ellipsis(self._branch, 18)}", style="#8b949e")
+        status.append("  ·  ", style="dim")
+        status.append(self.mode or "predefinita", style="#c9d1d9")
+        status.append("  ·  ", style="dim")
+        status.append(self.status_detail, style="#e6edf3")
         if self.busy:
-            status.append("  ⏳", style="#d29922")
+            status.append(
+                f"  {SPINNER_FRAMES[self._spinner_frame]}",
+                style="#d29922",
+            )
         self.query_one("#statusline", Static).update(status)
+
+    def _tick_spinner(self):
+        if not self.busy:
+            return
+        self._spinner_frame = (self._spinner_frame + 1) % len(SPINNER_FRAMES)
+        self.refresh_statusline()
 
     def refresh_sidebar(self):
         agents = Text()
