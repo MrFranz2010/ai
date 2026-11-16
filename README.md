@@ -99,6 +99,21 @@ python nokk_cli.py --cwd / --exec "git status"
 Nelle esecuzioni one-shot i comandi sono bloccati per sicurezza: aggiungi `--yes`
 per approvarli automaticamente.
 
+### Attività persistenti
+
+I metadati delle richieste vengono salvati in `jobs.json` accanto alla
+configurazione (su Supabase nella variante hosting), così lo stato resta
+disponibile dopo un riavvio. Al riavvio le attività rimaste in corso vengono
+chiuse come fallite, perché il processo che le eseguiva non esiste più.
+
+Gli errori transitori del provider (`408`, `425`, `429`, `5xx`, timeout e
+connessione interrotta) vengono ritentati fino a tre volte con attesa crescente.
+Gli errori di autenticazione, modello o richiesta non vengono ritentati.
+
+Usa `/jobs` nella TUI o nella CLI per vedere attività recenti, provider,
+modello, durata, tentativi e ultimo errore. La stessa lista è disponibile su
+`GET /api/jobs` e, con una chiave API, su `GET /api/v1/jobs`.
+
 ### MCP
 
 `nokk_mcp.py` espone NOKK come server MCP su stdio con i tool `nokk_health` e

@@ -404,6 +404,23 @@ class SudoPasswordTests(unittest.TestCase):
         self.assertNotIn("segreta", result.command)
 
 
+class JobFormattingTests(unittest.TestCase):
+    def test_formats_status_provider_duration_and_error(self):
+        text = nokk_cli.format_jobs([{
+            "status": "failed",
+            "provider": "openai",
+            "model": "gpt-test",
+            "duration_seconds": 12.5,
+            "attempts": 3,
+            "last_error": "HTTP 503",
+        }])
+        self.assertIn("fallita", text)
+        self.assertIn("openai/gpt-test", text)
+        self.assertIn("12.5s", text)
+        self.assertIn("tentativi 3", text)
+        self.assertIn("HTTP 503", text)
+
+
 class WorkingDirectoryTests(unittest.TestCase):
     def test_resolves_an_existing_directory(self):
         with tempfile.TemporaryDirectory() as directory:

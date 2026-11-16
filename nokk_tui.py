@@ -58,6 +58,7 @@ from nokk_cli import (
     mask_key,
     infer_profile,
     needs_sudo_password,
+    format_jobs,
     normalize_base_url,
     normalize_mode,
     resolve_working_directory,
@@ -414,6 +415,7 @@ I comandi che NOKK vuole eseguire sul server passano da una conferma separata.
 | `/key` | imposta la chiave API |
 | `/server` | stato del server |
 | `/status` | sessione, connessione e configurazione |
+| `/jobs` | attività recenti, provider, durata ed errori |
 | `/config` | configurazione attuale |
 | `/settings` | profili locale/hosting e chiavi |
 | `/export [file]` | esporta la chat in Markdown |
@@ -1772,6 +1774,8 @@ class NokkTuiApp(App):
             self.show_git("diff" if name == "/diff" else argument)
         elif name == "/cancel":
             self.action_cancel_job()
+        elif name == "/jobs":
+            await self.show_jobs()
         elif name == "/config":
             self.show_config()
         elif name == "/export":
@@ -1853,6 +1857,14 @@ class NokkTuiApp(App):
             return
         lines = "\n".join(f"{key}: {value}" for key, value in data.items())
         self.write_system("Stato del server\n" + lines)
+
+    async def show_jobs(self):
+        try:
+            jobs = await asyncio.to_thread(self.client.jobs)
+        except CliError as error:
+            self.write_error(error)
+            return
+        self.write_system(format_jobs(jobs))
 
     def show_config(self):
         self.write_system(
