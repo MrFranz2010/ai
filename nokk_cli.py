@@ -382,6 +382,37 @@ def save_config(config, path):
         ) from None
 
 
+def format_jobs(jobs, limit=20):
+    if not jobs:
+        return "Nessuna attività registrata."
+    labels = {
+        "running": "in corso",
+        "retrying": "nuovo tentativo",
+        "awaiting_approval": "in attesa",
+        "complete": "completata",
+        "failed": "fallita",
+        "cancelled": "annullata",
+    }
+    lines = ["Attività recenti"]
+    for index, job in enumerate(jobs[:limit], start=1):
+        if not isinstance(job, dict):
+            continue
+        status = labels.get(job.get("status"), str(job.get("status") or "?"))
+        provider = job.get("provider") or "—"
+        model = job.get("model")
+        target = f"{provider}/{model}" if model else str(provider)
+        duration = job.get("duration_seconds")
+        duration_text = f"{duration:.1f}s" if isinstance(duration, (int, float)) else "—"
+        attempts = job.get("attempts")
+        attempt_text = f" · tentativi {attempts}" if attempts else ""
+        error = job.get("last_error") or job.get("error")
+        line = f"{index}. {status} · {target} · {duration_text}{attempt_text}"
+        if error:
+            line += f"\n   ultimo errore: {truncate(str(error), 240)}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def mask_key(key):
     if not key:
         return "(nessuna)"
@@ -529,6 +560,14 @@ class NokkClient:
             "action_id": action_id,
             "approved": bool(approved),
         })
+
+    def jobs(self):
+        path = "/api/v1/jobs" if self.versioned else "/api/jobs"
+        data = self._request("GET", path)
+        jobs = data.get("jobs")
+        if not isinstance(jobs, list):
+            raise CliError("Il server non ha restituito l'elenco delle attività.")
+        return jobs
 
     def cancel(self, job_id):
         if not isinstance(job_id, str) or not JOB_ID_RE.fullmatch(job_id):
@@ -1233,6 +1272,12 @@ class Session:
                 return True
             self._write(json.dumps(data, ensure_ascii=False, indent=2)[:8_000])
             return True
+        if name == "/jobs":
+            try:
+                self._write(format_jobs(self.client.jobs()))
+            except CliError as error:
+                self.error(error)
+            return True
         if name == "/config":
             self._write(f"server:   {self.client.base_url}")
             self._write(f"api key:  {mask_key(self.client.api_key)}")
@@ -1278,6 +1323,7 @@ Comandi del terminale NOKK
   /url [indirizzo]      mostra o cambia il server NOKK
   /key                  imposta (in modo nascosto) la chiave API
   /server               stato del server
+  /jobs                 attività recenti, provider, durata ed errori
   /config               configurazione attuale
   /exit                 esci
 

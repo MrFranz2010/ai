@@ -170,6 +170,19 @@ Con una chiave API usa sempre `/api/v1/*`; senza chiave usa le rotte del
 browser, comode su un NOKK locale. Le approvazioni dal terminale richiedono una
 versione del server che esponga la rotta `/api/v1/jobs/<id>/approval`.
 
+## Attività persistenti
+
+Il server conserva i metadati delle richieste in `jobs.json` (o in Supabase
+nell'hosting), quindi restano disponibili dopo un riavvio; le attività rimaste
+in corso vengono chiuse come fallite. Gli errori transitori del provider
+(`408`, `425`, `429`, `5xx`, timeout e connessione interrotta) vengono ritentati
+fino a tre volte con attesa crescente, mentre gli errori di autenticazione,
+modello o richiesta non vengono ritentati.
+
+Usa `/jobs` per vedere attività recenti, provider, modello, durata, tentativi e
+ultimo errore. La stessa lista è disponibile su `GET /api/jobs` e
+`GET /api/v1/jobs`.
+
 ## Test
 
 ```bash
