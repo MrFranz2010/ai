@@ -1526,8 +1526,8 @@ class NokkTuiApp(App):
     def active_chat(self):
         return self.chats[self.active_index]
 
-    def _persist_sessions(self):
-        if not self.save_sessions_enabled:
+    def _persist_sessions(self, force=False):
+        if not self.save_sessions_enabled and not force:
             return
         try:
             save_sessions(self.session_path, self.chats)
@@ -2112,7 +2112,7 @@ class NokkTuiApp(App):
         self.render_chat()
         self.refresh_chat_list()
         self.refresh_widgets()
-        self._persist_sessions()
+        self._persist_sessions(force=True)
         self.write_system(f"Eliminata {label} dalla memoria.")
 
     def resume_session(self, argument):
