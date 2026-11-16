@@ -68,6 +68,20 @@ python nokk_cli.py --exec "git status"
 Nelle esecuzioni one-shot i comandi sono bloccati per sicurezza: aggiungi `--yes`
 per approvarli automaticamente.
 
+### Client unificato
+
+Il terminale è disponibile anche nel ramo **`nokk-cli-unified`**, che contiene
+solo client, TUI e test. Si collega indifferentemente al NOKK locale o a quello
+hosting tramite i profili Locale/Hosting in `F2`, senza duplicare il codice del
+terminale. Non è un merge dei due rami server: le varianti desktop e hosting
+restano separate, come richiesto da `AGENTS.md`.
+
+```bash
+git switch nokk-cli-unified
+python -m pip install -r requirements-tui.txt
+python nokk_cli.py
+```
+
 Il server predefinito è `http://127.0.0.1:8000` (quello di `linux_start.py`).
 Per l'hosting indica l'indirizzo e una chiave API creata in **Impostazioni →
 API**, preferibilmente tramite variabili d'ambiente così la chiave non finisce
