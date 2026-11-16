@@ -65,6 +65,8 @@ from nokk_cli import (
 )
 
 SIDEBAR_MIN_WIDTH = 96
+MAX_SESSIONS = 30
+MAX_SESSION_MESSAGES = 400
 
 
 @dataclass
@@ -84,7 +86,7 @@ def load_sessions(path):
     if not isinstance(items, list):
         return []
     sessions = []
-    for item in items[:30]:
+    for item in items[:MAX_SESSIONS]:
         if not isinstance(item, dict):
             continue
         title = item.get("title")
@@ -93,7 +95,7 @@ def load_sessions(path):
         messages = []
         raw_messages = item.get("messages")
         if isinstance(raw_messages, list):
-            for message in raw_messages[-400:]:
+            for message in raw_messages[-MAX_SESSION_MESSAGES:]:
                 if not isinstance(message, dict):
                     continue
                 role = message.get("role")
@@ -120,9 +122,9 @@ def save_sessions(path, chats):
             {
                 "title": chat.title,
                 "created_at": chat.created_at,
-                "messages": chat.messages[-400:],
+                "messages": chat.messages[-MAX_SESSION_MESSAGES:],
             }
-            for chat in chats[:30]
+            for chat in chats[:MAX_SESSIONS]
         ],
     }
     path.write_text(
@@ -141,7 +143,7 @@ FILE_MENTION_RE = re.compile(r"(?<![\w@])@([^\s@]+)")
 
 
 def collect_file_context(text, cwd):
-    """Read @file mentions into a compact system context."""
+    """Read @file mentions into context for the next request."""
     cwd = Path(cwd).expanduser().resolve()
     seen = set()
     blocks = []
@@ -161,7 +163,8 @@ def collect_file_context(text, cwd):
             continue
         seen.add(path)
         try:
-            if path.stat().st_size > FILE_CONTEXT_LIMIT:
+            size = path.stat().st_size
+            if size > FILE_CONTEXT_LIMIT:
                 blocks.append(f"File: {path}\n(file troppo grande, non incluso)")
                 continue
             content = path.read_text(encoding="utf-8", errors="replace")
@@ -1305,14 +1308,11 @@ class NokkTuiApp(App):
             if role not in {"user", "assistant"} or not isinstance(content, str):
                 continue
             wire.append({"role": role, "content": truncate(content, 12_000)})
-        if self.agent and wire and wire[-1]["role"] == "user":
-            wire[-1]["content"] = self._wire(wire[-1]["content"])
-        if extra_context and wire and wire[-1]["role"] == "user":
-            wire[-1]["content"] = (
-                truncate(extra_context, 100_000)
-                + "\n\n"
-                + wire[-1]["content"]
-            )
+        if wire and wire[-1]["role"] == "user":
+            content = wire[-1]["content"]
+            if extra_context:
+                content = truncate(extra_context, 100_000) + "\n\n" + content
+            wire[-1]["content"] = self._wire(content) if self.agent else content
         return wire
 
     async def ask(self, text):
@@ -1677,7 +1677,7 @@ class NokkTuiApp(App):
 
     def list_sessions(self):
         lines = []
-        for index, chat in enumerate(self.chats[:30], start=1):
+        for index, chat in enumerate(self.chats[:MAX_SESSIONS], start=1):
             marker = "→" if index - 1 == self.active_index else " "
             count = sum(
                 1 for message in chat.messages if not message.get("hidden")
@@ -1733,14 +1733,13 @@ class NokkTuiApp(App):
             self.write_system("Modello della sessione: quello configurato sul server.")
             self.refresh_widgets()
             return
-        parts = argument.replace("/", " ", 1).split()
-        if len(parts) != 2 or not all(parts):
+        provider, separator, model = argument.partition("/")
+        provider, model = provider.strip(), model.strip()
+        if not separator or not provider or not model:
             self.write_system("Uso: /model <provider>/<modello>")
             return
-        self.model_override = {"provider": parts[0], "model": parts[1]}
-        self.write_system(
-            f"Modello della sessione: {parts[0]}/{parts[1]}"
-        )
+        self.model_override = {"provider": provider, "model": model}
+        self.write_system(f"Modello della sessione: {provider}/{model}")
         self.refresh_widgets()
 
     def show_git(self, argument):
@@ -1749,14 +1748,10 @@ class NokkTuiApp(App):
             code, output = git_output(self.cwd, ["status", "--short", "--branch"])
             title = "git status"
         elif mode in {"diff", "d", "staged", "--staged", "--cached"}:
-            args = ["diff", "--stat"]
-            if mode in {"staged", "--staged", "--cached"}:
-                args.append("--cached")
-            code, summary = git_output(self.cwd, args)
-            patch_args = ["diff"]
-            if mode in {"staged", "--staged", "--cached"}:
-                patch_args.append("--cached")
-            _, patch = git_output(self.cwd, patch_args)
+            staged = mode in {"staged", "--staged", "--cached"}
+            extra = ["--cached"] if staged else []
+            code, summary = git_output(self.cwd, ["diff", "--stat", *extra])
+            _, patch = git_output(self.cwd, ["diff", *extra])
             output = "\n".join(part for part in (summary, patch) if part)
             title = "git diff"
         elif mode == "log":
