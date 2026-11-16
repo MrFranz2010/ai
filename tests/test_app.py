@@ -630,6 +630,83 @@ class AppRouteTests(unittest.TestCase):
         self.assertNotIn("api_key", settings)
         self.assertNotIn("system_prompt", settings)
 
+    def test_planner_mutations_require_an_explicit_request(self):
+        self.assertFalse(app.has_explicit_planner_intent("Esegui npm test"))
+        self.assertFalse(
+            app.has_explicit_planner_intent("Crea un file con i compiti")
+        )
+        self.assertFalse(app.has_explicit_planner_intent("Che compiti ho?"))
+        self.assertTrue(app.has_explicit_planner_intent("Crea una task"))
+        self.assertTrue(
+            app.has_explicit_planner_intent("Aggiungi una verifica domani")
+        )
+        self.assertTrue(
+            app.has_explicit_planner_intent("Ricordami di comprare il pane")
+        )
+        with self.assertRaises(ValueError):
+            app.execute_app_tool(
+                "manage_planner_item",
+                {
+                    "section": "calendar",
+                    "action": "create",
+                    "title": "Evento casuale",
+                    "starts_at": "2026-11-20T10:00",
+                },
+                user_text="Esegui npm test nel terminale",
+            )
+        with self.assertRaises(ValueError):
+            app.execute_app_tool(
+                "google_calendar",
+                {"action": "delete", "event_id": "evento"},
+                user_text="Sistema il bug nel progetto",
+            )
+        self.assertEqual(app.planner["events"], [])
+
+    def test_chat_does_not_add_calendar_events_during_terminal_tasks(self):
+        with app.config_lock:
+            app.config.update({
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "api_key": "test-key-not-sent",
+                "terminal_enabled": False,
+                "approval_mode": "manual",
+                "workspace": str(Path(app.__file__).resolve().parent),
+                "system_prompt": "",
+            })
+        tool_response = {
+            "choices": [{
+                "message": {
+                    "content": None,
+                    "tool_calls": [{
+                        "id": "call-random-event",
+                        "type": "function",
+                        "function": {
+                            "name": "manage_planner_item",
+                            "arguments": json.dumps({
+                                "section": "calendar",
+                                "action": "create",
+                                "title": "Evento casuale",
+                                "starts_at": "2026-11-20T10:00",
+                            }),
+                        },
+                    }],
+                },
+            }],
+        }
+        responses = iter([
+            FakeResponse(tool_response),
+            FakeResponse({
+                "choices": [{"message": {"content": "Comando eseguito."}}],
+            }),
+        ])
+        with patch("app.urlopen", side_effect=lambda *_args, **_kwargs: next(responses)):
+            job = self.run_chat([
+                {"role": "user", "content": "Esegui npm test nel terminale"},
+            ])
+        self.assertEqual(app.planner["events"], [])
+        self.assertEqual(job["tool_events"][0]["executed"], False)
+        self.assertIn("manca una richiesta esplicita", job["tool_events"][0]["output"])
+
     def test_chat_can_use_app_tools_without_calling_a_real_provider(self):
         with app.config_lock:
             app.config.update({
