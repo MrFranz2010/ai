@@ -1,3 +1,4 @@
+import io
 import json
 import tempfile
 import threading
@@ -27,6 +28,10 @@ def sample_config():
 
 class ChatJobFailureTests(unittest.TestCase):
     def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.old_config_file = app.CONFIG_FILE
+        app.CONFIG_FILE = Path(self.directory.name) / "config.json"
+        app._chat_jobs_loaded = False
         self.job_id = uuid.uuid4().hex
         with app.chat_jobs_lock:
             app.chat_jobs.clear()
@@ -43,9 +48,15 @@ class ChatJobFailureTests(unittest.TestCase):
     def tearDown(self):
         with app.chat_jobs_lock:
             app.chat_jobs.clear()
+        app.CONFIG_FILE = self.old_config_file
+        app._chat_jobs_loaded = False
+        self.directory.cleanup()
 
     def run_job(self, error):
-        with patch("app.urlopen", side_effect=error):
+        with (
+            patch("app.urlopen", side_effect=error),
+            patch("app.time.sleep"),
+        ):
             app.run_chat_job(
                 self.job_id, [{"role": "user", "content": "ciao"}], self.config
             )
@@ -61,6 +72,54 @@ class ChatJobFailureTests(unittest.TestCase):
         job = self.run_job(ConnectionResetError("remote closed"))
         self.assertEqual(job["status"], "failed")
         self.assertIn("Connessione al provider interrotta", job["error"])
+
+    def test_a_transient_provider_error_is_retried(self):
+        failure = app.HTTPError(
+            "https://provider.example/chat", 503, "busy", {},
+            io.BytesIO(b"busy"),
+        )
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return b"{}"
+        with (
+            patch("app.urlopen", side_effect=[failure, Response()]) as urlopen,
+            patch("app.parse_tool_response", return_value=(
+                {"role": "assistant", "content": "ok"}, [],
+            )),
+            patch("app.time.sleep"),
+        ):
+            app.run_chat_job(
+                self.job_id, [{"role": "user", "content": "ciao"}], self.config
+            )
+        with app.chat_jobs_lock:
+            job = dict(app.chat_jobs[self.job_id])
+        self.assertEqual(urlopen.call_count, 2)
+        self.assertEqual(job["status"], "complete")
+        self.assertEqual(job["attempts"], 2)
+        self.assertIn("503", job["last_error"])
+
+    def test_an_authentication_error_is_not_retried(self):
+        failure = app.HTTPError(
+            "https://provider.example/chat", 401, "unauthorized", {},
+            io.BytesIO(b"unauthorized"),
+        )
+        with (
+            patch("app.urlopen", side_effect=[failure]) as urlopen,
+            patch("app.time.sleep"),
+        ):
+            app.run_chat_job(
+                self.job_id, [{"role": "user", "content": "ciao"}], self.config
+            )
+        with app.chat_jobs_lock:
+            job = dict(app.chat_jobs[self.job_id])
+        self.assertEqual(urlopen.call_count, 1)
+        self.assertEqual(job["status"], "failed")
 
     def test_an_unexpected_error_still_fails_the_job(self):
         job = self.run_job(RuntimeError("boom"))
@@ -124,6 +183,29 @@ class StaleJobEndpointTests(unittest.TestCase):
         self.assertEqual(payload["status"], "failed")
         self.assertIn("minuti", payload["error"])
 
+    def test_jobs_endpoint_lists_provider_duration_and_error(self):
+        job_id = self.make_job(2)
+        with app.chat_jobs_lock:
+            app.chat_jobs[job_id].update({
+                "status": "failed",
+                "provider": "openai",
+                "model": "gpt-test",
+                "started_at": time.time() - 2,
+                "finished_at": time.time(),
+                "duration_seconds": 2.0,
+                "attempts": 3,
+                "error": "HTTP 503",
+                "last_error": "HTTP 503",
+            })
+        with urlopen(f"{self.base_url}/api/jobs") as response:
+            payload = json.loads(response.read())
+        job = next(item for item in payload["jobs"] if item["id"] == job_id)
+        self.assertEqual(job["provider"], "openai")
+        self.assertEqual(job["model"], "gpt-test")
+        self.assertEqual(job["duration_seconds"], 2.0)
+        self.assertEqual(job["attempts"], 3)
+        self.assertEqual(job["last_error"], "HTTP 503")
+
     def test_a_fresh_job_stays_running(self):
         job_id = self.make_job(1)
         with urlopen(f"{self.base_url}/api/jobs/{job_id}") as response:
@@ -133,12 +215,19 @@ class StaleJobEndpointTests(unittest.TestCase):
 
 class ChatJobAccountingTests(unittest.TestCase):
     def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.old_config_file = app.CONFIG_FILE
+        app.CONFIG_FILE = Path(self.directory.name) / "config.json"
+        app._chat_jobs_loaded = False
         with app.chat_jobs_lock:
             app.chat_jobs.clear()
 
     def tearDown(self):
         with app.chat_jobs_lock:
             app.chat_jobs.clear()
+        app.CONFIG_FILE = self.old_config_file
+        app._chat_jobs_loaded = False
+        self.directory.cleanup()
 
     def add_job(self, status, age=0):
         with app.chat_jobs_lock:
@@ -168,6 +257,56 @@ class ChatJobAccountingTests(unittest.TestCase):
             job = next(iter(app.chat_jobs.values()))
             self.assertEqual(job["status"], "failed")
             self.assertEqual(app._active_chat_job_count_locked(), 0)
+
+    def test_completed_metadata_survives_a_restart(self):
+        job_id = uuid.uuid4().hex
+        now = time.time()
+        with app.chat_jobs_lock:
+            app.chat_jobs[job_id] = {
+                "status": "complete",
+                "created_at": now - 8,
+                "started_at": now - 8,
+                "finished_at": now,
+                "updated_at": now,
+                "duration_seconds": 8.0,
+                "provider": "openai",
+                "model": "gpt-test",
+                "attempts": 2,
+                "last_error": "HTTP 503",
+            }
+            app._save_chat_jobs_locked()
+        with app.chat_jobs_lock:
+            app.chat_jobs.clear()
+        app._chat_jobs_loaded = False
+        with app.chat_jobs_lock:
+            app._ensure_chat_jobs_loaded_locked()
+            restored = app.chat_jobs[job_id]
+        self.assertEqual(restored["status"], "complete")
+        self.assertEqual(restored["provider"], "openai")
+        self.assertEqual(restored["model"], "gpt-test")
+        self.assertEqual(restored["duration_seconds"], 8.0)
+        self.assertEqual(restored["attempts"], 2)
+
+    def test_an_active_job_is_closed_after_a_restart(self):
+        job_id = uuid.uuid4().hex
+        with app.chat_jobs_lock:
+            app.chat_jobs[job_id] = {
+                "status": "running",
+                "created_at": time.time(),
+                "updated_at": time.time(),
+                "provider": "openai",
+                "model": "gpt-test",
+            }
+            app._save_chat_jobs_locked()
+        with app.chat_jobs_lock:
+            app.chat_jobs.clear()
+        app._chat_jobs_loaded = False
+        with app.chat_jobs_lock:
+            app._ensure_chat_jobs_loaded_locked()
+            restored = app.chat_jobs[job_id]
+        self.assertEqual(restored["status"], "failed")
+        self.assertIn("riavviato", restored["error"])
+        self.assertIn("finished_at", restored)
 
     def test_finished_jobs_are_capped(self):
         for _ in range(app.MAX_STORED_CHAT_JOBS + 10):

@@ -128,6 +128,20 @@ server fidati e limita gli argomenti alla cartella che vuoi rendere accessibile.
 Le chiamate MCP non passano dalla conferma dei comandi del terminale, quindi il
 contenuto a cui il server può accedere dipende dai suoi permessi.
 
+## Attività persistenti
+
+I metadati delle richieste vengono salvati in `jobs.json` accanto alla
+configurazione, così lo stato resta disponibile dopo un riavvio. Al riavvio le
+attività rimaste in corso vengono chiuse come fallite, perché il processo che
+le eseguiva non esiste più.
+
+Gli errori transitori del provider (`408`, `425`, `429`, `5xx`, timeout e
+connessione interrotta) vengono ritentati fino a tre volte con attesa crescente.
+Gli errori di autenticazione, modello o richiesta non vengono ritentati.
+
+`GET /api/jobs` e `GET /api/v1/jobs` restituiscono attività recenti, provider,
+modello, durata, tentativi e ultimo errore.
+
 ## Note sulla cronologia chat
 
 Sono supportate fino a 100 chat, con fino a 500 messaggi testuali per chat. Gli
