@@ -201,6 +201,39 @@ configurazione, con le stesse protezioni locali.
 
 La creazione e l'attivazione di skill generate sono una fase successiva.
 
+## Server MCP esterni
+
+NOKK può avviare server MCP locali via stdio e usarne i tool durante una chat.
+I server si configurano nel file di configurazione, nella chiave `mcp_servers`:
+
+```json
+{
+  "mcp_servers": [
+    {
+      "name": "filesystem",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/home/tuo-utente/progetti"
+      ],
+      "enabled": true
+    }
+  ]
+}
+```
+
+I tool vengono esposti al modello come `mcp_<server>_<tool>`; NOKK scopre la
+lista all'avvio di ogni richiesta e inoltra le chiamate allo stesso processo.
+`env` può aggiungere variabili d'ambiente, mentre quelle del server non
+necessarie non vengono ereditate. Un server che non parte viene saltato senza
+bloccare la chat.
+
+Il comando del server esegue codice sulla macchina di NOKK: configura solo
+server fidati e limita gli argomenti alla cartella che vuoi rendere accessibile.
+Le chiamate MCP non passano dalla conferma dei comandi del terminale, quindi il
+contenuto a cui il server può accedere dipende dai suoi permessi.
+
 ## Test
 
 Esegui `python -m unittest discover -s tests`.
