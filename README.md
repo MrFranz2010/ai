@@ -81,6 +81,12 @@ la passa a sudo tramite stdin (`sudo -S`); nella modalità a righe la password
 viene chiesta con `getpass`. La password resta solo in memoria, non viene
 salvata, non compare nel transcript e non viene inviata al modello.
 
+Da `F2` (`/settings`) configuri anche: cartella iniziale, timeout delle attività,
+numero massimo di round dell'agente, esecuzione automatica dei comandi locali,
+streaming della risposta, salvataggio delle sessioni, segnale acustico finale e
+pannello di benvenuto. Le stesse impostazioni restano nel file `cli.json` e
+valgono anche per la CLI.
+
 - `!comando` esegue subito un comando locale e aggiunge l'output al contesto.
 - Con l'agente attivo, se NOKK propone un comando nel blocco `nokk-run`, il
   client chiede conferma, lo esegue **sulla macchina locale** e rimanda
