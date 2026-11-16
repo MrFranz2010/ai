@@ -3,10 +3,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import nokk_cli
 from nokk_cli import Config
 
 try:
-    from nokk_tui import NokkTuiApp
+    from nokk_tui import NokkTuiApp, SettingsScreen
     HAS_TUI = True
 except ImportError:
     HAS_TUI = False
@@ -160,6 +161,46 @@ class NokkTuiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(
                     app.active_chat.messages[-1]["content"], "Approvato."
                 )
+
+    async def test_settings_switch_between_local_and_hosting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cli.json"
+            app = NokkTuiApp(
+                Config(
+                    base_url="http://127.0.0.1:8000",
+                    api_key="local-key",
+                    profile="local",
+                    local_url="http://127.0.0.1:8000",
+                    local_api_key="local-key",
+                    hosting_url="https://nokk.example.com",
+                    hosting_api_key="hosting-key",
+                ),
+                path,
+                client=FakeClient(),
+            )
+            async with app.run_test(size=(120, 44)) as pilot:
+                await pilot.pause()
+                app.action_settings()
+                await pilot.pause()
+                self.assertIsInstance(app.screen, SettingsScreen)
+                screen = app.screen
+                screen.query_one("#settings-profile").value = "hosting"
+                await pilot.pause()
+                self.assertEqual(
+                    screen.query_one("#settings-url").value,
+                    "https://nokk.example.com",
+                )
+                screen.query_one("#settings-url").value = "https://new.example.com"
+                screen.query_one("#settings-key").value = "new-key"
+                screen.query_one("#settings-save").focus()
+                await pilot.press("enter")
+                self.assertTrue(await wait_until(pilot, lambda: app.profile == "hosting"))
+                self.assertEqual(app.client.base_url, "https://new.example.com")
+                self.assertEqual(app.client.api_key, "new-key")
+                saved = nokk_cli.read_config(path)
+                self.assertEqual(saved.hosting_url, "https://new.example.com")
+                self.assertEqual(saved.hosting_api_key, "new-key")
+                self.assertEqual(saved.local_url, "http://127.0.0.1:8000")
 
     async def test_narrow_terminal_hides_the_sidebar(self):
         with tempfile.TemporaryDirectory() as directory:

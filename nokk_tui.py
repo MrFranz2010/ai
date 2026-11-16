@@ -35,12 +35,15 @@ from textual.widgets import (
     ListItem,
     ListView,
     RichLog,
+    Select,
     Static,
+    Switch,
 )
 
 from nokk_cli import (
     AGENT_RULES,
     CONTINUE_RULES,
+    DEFAULT_BASE_URL,
     JOB_TIMEOUT,
     MAX_AGENT_ROUNDS,
     MAX_COMMANDS_PER_REPLY,
@@ -51,6 +54,7 @@ from nokk_cli import (
     NokkClient,
     extract_run_commands,
     mask_key,
+    infer_profile,
     normalize_base_url,
     normalize_mode,
     run_local,
@@ -245,11 +249,12 @@ I comandi che NOKK vuole eseguire sul server passano da una conferma separata.
 | `/key` | imposta la chiave API |
 | `/server` | stato del server |
 | `/config` | configurazione attuale |
+| `/settings` | profili locale/hosting e chiavi |
 | `/clear` | pulisce il transcript |
 
 `!comando` esegue subito un comando locale. `Ctrl+Q` esce, `Ctrl+N` apre una
-nuova chat, `Ctrl+B` mostra o nasconde la barra laterale e `F1` apre questo
-aiuto.
+nuova chat, `Ctrl+B` mostra o nasconde la barra laterale, `F1` apre l'aiuto
+e `F2` le impostazioni.
 """
 
 
@@ -266,6 +271,172 @@ class HelpScreen(ModalScreen[None]):
         self.dismiss(None)
 
     def action_close(self):
+        self.dismiss(None)
+
+
+MODE_OPTIONS = [
+    ("Predefinita", ""),
+    ("Codice", "codice"),
+    ("Studio", "studio"),
+    ("Analista", "analista"),
+]
+
+
+class SettingsScreen(ModalScreen[dict | None]):
+    """Impostazioni comuni per il profilo locale e quello hosting."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Annulla"),
+        Binding("ctrl+s", "save", "Salva"),
+    ]
+
+    def __init__(self, profile, profiles, mode, agent):
+        super().__init__()
+        self.profile = profile if profile in {"local", "hosting"} else "local"
+        self.profiles = {
+            name: {
+                "url": str(values.get("url") or ""),
+                "key": str(values.get("key") or ""),
+            }
+            for name, values in profiles.items()
+            if name in {"local", "hosting"}
+        }
+        self.profiles.setdefault("local", {"url": DEFAULT_BASE_URL, "key": ""})
+        self.profiles.setdefault("hosting", {"url": "", "key": ""})
+        self.mode = mode
+        self.agent = bool(agent)
+        self._ready = False
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="dialog", classes="settings-dialog"):
+            yield Static("Impostazioni", id="dialog-title")
+            yield Static(
+                "Scegli il profilo, poi modifica server e chiave. "
+                "Le due configurazioni restano salvate separatamente.",
+                id="dialog-text",
+            )
+            yield Label("Profilo")
+            yield Select(
+                [("Locale", "local"), ("Hosting", "hosting")],
+                value=self.profile,
+                allow_blank=False,
+                compact=True,
+                id="settings-profile",
+            )
+            yield Label("Server")
+            yield Input(
+                value=self.profiles[self.profile]["url"],
+                placeholder="http://127.0.0.1:8000",
+                compact=True,
+                id="settings-url",
+            )
+            yield Label("Chiave API")
+            yield Input(
+                value=self.profiles[self.profile]["key"],
+                placeholder="nokk_… (serve per l'hosting)",
+                password=True,
+                compact=True,
+                id="settings-key",
+            )
+            yield Label("Modalità")
+            yield Select(
+                MODE_OPTIONS,
+                value=self.mode or "",
+                allow_blank=True,
+                compact=True,
+                id="settings-mode",
+            )
+            yield Label("Comandi locali proposti dall'agente")
+            yield Switch(value=self.agent, id="settings-agent")
+            yield Static(id="settings-status")
+            with Horizontal(classes="dialog-buttons"):
+                yield Button("Prova connessione", id="settings-test", variant="default")
+                yield Button("Salva", id="settings-save", variant="primary")
+                yield Button("Annulla", id="settings-cancel", variant="default")
+
+    def on_mount(self):
+        self._ready = True
+        self.query_one("#settings-url", Input).focus()
+
+    def _capture_current(self):
+        self.profiles[self.profile] = {
+            "url": self.query_one("#settings-url", Input).value.strip(),
+            "key": self.query_one("#settings-key", Input).value.strip(),
+        }
+
+    def _load_profile(self):
+        values = self.profiles[self.profile]
+        self.query_one("#settings-url", Input).value = values["url"]
+        self.query_one("#settings-key", Input).value = values["key"]
+        self.query_one("#settings-profile", Select).value = self.profile
+
+    def on_select_changed(self, event: Select.Changed):
+        if event.select.id != "settings-profile" or not self._ready:
+            return
+        if event.value not in {"local", "hosting"} or event.value == self.profile:
+            return
+        self._capture_current()
+        self.profile = event.value
+        self._load_profile()
+        self.query_one("#settings-url", Input).focus()
+
+    def collect(self):
+        self._capture_current()
+        values = self.profiles[self.profile]
+        url = normalize_base_url(values["url"])
+        key = values["key"]
+        mode_value = self.query_one("#settings-mode", Select).value
+        mode = normalize_mode(mode_value if mode_value not in (None, Select.BLANK) else None)
+        agent = self.query_one("#settings-agent", Switch).value
+        self.profiles[self.profile] = {"url": url, "key": key}
+        return {
+            "profile": self.profile,
+            "profiles": {
+                name: dict(profile) for name, profile in self.profiles.items()
+            },
+            "mode": mode,
+            "agent": bool(agent),
+        }
+
+    def _set_status(self, text, color="#7d8b9a"):
+        self.query_one("#settings-status", Static).update(
+            Text(text, style=color)
+        )
+
+    async def test_connection(self):
+        try:
+            data = self.collect()
+            profile = data["profiles"][self.profile]
+            client = NokkClient(profile["url"], profile["key"])
+            health = await asyncio.to_thread(client.health)
+        except CliError as error:
+            self._set_status(f"Errore: {error}", "#f85149")
+            return
+        provider = health.get("provider") or "NOKK"
+        self._set_status(f"Connessione riuscita · {provider}", "#3fb950")
+
+    def save(self):
+        try:
+            data = self.collect()
+        except CliError as error:
+            self._set_status(f"Errore: {error}", "#f85149")
+            return
+        self.dismiss(data)
+
+    def on_button_pressed(self, event: Button.Pressed):
+        if event.button.id == "settings-test":
+            self.run_worker(
+                self.test_connection(), group="settings-test", exclusive=True,
+            )
+        elif event.button.id == "settings-save":
+            self.save()
+        elif event.button.id == "settings-cancel":
+            self.dismiss(None)
+
+    def action_save(self):
+        self.save()
+
+    def action_cancel(self):
         self.dismiss(None)
 
 
@@ -370,6 +541,20 @@ class NokkTuiApp(App):
     .dialog-buttons Button {
         margin-left: 1;
     }
+    .settings-dialog {
+        width: 84;
+    }
+    .settings-dialog Label {
+        color: #7d8b9a;
+        margin-top: 1;
+    }
+    .settings-dialog Input, .settings-dialog Select {
+        margin-bottom: 0;
+    }
+    #settings-status {
+        height: 2;
+        margin-top: 1;
+    }
     """
 
     BINDINGS = [
@@ -378,6 +563,7 @@ class NokkTuiApp(App):
         Binding("ctrl+b", "toggle_sidebar", "Sidebar", show=True),
         Binding("ctrl+l", "clear_view", "Pulisci", show=True),
         Binding("f1", "help", "Aiuto", show=True),
+        Binding("f2", "settings", "Impostazioni", show=True),
     ]
 
     def __init__(
@@ -393,6 +579,21 @@ class NokkTuiApp(App):
         super().__init__()
         self.client = client or NokkClient(config.base_url, config.api_key)
         self.config_path = Path(config_path)
+        self.profile = config.profile if config.profile in {"local", "hosting"} else infer_profile(config.base_url)
+        self.profiles = {
+            "local": {
+                "url": config.local_url or DEFAULT_BASE_URL,
+                "key": config.local_api_key,
+            },
+            "hosting": {
+                "url": config.hosting_url or "",
+                "key": config.hosting_api_key,
+            },
+        }
+        self.profiles[self.profile] = {
+            "url": self.client.base_url,
+            "key": self.client.api_key,
+        }
         self.mode = normalize_mode(config.mode)
         self.agent = bool(config.agent)
         self.auto_yes = bool(auto_yes)
@@ -487,6 +688,32 @@ class NokkTuiApp(App):
 
     def action_help(self):
         self.push_screen(HelpScreen())
+
+    def action_settings(self):
+        if self.busy:
+            self.notify("Attendi la risposta di NOKK.", severity="warning")
+            return
+        self.push_screen(
+            SettingsScreen(self.profile, self.profiles, self.mode, self.agent),
+            callback=self.apply_settings,
+        )
+
+    def apply_settings(self, data):
+        if not data:
+            return
+        self.profile = data["profile"]
+        self.profiles = data["profiles"]
+        self.mode = data["mode"]
+        self.agent = bool(data["agent"])
+        active = self.profiles[self.profile]
+        self.client.base_url = active["url"]
+        self.client.api_key = active["key"]
+        self.save()
+        self.write_system(
+            f"Profilo {self.profile} · {self.client.base_url}"
+        )
+        self.refresh_widgets()
+        self.run_worker(self.check_health(), group="health")
 
     # ------------------------------------------------------------------ output
     def transcript(self) -> RichLog:
@@ -670,6 +897,8 @@ class NokkTuiApp(App):
         if len(title) > 28:
             title = title[:27] + "…"
         widgets = Text()
+        widgets.append("Profilo ", style="dim")
+        widgets.append(("locale" if self.profile == "local" else "hosting") + "\n")
         widgets.append("Chat    ", style="dim")
         widgets.append(f"{title} · {visible_messages} msg\n")
         widgets.append("Mode    ", style="dim")
@@ -1036,6 +1265,8 @@ class NokkTuiApp(App):
             self.change_url(argument)
         elif name == "/key":
             await self.change_key()
+        elif name == "/settings":
+            self.action_settings()
         elif name == "/server":
             await self.show_server()
         elif name == "/config":
@@ -1085,6 +1316,10 @@ class NokkTuiApp(App):
         except CliError as error:
             self.write_error(error)
             return
+        self.profiles[self.profile] = {
+            "url": self.client.base_url,
+            "key": self.client.api_key,
+        }
         self.save()
         self.write_system(f"Server: {self.client.base_url}")
         self.run_worker(self.check_health(), group="health")
@@ -1094,6 +1329,7 @@ class NokkTuiApp(App):
         if key is None:
             return
         self.client.api_key = key
+        self.profiles[self.profile]["key"] = key
         self.save()
         self.write_system(
             "Chiave aggiornata." if key else "Chiave rimossa: uso le rotte locali."
@@ -1126,6 +1362,11 @@ class NokkTuiApp(App):
                 api_key=self.client.api_key,
                 mode=self.mode,
                 agent=self.agent,
+                profile=self.profile,
+                local_url=self.profiles["local"]["url"],
+                local_api_key=self.profiles["local"]["key"],
+                hosting_url=self.profiles["hosting"]["url"],
+                hosting_api_key=self.profiles["hosting"]["key"],
             ), self.config_path)
         except CliError as error:
             self.write_error(error)

@@ -97,7 +97,34 @@ class ConfigTests(unittest.TestCase):
                 agent=False,
             )
             nokk_cli.save_config(expected, path)
-            self.assertEqual(nokk_cli.read_config(path), expected)
+            loaded = nokk_cli.read_config(path)
+            self.assertEqual(loaded.base_url, expected.base_url)
+            self.assertEqual(loaded.api_key, expected.api_key)
+            self.assertEqual(loaded.mode, expected.mode)
+            self.assertEqual(loaded.agent, expected.agent)
+            self.assertEqual(loaded.profile, "hosting")
+            self.assertEqual(loaded.local_url, nokk_cli.DEFAULT_BASE_URL)
+
+    def test_keeps_local_and_hosting_profiles_separately(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cli.json"
+            nokk_cli.save_config(nokk_cli.Config(
+                base_url="http://127.0.0.1:8000",
+                api_key="local-key",
+                mode="codice",
+                agent=True,
+                profile="local",
+                local_url="http://127.0.0.1:8000",
+                local_api_key="local-key",
+                hosting_url="https://nokk.example.com",
+                hosting_api_key="hosting-key",
+            ), path)
+            loaded = nokk_cli.read_config(path)
+            self.assertEqual(loaded.profile, "local")
+            self.assertEqual(loaded.local_url, "http://127.0.0.1:8000")
+            self.assertEqual(loaded.local_api_key, "local-key")
+            self.assertEqual(loaded.hosting_url, "https://nokk.example.com")
+            self.assertEqual(loaded.hosting_api_key, "hosting-key")
 
     def test_missing_file_uses_defaults(self):
         with tempfile.TemporaryDirectory() as directory:

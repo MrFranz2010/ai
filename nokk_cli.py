@@ -89,6 +89,11 @@ class Config:
     api_key: str = ""
     mode: str | None = None
     agent: bool = True
+    profile: str = ""
+    local_url: str = ""
+    local_api_key: str = ""
+    hosting_url: str = ""
+    hosting_api_key: str = ""
 
 
 @dataclass
@@ -172,7 +177,7 @@ def normalize_base_url(value):
 
 
 def normalize_mode(value):
-    if value is None:
+    if value is None or not str(value).strip():
         return None
     key = str(value).strip().lower()
     if key not in MODE_ALIASES:
@@ -181,6 +186,15 @@ def normalize_mode(value):
             "Scegli codice, studio, analista oppure off.",
         )
     return MODE_ALIASES[key]
+
+
+def is_local_url(base_url):
+    host = (urlsplit(base_url).hostname or "").lower()
+    return host in {"127.0.0.1", "localhost", "::1"} or host.endswith(".localhost")
+
+
+def infer_profile(base_url):
+    return "local" if is_local_url(base_url) else "hosting"
 
 
 def default_config_path():
@@ -216,16 +230,81 @@ def read_config(path):
         config.mode = normalize_mode(saved["mode"])
     if isinstance(saved.get("agent"), bool):
         config.agent = saved["agent"]
+    config.profile = saved.get("profile")
+    if config.profile not in {"local", "hosting"}:
+        config.profile = infer_profile(config.base_url)
+    for name in ("local_url", "hosting_url"):
+        value = saved.get(name)
+        if isinstance(value, str) and value.strip():
+            setattr(config, name, normalize_base_url(value))
+    for name in ("local_api_key", "hosting_api_key"):
+        value = saved.get(name)
+        if isinstance(value, str):
+            setattr(config, name, value.strip())
+    if config.profile == "local":
+        if not config.local_url:
+            config.local_url = config.base_url
+        if not config.local_api_key:
+            config.local_api_key = config.api_key
+    else:
+        if not config.hosting_url:
+            config.hosting_url = config.base_url
+        if not config.hosting_api_key:
+            config.hosting_api_key = config.api_key
     return config
 
 
 def save_config(config, path):
     path = Path(path)
+    existing = {}
+    try:
+        if path.exists():
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(saved, dict):
+                existing = saved
+    except (OSError, ValueError):
+        existing = {}
+
+    profile = config.profile
+    if profile not in {"local", "hosting"}:
+        profile = existing.get("profile")
+    if profile not in {"local", "hosting"}:
+        profile = infer_profile(config.base_url)
+
+    explicit = bool(config.profile in {"local", "hosting"})
+    local_url = (
+        config.local_url if explicit and config.local_url
+        else existing.get("local_url") or DEFAULT_BASE_URL
+    )
+    local_api_key = (
+        config.local_api_key if explicit
+        else existing.get("local_api_key", "")
+    )
+    hosting_url = (
+        config.hosting_url if explicit and config.hosting_url
+        else existing.get("hosting_url", "")
+    )
+    hosting_api_key = (
+        config.hosting_api_key if explicit
+        else existing.get("hosting_api_key", "")
+    )
+    if profile == "local":
+        local_url = config.base_url
+        local_api_key = config.api_key
+    else:
+        hosting_url = config.base_url
+        hosting_api_key = config.api_key
+
     payload = {
         "base_url": normalize_base_url(config.base_url),
         "api_key": config.api_key,
         "mode": config.mode,
         "agent": bool(config.agent),
+        "profile": profile,
+        "local_url": normalize_base_url(local_url),
+        "local_api_key": local_api_key,
+        "hosting_url": normalize_base_url(hosting_url) if hosting_url else "",
+        "hosting_api_key": hosting_api_key,
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

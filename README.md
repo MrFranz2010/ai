@@ -51,8 +51,11 @@ lo esegue **sulla macchina locale** e restituisce l'output al modello; i comandi
 che NOKK vuole eseguire sul server restano soggetti alle approvazioni del server.
 
 Tasti: `Ctrl+Q` esce, `Ctrl+N` nuova chat, `Ctrl+B` mostra o nasconde la
-barra laterale, `Ctrl+L` pulisce il transcript e `F1` apre l'aiuto. Su terminali
-stretti la barra laterale si nasconde da sola. Se Textual non è installato, il
+barra laterale, `Ctrl+L` pulisce il transcript, `F1` apre l'aiuto e `F2` le
+impostazioni. Da `F2` (o `/settings`) scegli il profilo **Locale** o **Hosting**
+e modifichi server, chiave API, modalità e agente: i due profili restano salvati
+separatamente nello stesso file di configurazione. Su terminali stretti la
+barra laterale si nasconde da sola. Se Textual non è installato, il
 client ripiega sul terminale a righe; `--plain` lo forza e `--tui` richiede
 esplicitamente la TUI.
 
