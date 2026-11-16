@@ -303,6 +303,32 @@ class ChatJobAccountingTests(unittest.TestCase):
         listed = app.list_chat_jobs()
         self.assertNotIn(job_id, {item["id"] for item in listed})
 
+    def test_storage_outage_does_not_break_job_updates(self):
+        job_id = uuid.uuid4().hex
+        with app.chat_jobs_lock:
+            app.chat_jobs[job_id] = {
+                "status": "running",
+                "created_at": time.time(),
+                "updated_at": time.time(),
+            }
+            with patch(
+                "app.save_chat_jobs",
+                side_effect=Exception("storage non disponibile"),
+            ):
+                app._save_chat_jobs_locked()
+        with app.chat_jobs_lock:
+            self.assertEqual(app.chat_jobs[job_id]["status"], "running")
+
+    def test_storage_outage_does_not_break_job_loading(self):
+        with patch(
+            "app.load_chat_jobs",
+            side_effect=Exception("storage non disponibile"),
+        ):
+            app._chat_jobs_loaded = False
+            with app.chat_jobs_lock:
+                app._ensure_chat_jobs_loaded_locked()
+        self.assertTrue(app._chat_jobs_loaded)
+
     def test_an_active_job_is_closed_after_a_restart(self):
         job_id = uuid.uuid4().hex
         with app.chat_jobs_lock:

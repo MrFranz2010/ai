@@ -4455,7 +4455,7 @@ def _save_chat_jobs_locked():
             _job_metadata(job_id, job) for job_id, job in chat_jobs.items()
             if not job.get("ephemeral")
         ])
-    except (OSError, RuntimeError, ValueError) as error:
+    except Exception as error:  # noqa: BLE001 - jobs must not break chat
         print(f"Impossibile salvare le attività: {error}")
 
 
@@ -4465,7 +4465,12 @@ def _ensure_chat_jobs_loaded_locked():
         return
     _chat_jobs_loaded = True
     restored = False
-    for item in load_chat_jobs():
+    try:
+        stored_jobs = load_chat_jobs()
+    except Exception as error:  # noqa: BLE001 - jobs must not break chat
+        print(f"Impossibile leggere le attività: {error}")
+        stored_jobs = []
+    for item in stored_jobs:
         if not isinstance(item, dict):
             continue
         job_id = item.get("id")
