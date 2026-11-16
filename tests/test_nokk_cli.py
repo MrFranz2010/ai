@@ -33,9 +33,11 @@ class FakeClient:
         self.sent = []
         self.jobs = 0
         self.approvals = []
+        self.start_options = {}
 
-    def start_chat(self, messages, mode=None):
+    def start_chat(self, messages, mode=None, **options):
         self.sent.append([dict(message) for message in messages])
+        self.start_options = options
         return "a" * 32
 
     def job(self, _job_id):
@@ -201,6 +203,21 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(request.get_header("X-api-key"), "nokk_secret")
         self.assertEqual(json.loads(request.data)["mode"], "studio")
 
+    def test_local_client_disables_the_server_terminal(self):
+        with patch(
+            "nokk_cli.urllib.request.urlopen",
+            return_value=FakeResponse({"job_id": "d" * 32}),
+        ) as urlopen:
+            client = nokk_cli.NokkClient("https://nokk.example.com", "nokk_secret")
+            client.start_chat(
+                [{"role": "user", "content": "sistema il test"}],
+                terminal_enabled=False,
+                local_terminal=True,
+            )
+        payload = json.loads(urlopen.call_args.args[0].data)
+        self.assertIs(payload["terminal_enabled"], False)
+        self.assertIs(payload["local_terminal"], True)
+
     def test_approval_uses_the_v1_job_route(self):
         with patch(
             "nokk_cli.urllib.request.urlopen",
@@ -268,6 +285,8 @@ class SessionTests(unittest.TestCase):
             for message in session.messages
         ))
         self.assertEqual(len(client.sent), 2)
+        self.assertIs(client.start_options["terminal_enabled"], False)
+        self.assertIs(client.start_options["local_terminal"], True)
 
     def test_sudo_command_uses_the_password_prompt(self):
         client = FakeClient([])

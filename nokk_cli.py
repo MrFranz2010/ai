@@ -519,6 +519,7 @@ class NokkClient:
 
     def start_chat(
         self, messages, mode=None, provider=None, model=None, stream=False,
+        terminal_enabled=None, local_terminal=False,
     ):
         payload = {"messages": messages}
         if mode:
@@ -529,6 +530,10 @@ class NokkClient:
             payload["model"] = model
         if stream:
             payload["stream"] = True
+        if terminal_enabled is False:
+            payload["terminal_enabled"] = False
+        if local_terminal:
+            payload["local_terminal"] = True
         path = "/api/v1/chat" if self.versioned else "/api/chat"
         data = self._request("POST", path, payload)
         job_id = data.get("job_id")
@@ -924,7 +929,12 @@ class Session:
                 "role": message.get("role", "user"),
                 "content": truncate(content, 12_000),
             })
-        job_id = self.client.start_chat(trimmed, self.mode)
+        job_id = self.client.start_chat(
+            trimmed,
+            self.mode,
+            terminal_enabled=False if self.agent else None,
+            local_terminal=self.agent,
+        )
         return self._wait_for_job(job_id)
 
     def _wait_for_job(self, job_id):
