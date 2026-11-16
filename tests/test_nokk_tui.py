@@ -80,6 +80,17 @@ class AgentClient(FakeClient):
         return {"status": "complete", "reply": "Fatto."}
 
 
+class TaggedAgentClient(FakeClient):
+    def job(self, job_id):
+        self.jobs += 1
+        if self.jobs == 1:
+            return {
+                "status": "complete",
+                "reply": "Eseguo.\n```nokk-run\necho locale\n</parameter>\n",
+            }
+        return {"status": "complete", "reply": "Fatto."}
+
+
 class SudoAgentClient(FakeClient):
     def job(self, job_id):
         self.jobs += 1
@@ -231,6 +242,29 @@ class NokkTuiTests(unittest.IsolatedAsyncioTestCase):
                     and "locale" in message["content"]
                     for message in app.active_chat.messages
                 ))
+
+    async def test_agent_runs_a_block_closed_by_parameter_tag(self):
+        with tempfile.TemporaryDirectory() as directory:
+            calls = []
+
+            def runner(command, cwd, sudo_password=None):
+                calls.append(command)
+                return nokk_cli.LocalResult(command, 0, "ok")
+
+            app = NokkTuiApp(
+                Config(),
+                Path(directory) / "cli.json",
+                client=TaggedAgentClient(),
+                auto_yes=True,
+                cwd=directory,
+                runner=runner,
+            )
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                app.query_one("#prompt").value = "controlla"
+                await pilot.press("enter")
+                self.assertTrue(await wait_until(pilot, lambda: not app.busy))
+        self.assertEqual(calls, ["echo locale"])
 
     async def test_sudo_command_asks_for_a_hidden_password(self):
         with tempfile.TemporaryDirectory() as directory:

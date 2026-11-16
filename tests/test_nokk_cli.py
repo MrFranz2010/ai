@@ -61,6 +61,28 @@ class CliParsingTests(unittest.TestCase):
             ["python -m unittest", "echo fatto"],
         )
 
+    def test_accepts_parameter_tag_and_strips_xml(self):
+        reply = (
+            "Eseguo.\n"
+            "```nokk-run\ncd /tmp\necho ok\n</parameter>\n"
+        )
+        self.assertEqual(
+            nokk_cli.extract_run_commands(reply),
+            ["cd /tmp\necho ok"],
+        )
+        self.assertEqual(
+            nokk_cli.extract_run_commands(
+                "```nokk-run\n<parameter name=\"command\">echo ok</parameter>\n```"
+            ),
+            ["echo ok"],
+        )
+        self.assertEqual(
+            nokk_cli.extract_run_commands(
+                "```nokk-run\necho ok</parameter>\n```"
+            ),
+            ["echo ok"],
+        )
+
     def test_ignores_unclosed_blocks(self):
         self.assertEqual(
             nokk_cli.extract_run_commands("```nokk-run\necho ciao"),
