@@ -7005,10 +7005,17 @@ class AppHandler(BaseHTTPRequestHandler):
             data = self._read_json()
             if not isinstance(data, dict):
                 raise ValueError("Il corpo della richiesta deve essere un oggetto JSON.")
+            approval_job = None
+            if path.startswith("/api/v1/jobs/") and path.endswith("/approval"):
+                candidate = path[len("/api/v1/jobs/"):-len("/approval")]
+                if re.fullmatch(r"[a-f0-9]{32}", candidate):
+                    approval_job = candidate
             if path == "/api/v1/chat":
                 self._start_chat(data)
             elif path == "/api/v1/reminders":
                 self._save_reminder(data)
+            elif approval_job:
+                self._approve_action(approval_job, data)
             else:
                 self._send_json(404, {"error": "Endpoint non trovato."})
         except ValueError as error:

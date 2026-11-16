@@ -31,6 +31,7 @@ Ogni chiave accetta al massimo **60 richieste al minuto**; oltre si riceve
 | GET | `/api/v1/health` | Stato del servizio, senza chiave |
 | POST | `/api/v1/chat` | Avvia una conversazione |
 | GET | `/api/v1/jobs/<id>` | Legge l'esito di una conversazione |
+| POST | `/api/v1/jobs/<id>/approval` | Approva o rifiuta un comando in attesa |
 | POST | `/api/v1/reminders` | Crea un promemoria da testo italiano |
 | GET | `/api/v1/planner` | Elenca eventi e attività |
 
@@ -64,6 +65,21 @@ curl -sS https://tuo-nokk.onrender.com/api/v1/jobs/8f2c... \
 La risposta contiene `status` (`running`, `awaiting_approval`, `complete`,
 `failed`) e, quando la conversazione è finita, `reply` con il testo e
 `tool_events` con gli strumenti usati.
+
+### Approvare un comando
+
+Se lo stato è `awaiting_approval`, la risposta include `action` con `id`,
+`command` e `workspace`. Approva con la stessa chiave dell'attività:
+
+```bash
+curl -sS https://tuo-nokk.onrender.com/api/v1/jobs/8f2c.../approval \
+  -H "X-API-Key: nokk_..." \
+  -H "Content-Type: application/json" \
+  -d '{"action_id":"call-1","approved":true}'
+```
+
+Il client `nokk_cli.py` usa questa rotta per mostrare e approvare i comandi
+proposti dall'assistente; senza di essa un job in attesa resterebbe bloccato.
 
 ### Creare un promemoria
 

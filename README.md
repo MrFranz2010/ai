@@ -21,6 +21,38 @@ Il launcher `linux_start.py` mantiene la compatibilità con il server locale e a
 la cronologia delle chat. Su Linux le conversazioni sono salvate in `chats.json`
 accanto alla configurazione dell’app; puoi crearne molte, riaprirle ed eliminarle.
 
+## Terminale (`nokk`)
+
+`nokk_cli.py` è un client da terminale in stile Claude Code: usa lo stesso
+backend della pagina web e lavora nella cartella da cui lo avvii.
+
+```bash
+python nokk_cli.py
+python nokk_cli.py "controlla perché il test fallisce"
+python nokk_cli.py --exec "git status"
+```
+
+Nel terminale puoi scrivere normalmente all'assistente, usare `!comando` per
+eseguire subito un comando locale e `/help` per gli altri comandi (`/cd`,
+`/run`, `/agent`, `/mode`, `/url`, `/key`, `/server`). Con l'agente attivo,
+se NOKK propone un comando in un blocco `nokk-run`, il client chiede conferma,
+lo esegue **sulla macchina locale** e restituisce l'output al modello; i comandi
+che NOKK vuole eseguire sul server restano soggetti alle approvazioni del server.
+Nelle esecuzioni one-shot i comandi sono bloccati per sicurezza: aggiungi `--yes`
+per approvarli automaticamente.
+
+Il server predefinito è `http://127.0.0.1:8000` (quello di `linux_start.py`).
+Per l'hosting indica l'indirizzo e una chiave API creata in **Impostazioni →
+API**, preferibilmente tramite variabili d'ambiente così la chiave non finisce
+nella cronologia della shell:
+
+```bash
+NOKK_URL=https://tuo-nokk.onrender.com NOKK_API_KEY=nokk_... python nokk_cli.py
+```
+
+La chiave può anche essere impostata una volta con `/key` (viene chiesta in modo
+nascosto e salvata in `~/.config/nokk/cli.json` con permessi `600`).
+
 ## Ricerca web gratuita
 
 L'assistente usa lo strumento `web_search`, che restituisce titolo, URL ed

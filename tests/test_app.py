@@ -1362,6 +1362,87 @@ class AppRouteTests(unittest.TestCase):
         )
         self.assertEqual(json.loads(request.data)["model"], "openrouter/free")
 
+    def test_api_v1_can_approve_a_terminal_command(self):
+        record, secret = app._make_api_key_record("CLI test")
+        with app.api_lock:
+            app.api_config["enabled"] = True
+            app.api_config["keys"].append(record)
+        self.request_json("/api/config", {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "api_key": "test-secret",
+            "terminal_enabled": True,
+            "approval_mode": "manual",
+            "workspace": str(Path(app.APP_DIR).resolve()),
+        })
+        tool_response = FakeResponse({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{
+                        "id": "call-api-1",
+                        "type": "function",
+                        "function": {
+                            "name": "run_terminal_command",
+                            "arguments": '{"command":"pwd"}',
+                        },
+                    }],
+                },
+            }],
+        })
+        final_response = FakeResponse({
+            "choices": [{
+                "message": {"role": "assistant", "content": "Fatto."},
+            }],
+        })
+
+        def api(path, payload=None):
+            data = None if payload is None else json.dumps(payload).encode("utf-8")
+            request = Request(
+                f"{self.base_url}{path}",
+                data=data,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-API-Key": secret,
+                },
+                method="GET" if payload is None else "POST",
+            )
+            with urlopen(request) as response:
+                return json.loads(response.read())
+
+        with (
+            patch("app.urlopen", side_effect=[tool_response, final_response]),
+            patch(
+                "app.execute_terminal_command",
+                return_value={"exit_code": 0, "output": "cartella progetto"},
+            ),
+        ):
+            start = api("/api/v1/chat", {
+                "messages": [{"role": "user", "content": "dove sono?"}],
+            })
+            job_id = start["job_id"]
+            deadline = time.monotonic() + 5
+            approved = False
+            while time.monotonic() < deadline:
+                job = api(f"/api/v1/jobs/{job_id}")
+                if job["status"] == "awaiting_approval":
+                    api(f"/api/v1/jobs/{job_id}/approval", {
+                        "action_id": job["action"]["id"],
+                        "approved": True,
+                    })
+                    approved = True
+                elif job["status"] == "complete":
+                    break
+                elif job["status"] == "failed":
+                    self.fail(job.get("error", "Attività fallita"))
+                time.sleep(0.01)
+            else:
+                self.fail("Timeout in attesa del completamento via API v1")
+        self.assertTrue(approved)
+        self.assertEqual(job["reply"], "Fatto.")
+        self.assertEqual(job["tool_events"][0]["command"], "pwd")
+
     def test_terminal_command_waits_for_explicit_approval(self):
         self.request_json("/api/config", {
             "provider": "openai",
