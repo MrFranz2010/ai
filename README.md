@@ -147,6 +147,18 @@ terminale, le operazioni sui file e le richieste di codice non possono creare
 eventi. La modifica richiede una richiesta esplicita dell'utente nell'ultimo
 messaggio; in caso contrario il tool viene rifiutato e NOKK chiede conferma.
 
+## Aggiornamenti automatici
+
+`linux_start.py` controlla all'avvio il branch Git corrente e confronta `HEAD`
+con `origin`. Se ci sono nuovi commit applica solo un **fast-forward**, senza
+merge e senza perdere lavoro locale.
+
+L'aggiornamento viene saltato quando ci sono modifiche non committate, commit
+locali non pubblicati, un branch senza remote, Git o rete non disponibili, o
+quando cambiano `requirements.txt`/`requirements-tui.txt`. In quel caso reinstalla
+le dipendenze e riavvia. Si disattiva con `NOKK_AUTO_UPDATE=0`. L'hosting non si
+aggiorna da solo: usa il deploy del repository.
+
 ## Attività persistenti
 
 I metadati delle richieste vengono salvati in `jobs.json` accanto alla

@@ -2,6 +2,10 @@ import json
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
+from updater import auto_update
+
+auto_update(notify=print, restart_required=False)
+
 import app
 from user_memory import install, validate_memories
 
