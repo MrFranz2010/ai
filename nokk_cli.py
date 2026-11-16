@@ -599,12 +599,8 @@ def _sudo_positions(command):
         if text in {"then", "do", "else", "elif", "if", "while", "until", "!", "time", "{"}:
             continue
         expect_command = False
-        if text != "sudo":
-            continue
-        next_word = words[index + 1] if index + 1 < len(words) else None
-        if next_word and not next_word[3] and next_word[2] in {"-S", "--stdin"}:
-            continue
-        positions.append((start, end))
+        if text == "sudo":
+            positions.append((start, end))
     return positions
 
 
@@ -614,11 +610,104 @@ def needs_sudo_password(command):
 
 
 def ensure_sudo_stdin(command):
-    """Aggiunge -S ai comandi sudo così la password può arrivare da stdin."""
-    replacements = _sudo_positions(command or "")
+    """Aggiunge -S ai comandi sudo che non ce l'hanno già."""
+    command = command or ""
+    words = _shell_words(command)
+    replacements = []
+    for start, end in _sudo_positions(command):
+        index = next(
+            (i for i, word in enumerate(words) if word[0] == start), None,
+        )
+        next_word = words[index + 1] if index is not None and index + 1 < len(words) else None
+        has_stdin = bool(
+            next_word and not next_word[3] and next_word[2] in {"-S", "--stdin"}
+        )
+        if not has_stdin:
+            replacements.append((start, end))
     for start, end in reversed(replacements):
         command = command[:start] + "sudo -S" + command[end:]
     return command
+
+
+def _sudo_needs_tty(output):
+    text = (output or "").lower()
+    return "sudo:" in text and any(
+        marker in text for marker in (
+            "a terminal is required",
+            "no tty present",
+            "must have a tty",
+            "no askpass program",
+        )
+    )
+
+
+def _run_sudo_with_tty(command, cwd, timeout, password):
+    """Esegue sudo su un pseudo-terminale per i sistemi che lo richiedono."""
+    import pty
+    import select
+    import termios
+
+    master, slave = pty.openpty()
+    try:
+        attrs = termios.tcgetattr(slave)
+        attrs[3] &= ~termios.ECHO
+        termios.tcsetattr(slave, termios.TCSANOW, attrs)
+        process = subprocess.Popen(
+            command,
+            shell=True,
+            cwd=str(cwd),
+            stdin=slave,
+            stdout=slave,
+            stderr=slave,
+            close_fds=True,
+            start_new_session=True,
+        )
+        os.close(slave)
+        slave = None
+        try:
+            os.write(master, (password + "\n").encode("utf-8", "replace"))
+        except OSError:
+            pass
+        chunks = []
+        deadline = time.monotonic() + timeout
+        timed_out = False
+        while True:
+            if process.poll() is not None:
+                while True:
+                    ready, _, _ = select.select([master], [], [], 0)
+                    if not ready:
+                        break
+                    try:
+                        data = os.read(master, 65536)
+                    except OSError:
+                        data = b""
+                    if not data:
+                        break
+                    chunks.append(data)
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                process.kill()
+                break
+            ready, _, _ = select.select([master], [], [], min(0.1, remaining))
+            if not ready:
+                continue
+            try:
+                data = os.read(master, 65536)
+            except OSError:
+                break
+            if not data:
+                break
+            chunks.append(data)
+        process.wait(timeout=5)
+        output = b"".join(chunks).decode("utf-8", "replace")
+        output = output.replace("\r\n", "\n").replace("\r", "\n")
+        return process.returncode, output, timed_out
+    finally:
+        if slave is not None:
+            os.close(slave)
+        os.close(master)
 
 
 def prompt_sudo_password(command):
@@ -676,7 +765,19 @@ def run_local(command, cwd, timeout=LOCAL_TIMEOUT, sudo_password=None):
         return LocalResult(command, 124, output, True)
     except OSError as error:
         raise CliError(f"Non riesco a eseguire il comando: {error}") from None
-    return LocalResult(command, completed.returncode, completed.stdout or "")
+    output = completed.stdout or ""
+    if password and completed.returncode != 0 and _sudo_needs_tty(output):
+        try:
+            returncode, tty_output, timed_out = _run_sudo_with_tty(
+                command, directory, timeout, password,
+            )
+        except (ImportError, OSError):
+            pass
+        else:
+            if timed_out:
+                tty_output += f"\n[comando interrotto dopo {timeout} secondi]"
+            return LocalResult(command, returncode, tty_output, timed_out)
+    return LocalResult(command, completed.returncode, output)
 
 
 class Session:

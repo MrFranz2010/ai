@@ -345,16 +345,43 @@ class SudoPasswordTests(unittest.TestCase):
             "echo pronto | sudo -S tee out",
         )
 
-    def test_keeps_existing_stdin_flag(self):
+    def test_keeps_existing_stdin_flag_and_still_asks_for_a_password(self):
         self.assertEqual(
             nokk_cli.ensure_sudo_stdin("sudo -S apt update"),
             "sudo -S apt update",
         )
+        self.assertTrue(nokk_cli.needs_sudo_password("sudo -S apt update"))
 
     def test_ignores_sudo_words_and_quoted_text(self):
         for command in ("echo sudo", 'echo "sudo apt"', "sudoedit file"):
             self.assertFalse(nokk_cli.needs_sudo_password(command))
             self.assertEqual(nokk_cli.ensure_sudo_stdin(command), command)
+
+    def test_falls_back_to_a_tty_when_sudo_requires_one(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "bin"
+            binary.mkdir()
+            fake_sudo = binary / "sudo"
+            fake_sudo.write_text(
+                "#!/bin/sh\n"
+                "if [ ! -t 0 ]; then\n"
+                "  echo 'sudo: a terminal is required to read the password' >&2\n"
+                "  exit 1\n"
+                "fi\n"
+                "read -r password\n"
+                "printf 'tty:%s' \"$password\"\n",
+                encoding="utf-8",
+            )
+            fake_sudo.chmod(fake_sudo.stat().st_mode | stat.S_IXUSR)
+            with patch.dict(os.environ, {
+                "PATH": f"{binary}{os.pathsep}{os.environ.get('PATH', '')}",
+            }):
+                result = nokk_cli.run_local(
+                    "sudo true", directory, sudo_password="segreta",
+                )
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(result.output.strip(), "tty:segreta")
+        self.assertNotIn("segreta", result.command)
 
     def test_password_is_sent_on_stdin_and_not_in_the_command(self):
         with tempfile.TemporaryDirectory() as directory:
