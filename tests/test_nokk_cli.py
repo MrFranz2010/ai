@@ -1,4 +1,6 @@
 import json
+import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -232,6 +234,46 @@ class SessionTests(unittest.TestCase):
         ))
         self.assertEqual(len(client.sent), 2)
 
+    def test_sudo_command_uses_the_password_prompt(self):
+        client = FakeClient([])
+        with tempfile.TemporaryDirectory() as directory:
+            calls = []
+
+            def runner(command, cwd, sudo_password=None):
+                calls.append((command, Path(cwd), sudo_password))
+                return nokk_cli.LocalResult(command, 0, "ok")
+
+            session = nokk_cli.Session(
+                client,
+                Path(directory) / "cli.json",
+                agent=False,
+                interactive=False,
+                cwd=directory,
+                out=lambda _line: None,
+                runner=runner,
+                password_prompt=lambda _command: "segreta",
+            )
+            self.assertTrue(session.run_local_and_remember("sudo id"))
+        self.assertEqual(calls[0][0], "sudo id")
+        self.assertEqual(calls[0][2], "segreta")
+
+    def test_cancelled_sudo_prompt_does_not_run_the_command(self):
+        client = FakeClient([])
+        with tempfile.TemporaryDirectory() as directory:
+            calls = []
+            session = nokk_cli.Session(
+                client,
+                Path(directory) / "cli.json",
+                agent=False,
+                interactive=False,
+                cwd=directory,
+                out=lambda _line: None,
+                runner=lambda *args, **kwargs: calls.append(args),
+                password_prompt=lambda _command: None,
+            )
+            self.assertFalse(session.run_local_and_remember("sudo id"))
+        self.assertEqual(calls, [])
+
     def test_local_command_is_added_to_context(self):
         client = FakeClient([])
         with tempfile.TemporaryDirectory() as directory:
@@ -249,6 +291,55 @@ class SessionTests(unittest.TestCase):
             self.assertTrue(session.run_local_and_remember("echo ok"))
         self.assertIn("echo ok", session.messages[-1]["content"])
         self.assertIn("ok", session.messages[-1]["content"])
+
+
+class SudoPasswordTests(unittest.TestCase):
+    def test_adds_stdin_flag_to_a_sudo_command(self):
+        self.assertEqual(
+            nokk_cli.ensure_sudo_stdin("sudo apt update"),
+            "sudo -S apt update",
+        )
+
+    def test_adds_stdin_flag_after_shell_separators(self):
+        self.assertEqual(
+            nokk_cli.ensure_sudo_stdin("cd / && sudo rm file"),
+            "cd / && sudo -S rm file",
+        )
+        self.assertEqual(
+            nokk_cli.ensure_sudo_stdin("echo pronto | sudo tee out"),
+            "echo pronto | sudo -S tee out",
+        )
+
+    def test_keeps_existing_stdin_flag(self):
+        self.assertEqual(
+            nokk_cli.ensure_sudo_stdin("sudo -S apt update"),
+            "sudo -S apt update",
+        )
+
+    def test_ignores_sudo_words_and_quoted_text(self):
+        for command in ("echo sudo", 'echo "sudo apt"', "sudoedit file"):
+            self.assertFalse(nokk_cli.needs_sudo_password(command))
+            self.assertEqual(nokk_cli.ensure_sudo_stdin(command), command)
+
+    def test_password_is_sent_on_stdin_and_not_in_the_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "bin"
+            binary.mkdir()
+            fake_sudo = binary / "sudo"
+            fake_sudo.write_text(
+                "#!/bin/sh\nread -r password\nprintf '%s' \"$password\"\n",
+                encoding="utf-8",
+            )
+            fake_sudo.chmod(fake_sudo.stat().st_mode | stat.S_IXUSR)
+            with patch.dict(os.environ, {
+                "PATH": f"{binary}{os.pathsep}{os.environ.get('PATH', '')}",
+            }):
+                result = nokk_cli.run_local(
+                    "sudo -n true", directory, sudo_password="segreta",
+                )
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(result.output, "segreta")
+        self.assertNotIn("segreta", result.command)
 
 
 class WorkingDirectoryTests(unittest.TestCase):

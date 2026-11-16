@@ -49,6 +49,11 @@ usando anche percorsi assoluti fuori da quella cartella. La directory indicata √
 solo il punto di partenza. Nella TUI puoi cambiarla in qualsiasi momento con
 `/cd /` (Linux/macOS), `/cd C:\` (Windows) o `/cd ~`.
 
+Se un comando usa `sudo`, la TUI mostra una richiesta nascosta per la password e
+la passa a sudo tramite stdin (`sudo -S`); nella modalit√† a righe la password
+viene chiesta con `getpass`. La password resta solo in memoria, non viene
+salvata, non compare nel transcript e non viene inviata al modello.
+
 Nella TUI puoi scrivere normalmente all'assistente, usare `!comando` per
 eseguire subito un comando locale e `/help` per gli altri comandi (`/cd`,
 `/run`, `/agent`, `/mode`, `/url`, `/key`, `/server`, `/status`, `/export`,
