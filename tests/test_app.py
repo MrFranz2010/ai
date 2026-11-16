@@ -1153,6 +1153,14 @@ class AppRouteTests(unittest.TestCase):
             "NOKK section tools",
             provider_payload["messages"][0]["content"],
         )
+        self.assertIn(
+            "Consapevolezza operativa di NOKK",
+            provider_payload["messages"][0]["content"],
+        )
+        self.assertIn(
+            "provider openai",
+            provider_payload["messages"][0]["content"],
+        )
 
     def test_config_keeps_api_keys_when_switching_provider(self):
         self.request_json("/api/config", {

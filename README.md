@@ -106,6 +106,14 @@ a Internet. `/api/config` non restituisce mai la chiave al browser.
 Il token Telegram viene salvato separatamente in `telegram.json`, accanto alla
 configurazione, con le stesse protezioni locali.
 
+## Consapevolezza operativa
+
+NOKK riceve nel system prompt una descrizione del proprio stato: identità di
+assistente software, provider e modello in uso, modalità, numero di attività
+attive, terminale e strumenti disponibili. La descrizione include anche i limiti:
+NOKK non ha sensi, non percepisce file o rete senza uno strumento e non deve
+dichiarare azioni non confermate. Non vengono esposte chiavi API o altri segreti.
+
 ## Attività persistenti
 
 I metadati delle richieste vengono salvati in `jobs.json` nella tabella privata

@@ -314,6 +314,82 @@ def build_current_datetime_context(now=None):
     )
 
 
+def build_self_awareness_context(
+    active_config=None, mode=None, mcp_tools=None, active_jobs=None,
+):
+    """Describe NOKK's identity, runtime state and limits without overclaiming."""
+    config = active_config if isinstance(active_config, dict) else {}
+    provider = config.get("provider") or "non configurato"
+    model = config.get("model") or "non configurato"
+    mode_label = mode if mode in CHAT_MODES else "predefinita"
+    status = [
+        f"provider {provider}",
+        f"modello {model}",
+        f"modalità {mode_label}",
+    ]
+    if isinstance(active_jobs, int) and active_jobs >= 0:
+        status.append(f"{active_jobs} attività attive")
+    capabilities = ["conversazione e analisi del testo"]
+    capabilities.append(
+        "allegati testuali e immagini quando il provider li supporta"
+    )
+    available_tools = (
+        globals().get("ALL_APP_TOOLS") or globals().get("APP_TOOLS") or []
+    )
+    tool_names = {
+        tool.get("name") for tool in available_tools if isinstance(tool, dict)
+    }
+    if config.get("app_tools_enabled", True):
+        capabilities.append(
+            "strumenti NOKK per calendario, attività, procedure, ricerca web, "
+            "lettura di pagine ed esportazione di file"
+        )
+        if "read_repository_file" in tool_names:
+            capabilities.append(
+                "lettura del tuo codice sorgente e apertura di pull request"
+                if "create_pull_request" in tool_names
+                and globals().get("GITHUB_TOKEN")
+                else "lettura del tuo codice sorgente"
+            )
+    approval_mode = config.get("approval_mode")
+    if config.get("terminal_enabled"):
+        approval_label = (
+            "automatica per i comandi di sola lettura"
+            if approval_mode == "auto_readonly"
+            else "manuale"
+        )
+        environment = (
+            "Il terminale è abilitato nella cartella "
+            f"{config.get('workspace') or 'configurata'}, con approvazione "
+            f"{approval_label}."
+        )
+        capabilities.append("esecuzione di comandi nel terminale")
+    else:
+        environment = "Il terminale non è disponibile in questa sessione."
+    if mcp_tools:
+        mcp_count = len(mcp_tools)
+        mcp_label = f"{mcp_count} strument{'o' if mcp_count == 1 else 'i'} MCP"
+        capabilities.append(f"{mcp_label} configurati")
+        environment += f" Sono presenti {mcp_label}."
+    if not config.get("app_tools_enabled", True):
+        environment += " Gli strumenti NOKK sono disabilitati."
+    return (
+        "Consapevolezza operativa di NOKK. Sei NOKK, un assistente AI eseguito "
+        "come software: non sei una persona e non hai corpo, sensi, emozioni o "
+        "esperienze dirette. Il provider e il modello indicati sotto eseguono le "
+        "risposte, ma non sono la tua identità. Conosci solo ciò che ricevi nella "
+        "conversazione, nella configurazione e nei risultati degli strumenti.\n"
+        f"Stato corrente: {', '.join(status)}.\n"
+        f"Capacità disponibili in questa sessione: {', '.join(capabilities)}.\n"
+        f"Ambiente: {environment}\n"
+        "Limiti: non hai memoria persistente oltre ai messaggi forniti e ai "
+        "metadati delle attività; non percepire file, rete o dispositivi senza "
+        "uno strumento; non affermare di aver eseguito un'azione finché il "
+        "risultato dello strumento non lo conferma. Se ti chiedono chi sei o cosa "
+        "puoi fare, usa queste informazioni e non inventare capacità."
+    )
+
+
 def build_current_datetime_message(now=None):
     now = now or _local_now()
     date_label = (
@@ -4326,8 +4402,15 @@ def run_chat_job(job_id, messages, active_config, mode=None):
             "Sono server esterni fidati: non inventare risultati e riporta gli "
             "errori restituiti dal tool.",
         ))
+    with chat_jobs_lock:
+        active_jobs = _active_chat_job_count_locked()
+    self_awareness = build_self_awareness_context(
+        active_config, mode, mcp_tools, active_jobs,
+    )
     system_prompt = "\n\n".join(
-        part for part in (system_prompt, build_current_datetime_context()) if part
+        part for part in (
+            system_prompt, build_current_datetime_context(), self_awareness,
+        ) if part
     )
     try:
         round_index = 0
