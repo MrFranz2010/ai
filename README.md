@@ -79,11 +79,12 @@ python nokk_cli.py --exec "git status"
 - Nelle esecuzioni one-shot i comandi sono bloccati per sicurezza; `--yes` li
   approva automaticamente.
 - `/new`, `/cd`, `/run`, `/agent`, `/mode`, `/url`, `/key`, `/server`,
-  `/status`, `/config`, `/settings`, `/export` e `/retry` sono disponibili
-  anche come comandi slash.
-- `/export [file]` salva la chat corrente in Markdown, `/retry` ripete l'ultima
-  domanda e `/status` riassume connessione, provider, modello, directory e
-  configurazione.
+  `/status`, `/config`, `/settings`, `/export`, `/copy` e `/retry` sono
+  disponibili anche come comandi slash.
+- `/export [file]` salva la chat corrente in Markdown, `/copy [numero|all]`
+  copia l'ultima risposta, una risposta precedente o tutto il transcript,
+  `/retry` ripete l'ultima domanda e `/status` riassume connessione, provider,
+  modello, directory e configurazione.
 
 ### Tasti della TUI
 
@@ -93,6 +94,7 @@ python nokk_cli.py --exec "git status"
 | `Ctrl+N` | nuova chat |
 | `Ctrl+B` | mostra/nascondi la barra laterale |
 | `Ctrl+E` | esporta la chat in Markdown |
+| `Ctrl+Y` | copia l'ultima risposta |
 | `Ctrl+R` | ripete l'ultima domanda |
 | `Ctrl+L` | pulisci il transcript |
 | `F1` | aiuto |
