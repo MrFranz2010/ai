@@ -224,6 +224,25 @@ class NokkTuiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("## NOKK\n\n**Risposta**", exported)
                 self.assertNotIn("nascosto", exported)
 
+    async def test_ctrl_e_exports_without_opening_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = NokkTuiApp(
+                Config(),
+                Path(directory) / "cli.json",
+                client=FakeClient(),
+                cwd=directory,
+            )
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                app.active_chat.messages.append(
+                    {"role": "user", "content": "scorciatoia"}
+                )
+                await pilot.press("ctrl+e")
+                await pilot.pause()
+                exported = list(Path(directory).glob("nokk-chat-*.md"))
+                self.assertEqual(len(exported), 1)
+                self.assertIn("scorciatoia", exported[0].read_text(encoding="utf-8"))
+
     async def test_retry_replaces_the_last_answer(self):
         with tempfile.TemporaryDirectory() as directory:
             app = NokkTuiApp(
