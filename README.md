@@ -105,7 +105,7 @@ valgono anche per la CLI.
   `/retry` ripete l'ultima domanda e `/status` riassume connessione, provider,
   modello, directory e configurazione.
 - Le sessioni sono salvate in `sessions.json` accanto a `cli.json`:
-  `/sessions`, `/resume <n>` e `/rename <titolo>`.
+  `/sessions`, `/delete [n|all]`, `/resume <n>` e `/rename <titolo>`.
 - `/model <provider>/<modello>` sceglie il modello per la sessione;
   `@file` allega file al contesto; `/diff`, `/git status` e `/git log`
   mostrano il repository.

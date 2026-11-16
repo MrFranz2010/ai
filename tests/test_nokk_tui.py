@@ -1,4 +1,5 @@
 import asyncio
+import json
 import subprocess
 import tempfile
 import unittest
@@ -12,6 +13,7 @@ from nokk_cli import Config
 
 try:
     from nokk_tui import (
+        ChatSession,
         NokkTuiApp,
         SettingsScreen,
         SudoPasswordScreen,
@@ -462,6 +464,52 @@ class NokkTuiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(
                     second.chats[0].messages[-1]["content"], "memorizzata"
                 )
+
+    async def test_delete_removes_the_active_chat_from_memory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cli.json"
+            app = NokkTuiApp(
+                Config(), path, client=FakeClient(), auto_yes=True,
+            )
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                app.chats.append(ChatSession(
+                    "Seconda", [{"role": "user", "content": "da eliminare"}],
+                ))
+                app.active_index = 1
+                app.messages = app.active_chat.messages
+                app.refresh_chat_list()
+                await app.handle_command("/delete")
+                self.assertEqual([chat.title for chat in app.chats], ["Chat 1"])
+                self.assertEqual(app.active_index, 0)
+            saved = json.loads(
+                (Path(directory) / "sessions.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual([chat["title"] for chat in saved["chats"]], ["Chat 1"])
+
+    async def test_delete_all_resets_to_a_fresh_chat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cli.json"
+            app = NokkTuiApp(
+                Config(), path, client=FakeClient(), auto_yes=True,
+            )
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                app.chats.append(ChatSession(
+                    "Seconda", [{"role": "user", "content": "da eliminare"}],
+                ))
+                app.active_index = 1
+                app.messages = app.active_chat.messages
+                app.refresh_chat_list()
+                await app.handle_command("/delete all")
+                self.assertEqual(len(app.chats), 1)
+                self.assertEqual(app.chats[0].title, "Chat 1")
+                self.assertFalse(app.chats[0].messages)
+            saved = json.loads(
+                (Path(directory) / "sessions.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(saved["chats"]), 1)
+            self.assertFalse(saved["chats"][0]["messages"])
 
     async def test_model_override_is_sent_with_the_chat(self):
         with tempfile.TemporaryDirectory() as directory:
