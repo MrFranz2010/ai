@@ -3,6 +3,7 @@ import base64
 import datetime
 import json
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -1124,6 +1125,7 @@ class AppRouteTests(unittest.TestCase):
             "alerts_enabled": False,
             "alerts_disk_percent": 90,
             "alerts_memory_percent": 92,
+            "mcp_servers": [],
         })
         if os.name != "nt":
             self.assertEqual(app.CONFIG_FILE.stat().st_mode & 0o777, 0o600)
@@ -1462,6 +1464,99 @@ class AppRouteTests(unittest.TestCase):
         self.assertTrue(approved)
         self.assertEqual(job["reply"], "Fatto.")
         self.assertEqual(job["tool_events"][0]["command"], "pwd")
+
+    def test_chat_uses_a_configured_mcp_tool(self):
+        script = (
+            Path(tempfile.gettempdir())
+            / f"nokk_fake_mcp_{os.getpid()}_{time.time_ns()}.py"
+        )
+        self.addCleanup(lambda: script.unlink(missing_ok=True))
+        script.write_text(
+            "import json, sys\n"
+            "for line in sys.stdin:\n"
+            "    line = line.strip()\n"
+            "    if not line: continue\n"
+            "    message = json.loads(line)\n"
+            "    method = message.get('method')\n"
+            "    if method == 'initialize':\n"
+            "        result = {'protocolVersion': '2024-11-05', 'capabilities': {'tools': {}}}\n"
+            "    elif method == 'notifications/initialized': continue\n"
+            "    elif method == 'tools/list':\n"
+            "        result = {'tools': [{'name': 'echo', 'description': 'Echo',"
+            " 'inputSchema': {'type': 'object', 'properties': {'text': {'type': 'string'}}}}]}\n"
+            "    elif method == 'tools/call':\n"
+            "        result = {'content': [{'type': 'text', 'text':"
+            " message.get('params', {}).get('arguments', {}).get('text', '')}]}\n"
+            "    else: result = {}\n"
+            "    if message.get('id') is not None:\n"
+            "        print(json.dumps({'jsonrpc': '2.0', 'id': message['id'], 'result': result}))\n"
+            "        sys.stdout.flush()\n",
+            encoding="utf-8",
+        )
+        self.request_json("/api/config", {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "api_key": "test-secret",
+            "terminal_enabled": False,
+            "approval_mode": "manual",
+            "workspace": str(Path(app.APP_DIR).resolve()),
+            "mcp_servers": [{
+                "name": "fake",
+                "command": sys.executable,
+                "args": [str(script)],
+            }],
+        })
+        tool_response = FakeResponse({"choices": [{
+            "message": {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "call-mcp",
+                    "type": "function",
+                    "function": {
+                        "name": "mcp_fake_echo",
+                        "arguments": '{"text":"ciao"}',
+                    },
+                }],
+            },
+        }]})
+        final_response = FakeResponse({"choices": [{
+            "message": {"role": "assistant", "content": "Fatto."},
+        }]})
+        with patch("app.urlopen", side_effect=[tool_response, final_response]) as provider_call:
+            job = self.run_chat([
+                {"role": "user", "content": "Usa il tool MCP"},
+            ])
+        self.assertEqual(job["reply"], "Fatto.")
+        self.assertEqual(job["tool_events"][0]["output"], "ciao")
+        tools = json.loads(provider_call.call_args_list[0].args[0].data)["tools"]
+        self.assertIn("mcp_fake_echo", {tool["function"]["name"] for tool in tools})
+
+    def test_chat_stream_falls_back_to_json(self):
+        self.request_json("/api/config", {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "api_key": "test-secret",
+            "terminal_enabled": False,
+            "approval_mode": "manual",
+            "workspace": str(Path(app.APP_DIR).resolve()),
+        })
+        payload = {
+            "choices": [{
+                "message": {"role": "assistant", "content": "Risposta JSON."},
+            }],
+        }
+        responses = [
+            FakeResponse(payload),
+            FakeStreamResponse([json.dumps(payload).encode("utf-8")]),
+        ]
+        for response in responses:
+            with self.subTest(response=type(response).__name__):
+                with patch("app.urlopen", return_value=response):
+                    job = self.run_chat(
+                        [{"role": "user", "content": "Saluta"}], stream=True,
+                    )
+                self.assertEqual(job["reply"], "Risposta JSON.")
 
     def test_chat_streams_partial_text(self):
         self.request_json("/api/config", {

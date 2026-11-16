@@ -89,6 +89,27 @@ variabili `NOKK_URL`/`NOKK_API_KEY`. Non approva automaticamente i comandi del
 server: se un job è in attesa, restituisce un errore e invita ad approvarlo
 dalla web o dalla TUI.
 
+### Server MCP esterni
+
+NOKK può anche avviare server MCP locali via stdio e usarne i tool. Configura
+`mcp_servers` nel file di configurazione del server:
+
+```json
+{
+  "mcp_servers": [{
+    "name": "filesystem",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+    "enabled": true
+  }]
+}
+```
+
+I tool vengono esposti al modello come `mcp_<server>_<tool>`. Il comando esegue
+codice sulla macchina di NOKK: usa solo server fidati e limita gli argomenti
+alla cartella consentita. Un server che non parte viene saltato senza bloccare
+la chat.
+
 ### Client unificato
 
 Il terminale è disponibile anche nel ramo **`nokk-cli-unified`**, che contiene
