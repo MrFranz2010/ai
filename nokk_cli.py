@@ -968,6 +968,15 @@ def build_parser():
     parser.add_argument(
         "prompt", nargs="*", help="messaggio one-shot; senza, modalità interattiva",
     )
+    view_group = parser.add_mutually_exclusive_group()
+    view_group.add_argument(
+        "--plain", action="store_true",
+        help="usa il terminale a righe invece della TUI a pannelli",
+    )
+    view_group.add_argument(
+        "--tui", action="store_true",
+        help="apre la TUI a pannelli (predefinita se Textual è installato)",
+    )
     parser.add_argument("--url", help="indirizzo del server NOKK")
     parser.add_argument("--mode", help="codice, studio, analista oppure off")
     agent_group = parser.add_mutually_exclusive_group()
@@ -1052,6 +1061,40 @@ def main(argv=None):
                     return 1
             ok = session.ask(prompt)
             return 0 if ok else 1
+
+        interactive_terminal = bool(
+            sys.stdin.isatty() and sys.stdout.isatty()
+        )
+        if args.tui and not interactive_terminal:
+            raise CliError(
+                "La TUI richiede un terminale interattivo.",
+                "Usa --plain per l'output a righe o avvia il comando in un terminale.",
+            )
+        use_tui = args.tui or (not args.plain and interactive_terminal)
+        if use_tui:
+            try:
+                from nokk_tui import run_tui
+            except ImportError as error:
+                if args.tui:
+                    raise CliError(
+                        "Textual non è installato: impossibile aprire la TUI.",
+                        "Esegui: python -m pip install -r requirements-tui.txt",
+                    ) from error
+                print(
+                    Ansi(ansi_enabled(sys.stderr)).dim(
+                        "Textual non installato: uso la modalità a righe. "
+                        "Per la TUI: python -m pip install -r requirements-tui.txt"
+                    ),
+                    file=sys.stderr,
+                )
+            else:
+                return run_tui(
+                    config,
+                    config_path,
+                    auto_yes=args.yes,
+                    job_timeout=max(10, args.timeout),
+                    cwd=Path.cwd(),
+                )
         run_repl(session)
         return 0
     except CliError as error:

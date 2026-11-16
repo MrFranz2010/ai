@@ -24,20 +24,44 @@ accanto alla configurazione dell’app; puoi crearne molte, riaprirle ed elimina
 ## Terminale (`nokk`)
 
 `nokk_cli.py` è un client da terminale in stile Claude Code: usa lo stesso
-backend della pagina web e lavora nella cartella da cui lo avvii.
+backend della pagina web e lavora nella cartella da cui lo avvii. La modalità
+predefinita è una TUI a pannelli con la chat a sinistra e, a destra, agenti,
+chat, utilizzo delle risorse, widget e attività.
 
 ```bash
+python -m pip install -r requirements-tui.txt   # una volta sola
 python nokk_cli.py
-python nokk_cli.py "controlla perché il test fallisce"
-python nokk_cli.py --exec "git status"
 ```
 
-Nel terminale puoi scrivere normalmente all'assistente, usare `!comando` per
+```text
+┌ chat / transcript ─────────────────┬ agenti · chat · risorse ─┐
+│ tu: …                              │ ● NOKK API      online   │
+│ NOKK: …                            │ ● Agente        pronto   │
+│ !comando                           │ ● Terminale     conferma │
+│                                    │ CPU/RAM/Disco · token    │
+│ > scrivi a NOKK…                   │ chat · modalità · cwd    │
+└────────────────────────────────────┴──────────────────────────┘
+```
+
+Nella TUI puoi scrivere normalmente all'assistente, usare `!comando` per
 eseguire subito un comando locale e `/help` per gli altri comandi (`/cd`,
 `/run`, `/agent`, `/mode`, `/url`, `/key`, `/server`). Con l'agente attivo,
 se NOKK propone un comando in un blocco `nokk-run`, il client chiede conferma,
 lo esegue **sulla macchina locale** e restituisce l'output al modello; i comandi
 che NOKK vuole eseguire sul server restano soggetti alle approvazioni del server.
+
+Tasti: `Ctrl+Q` esce, `Ctrl+N` nuova chat, `Ctrl+B` mostra o nasconde la
+barra laterale, `Ctrl+L` pulisce il transcript e `F1` apre l'aiuto. Su terminali
+stretti la barra laterale si nasconde da sola. Se Textual non è installato, il
+client ripiega sul terminale a righe; `--plain` lo forza e `--tui` richiede
+esplicitamente la TUI.
+
+```bash
+python nokk_cli.py --plain
+python nokk_cli.py "controlla perché il test fallisce"
+python nokk_cli.py --exec "git status"
+```
+
 Nelle esecuzioni one-shot i comandi sono bloccati per sicurezza: aggiungi `--yes`
 per approvarli automaticamente.
 
