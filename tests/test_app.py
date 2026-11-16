@@ -648,6 +648,14 @@ class AppRouteTests(unittest.TestCase):
         self.assertTrue(
             app.has_explicit_planner_intent("Ricordami di comprare il pane")
         )
+        self.assertTrue(app.has_app_code_intent(
+            "non al calendario, intendo la versione di nokk tui"
+        ))
+        self.assertTrue(app.has_app_code_intent("controlla tutta la app, ci sono"))
+        self.assertFalse(app.has_app_code_intent("Aggiungi una verifica domani"))
+        self.assertFalse(app.has_app_code_intent("Esegui npm test nel terminale"))
+        self.assertTrue(app.has_ambiguous_topic_intent("autoaggiungiti nuovi temi"))
+        self.assertFalse(app.has_ambiguous_topic_intent("Aggiungi una verifica domani"))
         with self.assertRaises(ValueError):
             app.execute_app_tool(
                 "manage_planner_item",
@@ -711,6 +719,76 @@ class AppRouteTests(unittest.TestCase):
         self.assertEqual(app.planner["events"], [])
         self.assertEqual(job["tool_events"][0]["executed"], False)
         self.assertIn("manca una richiesta esplicita", job["tool_events"][0]["output"])
+
+    def test_app_code_chat_hides_planner_tools_even_after_continua(self):
+        with app.config_lock:
+            app.config.update({
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "api_key": "test-key-not-sent",
+                "terminal_enabled": False,
+                "approval_mode": "manual",
+                "workspace": str(Path(app.__file__).resolve().parent),
+                "system_prompt": "",
+                "app_tools_enabled": True,
+                "local_terminal": True,
+            })
+        captured = {}
+
+        def fake_urlopen(request, *_args, **_kwargs):
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            return FakeResponse()
+
+        messages = [
+            {"role": "user", "content": "nella versione TUI aggiungi nuovi temi"},
+            {"role": "assistant", "content": "Quali temi vuoi?"},
+            {"role": "user", "content": "continua"},
+        ]
+        with patch("app.urlopen", side_effect=fake_urlopen):
+            job = self.run_chat(messages)
+        self.assertEqual(job["status"], "complete")
+        payload = captured["payload"]
+        names = {
+            tool["function"]["name"] for tool in payload.get("tools", [])
+        }
+        self.assertNotIn("manage_planner_item", names)
+        self.assertNotIn("google_calendar", names)
+        self.assertNotIn("get_app_data", names)
+        system = payload["messages"][0]["content"]
+        self.assertIn("software NOKK", system)
+        self.assertIn("nokk-run", system)
+        self.assertIn("continua", messages[-1]["content"])
+
+    def test_ambiguous_topics_do_not_expose_planner_tools(self):
+        with app.config_lock:
+            app.config.update({
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "api_key": "test-key-not-sent",
+                "terminal_enabled": False,
+                "approval_mode": "manual",
+                "workspace": str(Path(app.__file__).resolve().parent),
+                "system_prompt": "",
+                "app_tools_enabled": True,
+            })
+        captured = {}
+
+        def fake_urlopen(request, *_args, **_kwargs):
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            return FakeResponse()
+
+        with patch("app.urlopen", side_effect=fake_urlopen):
+            job = self.run_chat([
+                {"role": "user", "content": "autoaggiungiti nuovi temi"},
+            ])
+        self.assertEqual(job["status"], "complete")
+        names = {
+            tool["function"]["name"]
+            for tool in captured["payload"].get("tools", [])
+        }
+        self.assertNotIn("manage_planner_item", names)
+        self.assertNotIn("google_calendar", names)
+        self.assertIn("ambigua", captured["payload"]["messages"][0]["content"])
 
     def test_chat_can_use_app_tools_without_calling_a_real_provider(self):
         with app.config_lock:
