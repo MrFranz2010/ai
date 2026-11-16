@@ -158,7 +158,9 @@ LOOPBACK_BASE_URL_PATTERN = re.compile(
 OPENROUTER_FREE_MODEL = "openrouter/free"
 MODEL_PATTERN = re.compile(r"^[A-Za-z0-9._:/-]{1,120}$")
 MAX_TOOL_ROUNDS = 4
+MAX_CODE_TOOL_ROUNDS = 6
 MAX_TOOL_CALLS_PER_RESPONSE = 3
+RECENT_USER_MESSAGES_FOR_ROUTING = 6
 COMMAND_TIMEOUT_SECONDS = 30
 MAX_COMMAND_OUTPUT = 20000
 MAX_TELEGRAM_MESSAGE_LENGTH = 12000
@@ -3709,13 +3711,16 @@ def transcribe_audio(active_config, audio, mime_type):
 def build_provider_request(
     provider, model, api_key, messages, system_prompt=None, enable_tools=False,
     enable_app_tools=False, base_url=None, merge_system_prompt=False,
-    stream=False, extra_tools=None,
+    stream=False, extra_tools=None, exclude_tools=None,
 ):
     tool_definitions = []
+    excluded = set(exclude_tools or ())
     if enable_tools:
         tool_definitions.append(TERMINAL_TOOL)
     if enable_app_tools:
-        tool_definitions.extend(ALL_APP_TOOLS)
+        tool_definitions.extend(
+            tool for tool in ALL_APP_TOOLS if tool["name"] not in excluded
+        )
     if extra_tools:
         tool_definitions.extend(extra_tools)
     headers = {"Content-Type": "application/json"}
@@ -4695,15 +4700,30 @@ def run_chat_job(job_id, messages, active_config, mode=None):
     tool_events = []
     mcp_registry = None
     mcp_tools = []
-    user_text = next(
-        (
-            message.get("content", "")
-            for message in reversed(messages)
-            if isinstance(message, dict)
-            and message.get("role") == "user"
-            and isinstance(message.get("content"), str)
-        ),
-        "",
+    user_texts = [
+        message.get("content", "")
+        for message in messages
+        if isinstance(message, dict)
+        and message.get("role") == "user"
+        and isinstance(message.get("content"), str)
+    ]
+    user_text = user_texts[-1] if user_texts else ""
+    recent_user_text = "\n".join(
+        user_texts[-RECENT_USER_MESSAGES_FOR_ROUTING:]
+    )
+    planner_requested = has_explicit_planner_intent(user_text)
+    app_code_request = (
+        has_app_code_intent(recent_user_text) and not planner_requested
+    )
+    ambiguous_topic_request = (
+        has_ambiguous_topic_intent(recent_user_text)
+        and not planner_requested
+        and not app_code_request
+    )
+    excluded_app_tools = (
+        PLANNER_TOPIC_TOOL_NAMES
+        if app_code_request or ambiguous_topic_request
+        else ()
     )
     if active_config.get("mcp_servers"):
         try:
@@ -4802,6 +4822,24 @@ def run_chat_job(job_id, messages, active_config, mode=None):
                 "requests is unavailable until the server owner configures "
                 "GITHUB_TOKEN."
             )
+        if app_code_request:
+            app_prompt += (
+                " La conversazione riguarda il software NOKK stesso (TUI, CLI, "
+                "interfaccia, codice o comportamento), non il planner. Non usare "
+                "calendario, attività, procedure o Google Calendar. Individua i "
+                "file con list_repository_files e leggili con "
+                "read_repository_file prima di rispondere; usa il terminale solo "
+                "per eseguire test o comandi necessari. Se l'utente non ha chiesto "
+                "una modifica, rispondi senza cambiare file. Non dire di non avere "
+                "accesso al codice prima di aver provato questi strumenti."
+            )
+        elif ambiguous_topic_request:
+            app_prompt += (
+                " La richiesta su temi o argomenti è ambigua: non salvarla nel "
+                "planner e non usare calendario, attività o Google Calendar. "
+                "Chiedi se l'utente intende argomenti di studio, una modalità di "
+                "risposta o una modifica al software NOKK."
+            )
         system_prompt = "\n\n".join(
             part for part in (system_prompt, app_prompt) if part
         )
@@ -4825,7 +4863,10 @@ def run_chat_job(job_id, messages, active_config, mode=None):
     try:
         round_index = 0
         merge_system_prompt = False
-        while round_index <= MAX_TOOL_ROUNDS:
+        tool_round_limit = (
+            MAX_CODE_TOOL_ROUNDS if app_code_request else MAX_TOOL_ROUNDS
+        )
+        while round_index <= tool_round_limit:
             if _job_cancelled(job_id):
                 return
             request = build_provider_request(
@@ -4840,6 +4881,7 @@ def run_chat_job(job_id, messages, active_config, mode=None):
                 merge_system_prompt=merge_system_prompt,
                 stream=bool(active_config.get("stream")),
                 extra_tools=mcp_tools,
+                exclude_tools=excluded_app_tools,
             )
             try:
                 response = _open_provider_response(request, job_id)
@@ -6601,6 +6643,49 @@ TERMINAL_CONTEXT_WORDS = {
     "bash", "npm", "git", "python", "pytest", "docker", "build", "file",
     "cartella", "directory", "codice", "progetto", "funzione", "bug", "test",
 }
+APP_CODE_REFERENCES = {
+    "nokk", "tui", "cli", "codice", "sorgente", "sorgenti", "repo",
+    "repository", "interfaccia", "app", "applicazione", "programma",
+    "versione", "funzionalità", "funzionalita", "feature", "pulsante",
+    "menu", "progetto", "script",
+}
+APP_CODE_ACTIONS = {
+    "aggiungi", "aggiungere", "crea", "creare", "modifica", "modificare",
+    "cambia", "cambiare", "togli", "togliere", "elimina", "eliminare",
+    "sistema", "sistemare", "correggi", "correggere", "implementa",
+    "implementare", "aggiorna", "aggiornare", "migliora", "migliorare",
+    "controlla", "controllare", "guarda", "guardare", "leggi", "leggere",
+    "cerca", "cercare", "trova", "trovare", "rendi", "rendere", "fixa",
+    "fixare", "dove", "come", "perché", "perche", "cosa", "quale",
+}
+AMBIGUOUS_TOPIC_WORDS = {"tema", "temi", "argomento", "argomenti"}
+PLANNER_TOPIC_TOOL_NAMES = frozenset({
+    "get_app_data", "manage_planner_item", "google_calendar",
+    "save_timetable", "manage_workflow",
+})
+
+
+def has_app_code_intent(text):
+    """Return True when the user is talking about NOKK's own software."""
+    if not isinstance(text, str) or not text.strip():
+        return False
+    words = set(re.findall(r"[a-zà-ÿ0-9'-]+", text.casefold()))
+    references = words & APP_CODE_REFERENCES
+    return len(references) >= 2 or bool(
+        references and words & APP_CODE_ACTIONS
+    )
+
+
+def has_ambiguous_topic_intent(text):
+    """Return True for bare 'temi/argomenti', which may be code or study."""
+    if not isinstance(text, str) or not text.strip():
+        return False
+    words = set(re.findall(r"[a-zà-ÿ0-9'-]+", text.casefold()))
+    return bool(
+        words & AMBIGUOUS_TOPIC_WORDS
+        and not words & STRONG_PLANNER_WORDS
+        and not has_app_code_intent(text)
+    )
 
 
 def has_explicit_planner_intent(text):
@@ -6637,7 +6722,10 @@ def execute_app_tool(name, arguments, user_text=None):
     ):
         raise ValueError(
             "Calendario e attività non modificati: manca una richiesta "
-            "esplicita dell'utente. Chiedi conferma prima di riprovare."
+            "esplicita dell'utente per il planner. Non riprovare questo "
+            "strumento e non chiedere conferma per la stessa azione: rispondi "
+            "con gli strumenti adatti (codice, repository o terminale) oppure "
+            "chiedi cosa intende."
         )
     if name == "save_timetable":
         return save_timetable_from_tool(arguments)
