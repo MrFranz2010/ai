@@ -111,10 +111,30 @@ attive, terminale e strumenti disponibili. La descrizione include anche i limiti
 NOKK non ha sensi, non percepisce file o rete senza uno strumento e non deve
 dichiarare azioni non confermate. Non vengono esposte chiavi API o altri segreti.
 
-#NOKK non modifica calendario o attività come effetto collaterale: i comandi da
+NOKK non modifica calendario o attività come effetto collaterale: i comandi da
 terminale, le operazioni sui file e le richieste di codice non possono creare
 eventi. La modifica richiede una richiesta esplicita dell'utente nell'ultimo
 messaggio; in caso contrario il tool viene rifiutato e NOKK chiede conferma.
+
+## Aggiornamenti automatici
+
+`linux_start.py` e il client controllano all'avvio il branch Git corrente e
+confrontano `HEAD` con `origin`. Se ci sono nuovi commit applica solo un
+**fast-forward**, senza merge e senza perdere lavoro locale.
+
+L'aggiornamento viene saltato quando:
+
+- ci sono modifiche non committate;
+- il branch locale ha commit che non sono sul remoto;
+- il branch non è collegato a un remote;
+- Git o la rete non sono disponibili.
+
+Per controllare o installare manualmente usa `/update` nella CLI o nella TUI.
+L'avvio automatico si disattiva con `NOKK_AUTO_UPDATE=0` oppure con
+`--no-update` nella CLI. Se cambiano `requirements.txt` o `requirements-tui.txt`
+l'aggiornamento automatico si ferma e lo segnala: usa `/update`, reinstalla le
+dipendenze e riavvia. L'hosting non si aggiorna da solo: usa il deploy del
+repository.
 
 ## Attività persistenti
 

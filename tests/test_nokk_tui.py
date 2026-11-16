@@ -4,8 +4,10 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import nokk_cli
+import updater
 from nokk_cli import Config
 
 try:
@@ -132,6 +134,47 @@ class NokkTuiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("agente", topbar)
                 self.assertTrue(app.query_one("#composer"))
                 self.assertTrue(app.query_one("#prompt"))
+
+    async def test_update_command_applies_a_safe_update(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = NokkTuiApp(
+                Config(),
+                Path(directory) / "cli.json",
+                client=FakeClient(),
+                auto_yes=True,
+            )
+            status = updater.UpdateStatus(
+                root=directory,
+                branch="main",
+                remote="origin",
+                local_sha="a" * 40,
+                remote_sha="b" * 40,
+                behind=1,
+                ahead=0,
+                dirty=False,
+                changed_files=("nokk_tui.py",),
+                commits=("abc1234\tNuova versione",),
+            )
+            result = updater.UpdateResult(
+                branch="main",
+                previous_sha=status.local_sha,
+                new_sha=status.remote_sha,
+                changed_files=status.changed_files,
+                requirements_changed=False,
+            )
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                with (
+                    patch.object(
+                        updater, "check_for_update", return_value=status,
+                    ) as check,
+                    patch.object(
+                        updater, "apply_update", return_value=result,
+                    ) as apply,
+                ):
+                    await app.handle_command("/update")
+                self.assertTrue(check.called)
+                self.assertTrue(apply.called)
 
     async def test_clicking_an_item_removed_by_refresh_is_ignored(self):
         with tempfile.TemporaryDirectory() as directory:

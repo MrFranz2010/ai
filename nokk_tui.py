@@ -42,6 +42,8 @@ from textual.widgets import (
     Switch,
 )
 
+import updater
+
 from nokk_cli import (
     AGENT_RULES,
     CONTINUE_RULES,
@@ -436,6 +438,7 @@ I comandi che NOKK vuole eseguire sul server passano da una conferma separata.
 | `/server` | stato del server |
 | `/status` | sessione, connessione e configurazione |
 | `/jobs` | attività recenti, provider, durata ed errori |
+| `/update` | controlla il repository e installa gli aggiornamenti |
 | `/config` | configurazione attuale |
 | `/settings` | profili locale/hosting e chiavi |
 | `/export [file]` | esporta la chat in Markdown |
@@ -1883,6 +1886,8 @@ class NokkTuiApp(App):
             self.action_cancel_job()
         elif name == "/jobs":
             await self.show_jobs()
+        elif name == "/update":
+            await self.update_nokk()
         elif name == "/config":
             self.show_config()
         elif name == "/export":
@@ -1964,6 +1969,58 @@ class NokkTuiApp(App):
             return
         lines = "\n".join(f"{key}: {value}" for key, value in data.items())
         self.write_system("Stato del server\n" + lines)
+
+    async def update_nokk(self):
+        self.write_system("Controllo gli aggiornamenti…")
+        try:
+            status = await asyncio.to_thread(updater.check_for_update)
+        except updater.UpdateError as error:
+            self.write_error(CliError(f"Aggiornamento non disponibile: {error}"))
+            return
+        if not status.available:
+            self.write_system("NOKK è già aggiornato.")
+            return
+        detail = (
+            f"{status.behind} commit su {status.remote}/{status.branch}."
+            + ("\n\n" + "\n".join(status.commits) if status.commits else "")
+        )
+        if status.dirty:
+            self.write_system(
+                "Aggiornamento disponibile, ma ci sono modifiche locali: "
+                "annullato."
+            )
+            return
+        if status.ahead:
+            self.write_system(
+                "Il branch locale ha commit non pubblicati: aggiornamento "
+                "annullato."
+            )
+            return
+        if not self.auto_yes:
+            approved = await self._ask_screen(ConfirmScreen(
+                "Aggiornare NOKK?",
+                detail,
+                yes_label="Aggiorna",
+            ))
+            if not approved:
+                self.write_system("Aggiornamento annullato.")
+                return
+        try:
+            result = await asyncio.to_thread(updater.apply_update, status)
+        except updater.UpdateError as error:
+            self.write_error(CliError(f"Aggiornamento non riuscito: {error}"))
+            return
+        self.write_system(
+            f"Aggiornato a {result.new_sha[:8]} "
+            f"({len(result.changed_files)} file). Riavvia NOKK."
+        )
+        if result.requirements_changed:
+            self.write_system(
+                "Dipendenze cambiate: esegui "
+                "python -m pip install -r requirements.txt "
+                "(e requirements-tui.txt per la TUI)."
+            )
+        self.activity_log().write(Text("NOKK aggiornato", style="#3fb950"))
 
     async def show_jobs(self):
         try:
