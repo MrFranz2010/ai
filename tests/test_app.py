@@ -37,6 +37,23 @@ class FakeResponse:
         return json.dumps(self.payload).encode("utf-8")
 
 
+class FakeStreamResponse:
+    def __init__(self, lines):
+        self.lines = lines
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def __iter__(self):
+        return iter(self.lines)
+
+    def read(self):
+        return b"".join(self.lines)
+
+
 class FakeHtmlResponse:
     def __init__(self, html):
         self.html = html
@@ -346,8 +363,11 @@ class AppRouteTests(unittest.TestCase):
         self.assertEqual(weather["city"], "Roma")
         self.assertEqual(weather["temperature"], 18)
 
-    def run_chat(self, messages, approve=True, expect_failure=False):
-        response = self.request_json("/api/chat", {"messages": messages})
+    def run_chat(self, messages, approve=True, expect_failure=False, stream=False):
+        payload = {"messages": messages}
+        if stream:
+            payload["stream"] = True
+        response = self.request_json("/api/chat", payload)
         job_id = response["job_id"]
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
@@ -1446,6 +1466,27 @@ class AppRouteTests(unittest.TestCase):
         self.assertTrue(approved)
         self.assertEqual(job["reply"], "Fatto.")
         self.assertEqual(job["tool_events"][0]["command"], "pwd")
+
+    def test_chat_streams_partial_text(self):
+        self.request_json("/api/config", {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "api_key": "test-secret",
+            "terminal_enabled": False,
+            "approval_mode": "manual",
+            "workspace": str(Path(app.APP_DIR).resolve()),
+        })
+        lines = [
+            b'data: {"choices":[{"delta":{"content":"Ciao "}}]}\n',
+            b'data: {"choices":[{"delta":{"content":"mondo"}}]}\n',
+            b'data: [DONE]\n',
+        ]
+        with patch("app.urlopen", return_value=FakeStreamResponse(lines)):
+            job = self.run_chat(
+                [{"role": "user", "content": "Saluta"}], stream=True,
+            )
+        self.assertEqual(job["reply"], "Ciao mondo")
+        self.assertEqual(job["partial_reply"], "Ciao mondo")
 
     def test_terminal_command_waits_for_explicit_approval(self):
         self.request_json("/api/config", {
