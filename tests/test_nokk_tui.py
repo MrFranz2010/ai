@@ -243,6 +243,30 @@ class NokkTuiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(len(exported), 1)
                 self.assertIn("scorciatoia", exported[0].read_text(encoding="utf-8"))
 
+    async def test_copy_last_answer_and_older_replies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = NokkTuiApp(
+                Config(),
+                Path(directory) / "cli.json",
+                client=FakeClient(),
+            )
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                app.active_chat.messages.extend([
+                    {"role": "user", "content": "prima"},
+                    {"role": "assistant", "content": "prima risposta"},
+                    {"role": "user", "content": "seconda"},
+                    {"role": "assistant", "content": "seconda risposta"},
+                ])
+                await pilot.press("ctrl+y")
+                await pilot.pause()
+                self.assertEqual(app._clipboard, "seconda risposta")
+                await app.handle_command("/copy 2")
+                self.assertEqual(app._clipboard, "prima risposta")
+                await app.handle_command("/copy all")
+                self.assertIn("seconda risposta", app._clipboard)
+                self.assertIn("# NOKK · Chat 1", app._clipboard)
+
     async def test_retry_replaces_the_last_answer(self):
         with tempfile.TemporaryDirectory() as directory:
             app = NokkTuiApp(

@@ -252,12 +252,14 @@ I comandi che NOKK vuole eseguire sul server passano da una conferma separata.
 | `/config` | configurazione attuale |
 | `/settings` | profili locale/hosting e chiavi |
 | `/export [file]` | esporta la chat in Markdown |
+| `/copy [n|all]` | copia l'ultima risposta, una precedente o tutto |
 | `/retry` | ripete l'ultima domanda |
 | `/clear` | pulisce il transcript |
 
 `!comando` esegue subito un comando locale. `Ctrl+Q` esce, `Ctrl+N` apre una
 nuova chat, `Ctrl+B` mostra o nasconde la barra laterale, `Ctrl+E` esporta la
-chat, `Ctrl+R` ripete l'ultima domanda, `F1` apre l'aiuto e `F2` le impostazioni.
+chat, `Ctrl+Y` copia l'ultima risposta, `Ctrl+R` ripete l'ultima domanda,
+`F1` apre l'aiuto e `F2` le impostazioni.
 """
 
 
@@ -565,6 +567,7 @@ class NokkTuiApp(App):
         Binding("ctrl+n", "new_chat", "Nuova chat", show=True),
         Binding("ctrl+b", "toggle_sidebar", "Sidebar", show=True),
         Binding("ctrl+e", "export_chat", "Esporta", show=True, priority=True),
+        Binding("ctrl+y", "copy_last", "Copia", show=True, priority=True),
         Binding("ctrl+r", "retry", "Riprova", show=True, priority=True),
         Binding("ctrl+l", "clear_view", "Pulisci", show=True),
         Binding("f1", "help", "Aiuto", show=True),
@@ -705,6 +708,9 @@ class NokkTuiApp(App):
 
     def action_export_chat(self):
         self.export_chat("")
+
+    def action_copy_last(self):
+        self.copy_message("")
 
     def action_retry(self):
         if self.busy:
@@ -1302,6 +1308,8 @@ class NokkTuiApp(App):
             self.show_config()
         elif name == "/export":
             self.export_chat(argument)
+        elif name == "/copy":
+            self.copy_message(argument)
         elif name in {"/retry", "/again"}:
             await self.retry_last()
         else:
@@ -1436,6 +1444,47 @@ class NokkTuiApp(App):
                 continue
             lines.extend([f"## {heading}", "", content.rstrip() or "(vuoto)", ""])
         return "\n".join(lines).rstrip() + "\n"
+
+    def copy_message(self, argument):
+        argument = (argument or "").strip().lower()
+        answers = [
+            message.get("content") for message in self.active_chat.messages
+            if message.get("role") == "assistant"
+            and not message.get("hidden")
+            and isinstance(message.get("content"), str)
+            and message.get("content").strip()
+        ]
+        if argument == "all":
+            text = self.chat_markdown()
+            label = "transcript"
+        else:
+            if argument:
+                try:
+                    position = int(argument)
+                except ValueError:
+                    self.write_system("Uso: /copy [numero|all]")
+                    return
+                if position < 1:
+                    self.write_system("Uso: /copy [numero|all]")
+                    return
+            else:
+                position = 1
+            if position > len(answers):
+                self.write_system(
+                    "Non c'è una risposta così vecchia da copiare."
+                )
+                return
+            text = answers[-position]
+            label = "risposta" if position == 1 else f"risposta {position}"
+        try:
+            self.copy_to_clipboard(text)
+        except Exception as error:  # noqa: BLE001 - clipboard is terminal-specific
+            self.write_error(CliError(f"Copia non riuscita: {error}"))
+            return
+        self.write_system(f"{label.capitalize()} copiato negli appunti.")
+        self.activity_log().write(
+            Text(f"copia: {label}", style="#3fb950")
+        )
 
     def export_chat(self, argument):
         visible = [
