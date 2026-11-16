@@ -43,6 +43,12 @@ python nokk_cli.py
 └────────────────────────────────────┴──────────────────────────┘
 ```
 
+La cartella di lavoro iniziale si sceglie con `--cwd`; i comandi locali girano
+con i permessi del tuo utente e possono leggere o modificare tutto il sistema,
+usando anche percorsi assoluti fuori da quella cartella. La directory indicata è
+solo il punto di partenza. Nella TUI puoi cambiarla in qualsiasi momento con
+`/cd /` (Linux/macOS), `/cd C:\` (Windows) o `/cd ~`.
+
 Nella TUI puoi scrivere normalmente all'assistente, usare `!comando` per
 eseguire subito un comando locale e `/help` per gli altri comandi (`/cd`,
 `/run`, `/agent`, `/mode`, `/url`, `/key`, `/server`, `/status`, `/export`,
@@ -74,8 +80,9 @@ terminale a righe; `--plain` lo forza e `--tui` richiede esplicitamente la TUI.
 
 ```bash
 python nokk_cli.py --plain
-python nokk_cli.py "controlla perché il test fallisce"
-python nokk_cli.py --exec "git status"
+python nokk_cli.py --cwd / --plain
+python nokk_cli.py --cwd "$HOME" "controlla perché il test fallisce"
+python nokk_cli.py --cwd / --exec "git status"
 ```
 
 Nelle esecuzioni one-shot i comandi sono bloccati per sicurezza: aggiungi `--yes`

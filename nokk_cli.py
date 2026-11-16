@@ -56,7 +56,9 @@ MODE_ALIASES = {
 
 AGENT_RULES = """\
 Contesto: stai lavorando tramite il terminale locale di NOKK.
-La directory corrente è {cwd}.
+La directory corrente è {cwd}. I comandi girano con i permessi dell'utente e
+possono accedere a tutto il sistema: per file o cartelle fuori dalla directory
+corrente usa un percorso assoluto oppure `cd`, senza limitarti a {cwd}.
 Se per completare il compito serve un comando shell sulla macchina locale,
 rispondi includendo un unico blocco con questo formato:
 
@@ -485,6 +487,18 @@ class NokkClient:
             else f"/api/jobs/{job_id}/cancel"
         )
         return self._request("POST", path, {})
+
+
+def resolve_working_directory(value=None):
+    """Risolve la cartella iniziale di TUI, REPL e comandi one-shot."""
+    target = Path(value).expanduser() if value else Path.cwd()
+    try:
+        target = target.resolve()
+    except OSError as error:
+        raise CliError(f"Cartella di lavoro non valida: {error}") from None
+    if not target.is_dir():
+        raise CliError(f"La cartella di lavoro non esiste: {target}")
+    return target
 
 
 def run_local(command, cwd, timeout=LOCAL_TIMEOUT):
@@ -1073,6 +1087,10 @@ def build_parser():
         "--tui", action="store_true",
         help="apre la TUI a pannelli (predefinita se Textual è installato)",
     )
+    parser.add_argument(
+        "--cwd", metavar="CARTELLA",
+        help="cartella di lavoro iniziale (predefinita: quella corrente)",
+    )
     parser.add_argument("--url", help="indirizzo del server NOKK")
     parser.add_argument("--mode", help="codice, studio, analista oppure off")
     agent_group = parser.add_mutually_exclusive_group()
@@ -1114,8 +1132,9 @@ def main(argv=None):
         else default_config_path()
     )
     try:
+        cwd = resolve_working_directory(args.cwd)
         if args.exec is not None:
-            result = run_local(args.exec, Path.cwd())
+            result = run_local(args.exec, cwd)
             ansi = Ansi(ansi_enabled())
             print(ansi.bold("Comando locale:") + " " + result.command)
             if result.output:
@@ -1145,7 +1164,7 @@ def main(argv=None):
             auto_yes=args.yes,
             interactive=sys.stdin.isatty() and not args.prompt,
             job_timeout=max(10, args.timeout),
-            cwd=Path.cwd(),
+            cwd=cwd,
         )
         if args.prompt:
             prompt = " ".join(args.prompt).strip()
@@ -1189,7 +1208,7 @@ def main(argv=None):
                     config_path,
                     auto_yes=args.yes,
                     job_timeout=max(10, args.timeout),
-                    cwd=Path.cwd(),
+                    cwd=cwd,
                 )
         run_repl(session)
         return 0

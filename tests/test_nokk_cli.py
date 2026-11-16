@@ -251,6 +251,30 @@ class SessionTests(unittest.TestCase):
         self.assertIn("ok", session.messages[-1]["content"])
 
 
+class WorkingDirectoryTests(unittest.TestCase):
+    def test_resolves_an_existing_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(
+                nokk_cli.resolve_working_directory(directory),
+                Path(directory).resolve(),
+            )
+
+    def test_rejects_a_missing_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "assente"
+            with self.assertRaises(nokk_cli.CliError):
+                nokk_cli.resolve_working_directory(str(missing))
+
+    def test_parser_accepts_the_initial_directory(self):
+        args = nokk_cli.build_parser().parse_args(["--cwd", "/"])
+        self.assertEqual(args.cwd, "/")
+
+    def test_agent_rules_allow_paths_outside_the_working_directory(self):
+        rules = nokk_cli.AGENT_RULES.format(cwd="/home/utente/progetto")
+        self.assertIn("tutto il sistema", rules)
+        self.assertIn("percorso assoluto", rules)
+
+
 class LocalCommandTests(unittest.TestCase):
     def test_runs_in_the_given_directory(self):
         with tempfile.TemporaryDirectory() as directory:
