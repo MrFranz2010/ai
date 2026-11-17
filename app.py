@@ -142,6 +142,7 @@ OPENAI_COMPATIBLE_ENDPOINTS = {
     "groq": "https://api.groq.com/openai/v1/chat/completions",
     "deepseek": "https://api.deepseek.com/v1/chat/completions",
     "xai": "https://api.x.ai/v1/chat/completions",
+    "ollama": "http://localhost:11434/api/chat",
 }
 OPENAI_COMPATIBLE_PROVIDERS = set(OPENAI_COMPATIBLE_ENDPOINTS) | {
     "openrouter", "custom",
