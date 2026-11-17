@@ -2043,7 +2043,7 @@ class NokkTuiApp(App):
             f"agente: {'on' if self.agent else 'off'}\n"
             f"cwd: {self.cwd}\n"
             f"cartella iniziale: {self.initial_cwd or '—'}\n"
-            f"timeout: {self.job_timeout}s · round agente: "
+            f"timeout attività: {self.job_timeout}s · round agente: "
             f"{self.max_rounds if self.max_rounds else 'illimitati'}\n"
             f"auto-approva: {'on' if self.auto_yes else 'off'} · streaming: {'on' if self.stream else 'off'}\n"
             f"sessioni salvate: {'on' if self.save_sessions_enabled else 'off'} · campanello: {'on' if self.bell_on_finish else 'off'}\n"
