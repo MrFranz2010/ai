@@ -134,7 +134,7 @@ MAX_WORKFLOW_PROMPT_LENGTH = 4000
 APP_DIR = Path(__file__).resolve().parent
 PROVIDERS = {
     "openai", "anthropic", "google", "openrouter",
-    "mistral", "groq", "deepseek", "xai", "custom",
+    "mistral", "ollama", "groq", "deepseek", "xai", "custom",
 }
 OPENAI_COMPATIBLE_ENDPOINTS = {
     "openai": "https://api.openai.com/v1/chat/completions",
@@ -146,7 +146,7 @@ OPENAI_COMPATIBLE_ENDPOINTS = {
 OPENAI_COMPATIBLE_PROVIDERS = set(OPENAI_COMPATIBLE_ENDPOINTS) | {
     "openrouter", "custom",
 }
-IMAGE_PROVIDERS = {"openai", "openrouter", "mistral", "xai", "custom"}
+IMAGE_PROVIDERS = {"openai", "openrouter", "mistral", "ollama", "xai", "custom"}
 MAX_BASE_URL_LENGTH = 300
 BASE_URL_PATTERN = re.compile(
     r"^https?://([A-Za-z0-9.-]+|\[[0-9a-fA-F:]+\])(:[0-9]{1,5})?"
