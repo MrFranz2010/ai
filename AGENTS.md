@@ -25,6 +25,19 @@ Differenze da tenere presenti:
 - Anche i fix recenti sono stati reimplementati in parallelo e non condivisi
   (per esempio il modello selezionato per provider).
 
+## CLI e TUI: sempre e solo `nokk-cli-unified`
+
+Le modifiche che riguardano esclusivamente il client da terminale —
+`nokk_cli.py`, `nokk_tui.py`, la cartella `nokk-ink/`, i test del client, i
+comandi slash, l'auto-approvazione locale e la documentazione del terminale —
+vanno sempre e solo sul ramo `nokk-cli-unified`.
+
+Non aggiungere né modificare questi file su `main` o
+`copilot/supabase-config-storage`: quei rami contengono solo le due varianti
+desktop/hosting dell'app web. Questa è l'eccezione alla doppia consegna: le
+modifiche solo-client non richiedono un commit separato sui due rami web e non
+si fondono con essi.
+
 ## Regola principale: i rami non si fondono mai
 
 Non eseguire **mai** merge, rebase, cherry-pick o pull request che uniscano
@@ -33,13 +46,18 @@ Non eseguire **mai** merge, rebase, cherry-pick o pull request che uniscano
 
 Quando lavori su un ramo, crea un branch a partire dal remoto corrispondente:
 `origin/main` per il desktop, `origin/copilot/supabase-config-storage` per
-l'hosting. Non cambiare ramo dentro un worktree già aperto da altri.
+l'hosting e `origin/nokk-cli-unified` per il client CLI/TUI. Non cambiare ramo
+dentro un worktree già aperto da altri.
 
 ## Due commit separati, stesso comportamento
 
-Ogni richiesta si consegna **due volte**, con **due commit distinti**, uno per
-ramo. Nessun commit unico contenente entrambe le versioni, nessun commit
-"condiviso" spostato con git.
+Ogni richiesta che modifica l'app web si consegna **due volte**, con **due
+commit distinti**, uno per ramo. Nessun commit unico contenente entrambe le
+versioni, nessun commit "condiviso" spostato con git.
+
+Fanno eccezione le richieste che riguardano solo il client CLI/TUI: vanno sempre
+e solo su `nokk-cli-unified`, come descritto sopra, e non richiedono i due
+commit desktop/hosting.
 
 1. Implementa sul ramo desktop (`main`) e committa lì.
 2. Implementa la stessa funzionalità sul ramo hosting
