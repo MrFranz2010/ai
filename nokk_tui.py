@@ -526,6 +526,7 @@ MODE_OPTIONS = [
     ("Codice", "codice"),
     ("Studio", "studio"),
     ("Analista", "analista"),
+    ("Ollama", "ollama"),
 ]
 
 
