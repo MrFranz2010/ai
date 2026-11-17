@@ -35,7 +35,8 @@ Opzioni: `--url`, `--mode`, `--agent/--no-agent`, `--cwd`, `--key`,
   comandi o durata.
 - Password `sudo` richiesta in modo nascosto e passata via stdin.
 - Menzioni `@file` lette nel contesto della richiesta.
-- Sessioni compatibili con la TUI Python: `/sessions`, `/resume`, `/delete`,
+- Sessioni compatibili con la TUI Python: `/history` apre l'elenco interattivo
+  (Invio riapre, `d` elimina con conferma), `/sessions`, `/resume`, `/delete`,
   `/rename`, `/export`, `/retry`.
 - Profili `local`/`hosting`, `/url`, `/key`, `/model`, `/mode`, `/agent`,
   `/settings`, `/status`, `/jobs`, `/diff`, `/git`, `/update`, `/cancel`.

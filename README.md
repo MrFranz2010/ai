@@ -153,9 +153,9 @@ locale predefinita, esecuzione dei blocchi `nokk-run`, password `sudo` nascosta,
 menzioni `@file`, sessioni, profili locale/hosting e i comandi `/help`,
 `/settings`, `/profile`, `/url`, `/key`, `/model`, `/mode`, `/agent`, `/cd`,
 `/run`, `/diff`, `/git`, `/jobs`, `/update`, `/cancel`, `/export`, `/copy`,
-`/retry`, `/sessions`, `/delete`, `/resume` e `/rename`. Nessun limite locale di
-round, comandi o durata; `Ctrl+C` annulla il job o il comando locale in corso e
-un secondo `Ctrl+C` esce. I dettagli e gli altri tasti sono in
+`/retry`, `/history`, `/sessions`, `/delete`, `/resume` e `/rename`. Nessun
+limite locale di round, comandi o durata; `Ctrl+C` annulla il job o il comando
+locale in corso e un secondo `Ctrl+C` esce. I dettagli e gli altri tasti sono in
 `nokk-ink/README.md`.
 
 ## MCP

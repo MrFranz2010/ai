@@ -1,4 +1,4 @@
-import React, { type ReactNode, useState } from "react";
+import React, { type ReactNode, useEffect, useState } from "react";
 import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
@@ -226,6 +226,7 @@ const HELP_LINES = [
   ["/key", "chiave API"],
   ["/settings", "impostazioni interattive"],
   ["/status", "stato sessione e server"],
+  ["/history", "gestisci la cronologia"],
   ["/sessions", "sessioni salvate"],
   ["/resume <n>", "riapre una sessione"],
   ["/delete [n|all]", "elimina chat salvate"],
@@ -254,6 +255,67 @@ export function HelpPanel({ onClose }: { onClose: () => void }): React.ReactElem
         </Box>
       ))}
       <Text color={COLORS.dim}>{"Esc o Invio per chiudere"}</Text>
+    </Box>
+  );
+}
+
+export interface HistoryEntry {
+  title: string;
+  count: number;
+  active: boolean;
+}
+
+export function HistoryPanel({
+  chats,
+  onResume,
+  onDelete,
+  onClose,
+}: {
+  chats: HistoryEntry[];
+  onResume: (index: number) => void;
+  onDelete: (index: number) => void;
+  onClose: () => void;
+}): React.ReactElement {
+  const [index, setIndex] = useState(0);
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    setIndex((value) => Math.max(0, Math.min(value, chats.length - 1)));
+  }, [chats.length]);
+
+  useInput((input, key) => {
+    if (confirming) {
+      if (input === "y" || input === "s") {
+        setConfirming(false);
+        onDelete(index);
+      } else if (input === "n" || key.escape) {
+        setConfirming(false);
+      }
+      return;
+    }
+    if (key.escape || input === "q") return onClose();
+    if (key.upArrow) setIndex((value) => Math.max(0, value - 1));
+    if (key.downArrow) setIndex((value) => Math.min(chats.length - 1, value + 1));
+    if (key.return) return onResume(index);
+    if (input === "d" || key.delete) setConfirming(true);
+  });
+
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor={COLORS.border} paddingX={1}>
+      <Text color={COLORS.accent} bold>{"Cronologia"}</Text>
+      {chats.length ? chats.map((chat, at) => (
+        <Box key={`${chat.title}-${at}`}>
+          <Box width={2}><Text color={at === index ? COLORS.accent : COLORS.dim}>{at === index ? "›" : " "}</Text></Box>
+          <Box width={2}><Text color={chat.active ? COLORS.green : COLORS.dim}>{chat.active ? "●" : " "}</Text></Box>
+          <Box width={38}><Text color={at === index ? COLORS.text : COLORS.dim} wrap="truncate">{chat.title}</Text></Box>
+          <Text color={COLORS.dim}>{`${chat.count} msg`}</Text>
+        </Box>
+      )) : <Text color={COLORS.dim}>{"Nessuna chat salvata."}</Text>}
+      {confirming ? (
+        <Text color={COLORS.yellow}>{`Eliminare «${chats[index]?.title || ""}»? y conferma · n annulla`}</Text>
+      ) : (
+        <Text color={COLORS.dim}>{"↑↓ scegli · Invio riapre · d elimina · Esc chiude"}</Text>
+      )}
     </Box>
   );
 }

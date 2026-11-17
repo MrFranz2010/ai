@@ -36,6 +36,7 @@ import {
   PasswordPanel,
   SettingsPanel,
   StatusBar,
+  HistoryPanel,
   Transcript,
   shortPath,
 } from "./ui.js";
@@ -43,7 +44,7 @@ import {
 const MODES: Mode[] = ["codice", "studio", "analista", null];
 const COMMAND_NAMES = [
   "/new", "/clear", "/cd", "/pwd", "/run", "/agent", "/mode", "/model",
-  "/profile", "/url", "/key", "/settings", "/status", "/sessions", "/resume", "/delete",
+  "/profile", "/url", "/key", "/settings", "/status", "/history", "/sessions", "/resume", "/delete",
   "/rename", "/export", "/copy", "/retry", "/diff", "/git", "/jobs", "/update",
   "/cancel", "/config", "/exit", "/help",
 ];
@@ -127,7 +128,7 @@ export function App({ initialConfig, configFile = configPath() }: { initialConfi
   const [startedAt, setStartedAt] = useState(0);
   const [online, setOnline] = useState<boolean | null>(null);
   const [modelLabel, setModelLabel] = useState("");
-  const [overlay, setOverlay] = useState<"help" | "settings" | null>(null);
+  const [overlay, setOverlay] = useState<"help" | "settings" | "history" | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [modelOverride, setModelOverride] = useState<ModelOverride | null>(null);
   const cancelRef = useRef(false);
@@ -257,6 +258,17 @@ export function App({ initialConfig, configFile = configPath() }: { initialConfi
   const appendSystem = useCallback((content: string) => {
     addView({ role: "system", content });
   }, [addView]);
+
+  const removeChats = useCallback((targets: number[], label: string) => {
+    const oldActive = activeRef.current;
+    const remaining = chatsRef.current.filter((_, index) => !targets.includes(index));
+    if (!remaining.length) remaining.push(toChat(newChat()));
+    const nextActive = targets.includes(oldActive)
+      ? Math.min(targets[0], remaining.length - 1)
+      : oldActive - targets.filter((index) => index < oldActive).length;
+    commit(remaining, Math.max(0, nextActive), true);
+    appendSystem(`Eliminata ${label} dalla memoria.`);
+  }, [appendSystem, commit]);
 
   const switchProfile = useCallback((profile: "local" | "hosting") => {
     const current = configRef.current;
@@ -641,6 +653,9 @@ export function App({ initialConfig, configFile = configPath() }: { initialConfi
         }
         return;
       }
+      case "/history":
+        setOverlay("history");
+        return;
       case "/sessions":
         appendSystem(chatsRef.current.map((item, index) => {
           const marker = index === activeRef.current ? "→" : " ";
@@ -681,14 +696,7 @@ export function App({ initialConfig, configFile = configPath() }: { initialConfi
           appendSystem("Eliminazione annullata.");
           return;
         }
-        const oldActive = activeRef.current;
-        const remaining = chatsRef.current.filter((_, index) => !targets.includes(index));
-        if (!remaining.length) remaining.push(toChat(newChat()));
-        const nextActive = targets.includes(oldActive)
-          ? Math.min(targets[0], remaining.length - 1)
-          : oldActive - targets.filter((index) => index < oldActive).length;
-        commit(remaining, Math.max(0, nextActive), true);
-        appendSystem(`Eliminata ${label} dalla memoria.`);
+        removeChats(targets, label);
         return;
       }
       case "/rename": {
@@ -747,7 +755,7 @@ export function App({ initialConfig, configFile = configPath() }: { initialConfi
       default:
         addView({ role: "error", content: `Comando sconosciuto: ${name}. Usa /help.` });
     }
-  }, [addView, appendSystem, askConfirm, askSecret, checkHealth, client, commit, copyChat, exit, exportChat, gitCommand, modelOverride, runConversation, runShell, switchProfile, updateActive, updateConfig, updateRepository]);
+  }, [addView, appendSystem, askConfirm, askSecret, checkHealth, client, commit, copyChat, exit, exportChat, gitCommand, modelOverride, removeChats, runConversation, runShell, switchProfile, updateActive, updateConfig, updateRepository]);
 
   const submit = useCallback(async () => {
     const text = input.trim();
@@ -858,6 +866,25 @@ export function App({ initialConfig, configFile = configPath() }: { initialConfi
           onClose={() => setOverlay(null)}
         />
       ) : null}
+      {overlay === "history" ? (
+        <HistoryPanel
+          chats={chats.map((item, index) => ({
+            title: item.title,
+            count: item.messages.filter((message) => !message.hidden).length,
+            active: index === active,
+          }))}
+          onResume={(index) => {
+            commit(chatsRef.current, index);
+            setOverlay(null);
+            appendSystem(`Sessione: ${chatsRef.current[index].title}`);
+          }}
+          onDelete={(index) => {
+            const title = chatsRef.current[index]?.title || "chat";
+            removeChats([index], `la chat «${title}»`);
+          }}
+          onClose={() => setOverlay(null)}
+        />
+      ) : null}
       {dialogNode}
       <StatusBar
         busy={busy}
@@ -874,7 +901,7 @@ export function App({ initialConfig, configFile = configPath() }: { initialConfi
         value={input}
         onChange={setInput}
         onSubmit={() => { void submit(); }}
-        disabled={busy}
+        disabled={busy || overlay !== null || dialog !== null}
       />
     </Box>
   );
