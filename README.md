@@ -37,7 +37,7 @@ python nokk_cli.py
 ┌ chat / transcript ─────────────────┬ agenti · chat · risorse ─┐
 │ tu: …                              │ ● NOKK API      online   │
 │ NOKK: …                            │ ● Agente        pronto   │
-│ !comando                           │ ● Terminale     conferma │
+│ !comando                           │ ● Terminale     automatico│
 │                                    │ CPU/RAM/Disco · token    │
 │ > scrivi a NOKK…                   │ chat · modalità · cwd    │
 └────────────────────────────────────┴──────────────────────────┘
@@ -55,7 +55,8 @@ viene chiesta con `getpass`. La password resta solo in memoria, non viene
 salvata, non compare nel transcript e non viene inviata al modello.
 
 Da `F2` (`/settings`) configuri anche: cartella iniziale, timeout delle attività,
-numero massimo di round dell'agente, esecuzione automatica dei comandi locali,
+numero massimo di round dell'agente (`0` = illimitato), esecuzione automatica
+dei comandi locali,
 streaming della risposta, salvataggio delle sessioni, segnale acustico finale e
 pannello di benvenuto. Le stesse impostazioni restano nel file `cli.json` e
 valgono anche per la CLI:
@@ -105,7 +106,9 @@ python nokk_cli.py --cwd / --exec "git status"
 L'auto-approvazione dei comandi locali è attiva per impostazione predefinita:
 non serve `--yes`. Puoi disattivarla da `F2` oppure impostando
 `"auto_approve": false` in `cli.json`. I comandi locali non hanno un limite
-fisso di round, di comandi per risposta o di durata.
+fisso di round, di comandi per risposta o di durata. I blocchi `nokk-run` chiusi
+con tag XML come `</parameter>` sono accettati e i tag vengono rimossi prima
+dell'esecuzione.
 
 ### Consapevolezza operativa
 
@@ -118,7 +121,10 @@ dichiarare azioni non confermate. Non vengono esposte chiavi API o altri segreti
 NOKK non modifica calendario o attività come effetto collaterale: i comandi da
 terminale, le operazioni sui file e le richieste di codice non possono creare
 eventi. La modifica richiede una richiesta esplicita dell'utente nell'ultimo
-messaggio; in caso contrario il tool viene rifiutato e NOKK chiede conferma.
+messaggio; in caso contrario il tool viene rifiutato senza salvare nulla. NOKK
+non riprova lo stesso tool: chiede cosa intende oppure passa agli strumenti del
+codice. Le richieste su TUI, CLI, app o repository non espongono al modello
+calendario, attività o planner, anche dopo un semplice “continua”.
 
 ## Aggiornamenti automatici
 
