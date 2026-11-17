@@ -134,6 +134,30 @@ valgono anche per la CLI.
 
 Su terminali stretti la barra laterale si nasconde automaticamente.
 
+## NOKK Ink (client React)
+
+La cartella `nokk-ink/` contiene un secondo client da terminale, costruito con
+Ink e React, pensato per chi preferisce una UI essenziale in stile Claude Code.
+Usa lo stesso backend, lo stesso `cli.json` e lo stesso `sessions.json` della
+TUI Python, quindi sessioni e profili restano condivisi.
+
+```bash
+cd nokk-ink
+npm install        # richiede Node 22 o successivo
+npm run build
+node dist/cli.js --url http://127.0.0.1:8000
+```
+
+Ha transcript con risposta in streaming, palette dei comandi, auto-approvazione
+locale predefinita, esecuzione dei blocchi `nokk-run`, password `sudo` nascosta,
+menzioni `@file`, sessioni, profili locale/hosting e i comandi `/help`,
+`/settings`, `/profile`, `/url`, `/key`, `/model`, `/mode`, `/agent`, `/cd`,
+`/run`, `/diff`, `/git`, `/jobs`, `/update`, `/cancel`, `/export`, `/copy`,
+`/retry`, `/sessions`, `/delete`, `/resume` e `/rename`. Nessun limite locale di
+round, comandi o durata; `Ctrl+C` annulla il job o il comando locale in corso e
+un secondo `Ctrl+C` esce. I dettagli e gli altri tasti sono in
+`nokk-ink/README.md`.
+
 ## MCP
 
 `nokk_mcp.py` espone NOKK come server MCP su stdio con i tool `nokk_health` e
