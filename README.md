@@ -37,7 +37,7 @@ python nokk_cli.py
 ┌ chat / transcript ─────────────────┬ agenti · chat · risorse ─┐
 │ tu: …                              │ ● NOKK API      online   │
 │ NOKK: …                            │ ● Agente        pronto   │
-│ !comando                           │ ● Terminale     automatico│
+│ !comando                           │ ● Terminale   automatico │
 │                                    │ CPU/RAM/Disco · token    │
 │ > scrivi a NOKK…                   │ chat · modalità · cwd    │
 └────────────────────────────────────┴──────────────────────────┘
