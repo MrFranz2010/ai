@@ -123,7 +123,11 @@ dichiarare azioni non confermate. Non vengono esposte chiavi API o altri segreti
 NOKK non modifica calendario o attività come effetto collaterale: i comandi da
 terminale, le operazioni sui file e le richieste di codice non possono creare
 eventi. La modifica richiede una richiesta esplicita dell'utente nell'ultimo
-messaggio; in caso contrario il tool viene rifiutato e NOKK chiede conferma.
+messaggio; in caso contrario il tool viene rifiutato senza salvare nulla. NOKK
+non riprova lo stesso tool: chiede cosa intende oppure passa agli strumenti del
+codice. Le richieste sul software NOKK, sul codice o sul repository non
+espongono al modello calendario, attività o planner, anche dopo un semplice
+“continua”.
 
 ## Aggiornamenti
 
