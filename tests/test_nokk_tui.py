@@ -177,6 +177,7 @@ class NokkTuiTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 self.assertEqual(prompt.value, "ciao")
                 self.assertTrue(prompt.has_focus)
+                self.assertIn("ciao", app.export_screenshot())
 
     async def test_update_command_applies_a_safe_update(self):
         with tempfile.TemporaryDirectory() as directory:

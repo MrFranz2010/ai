@@ -827,7 +827,7 @@ class NokkTuiApp(App):
         color: #8b949e;
     }
     #composer {
-        height: 3;
+        height: 5;
         margin: 0 1 1 1;
         padding: 0 1;
         border: round #30363d;
@@ -1095,9 +1095,16 @@ class NokkTuiApp(App):
         if self.focused is prompt or isinstance(self.focused, Input):
             return
         prompt.focus()
-        # Il focus viene applicato al prossimo refresh: inserire subito il
-        # carattere lo farebbe sovrascrivere dall'evento di focus dell'Input.
-        self.call_after_refresh(prompt.insert_text_at_cursor, event.character)
+
+        def insert_character(character=event.character):
+            # Il focus viene applicato al prossimo refresh: inserire subito il
+            # carattere lo farebbe sovrascrivere dall'evento di focus
+            # dell'Input. Dopo l'inserimento serve un altro refresh, altrimenti
+            # il valore cambia ma il composer continua a mostrare il vuoto.
+            prompt.insert_text_at_cursor(character)
+            prompt.refresh()
+
+        self.call_after_refresh(insert_character)
         event.stop()
 
     def action_new_chat(self):
