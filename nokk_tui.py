@@ -420,8 +420,9 @@ HELP_TEXT = """\
 ## Terminale NOKK
 
 Scrivi un messaggio e premi Invio. I comandi che NOKK propone nel blocco
-`nokk-run` vengono eseguiti **sul computer locale**, dopo la tua conferma.
-I comandi che NOKK vuole eseguire sul server passano da una conferma separata.
+`nokk-run` vengono eseguiti subito **sul computer locale**, salvo auto-approvazione
+disattivata. I comandi che NOKK vuole eseguire sul server passano da una conferma
+separata.
 
 ### Comandi
 
@@ -1490,7 +1491,7 @@ class NokkTuiApp(App):
             ),
             (
                 "Terminale",
-                "conferma",
+                "automatico" if self.auto_yes else "conferma",
                 "#58a6ff",
             ),
             (

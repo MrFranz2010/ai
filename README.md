@@ -82,7 +82,8 @@ viene chiesta con `getpass`. La password resta solo in memoria, non viene
 salvata, non compare nel transcript e non viene inviata al modello.
 
 Da `F2` (`/settings`) configuri anche: cartella iniziale, timeout delle attività,
-numero massimo di round dell'agente, esecuzione automatica dei comandi locali,
+numero massimo di round dell'agente (`0` = illimitato), esecuzione automatica
+dei comandi locali,
 streaming della risposta, salvataggio delle sessioni, segnale acustico finale e
 pannello di benvenuto. Le stesse impostazioni restano nel file `cli.json` e
 valgono anche per la CLI.
@@ -99,7 +100,9 @@ valgono anche per la CLI.
 - L'auto-approvazione dei comandi locali è attiva per impostazione predefinita:
   non serve `--yes`. Puoi disattivarla da `F2` oppure impostando
   `"auto_approve": false` in `cli.json`. I comandi locali non hanno un limite
-  fisso di round, di comandi per risposta o di durata.
+  fisso di round, di comandi per risposta o di durata. I blocchi `nokk-run`
+  chiusi con tag XML come `</parameter>` sono accettati e i tag vengono rimossi
+  prima dell'esecuzione.
 - `/new`, `/cd`, `/run`, `/agent`, `/mode`, `/url`, `/key`, `/server`,
   `/status`, `/config`, `/settings`, `/export`, `/copy` e `/retry` sono
   disponibili anche come comandi slash.

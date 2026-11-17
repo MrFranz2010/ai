@@ -1407,7 +1407,8 @@ Comandi del terminale NOKK
                         aggiunge il suo output al contesto della chat
 
 Con l'agente attivo, se NOKK propone un comando in un blocco ```nokk-run```,
-il terminale ti chiede conferma, lo esegue qui e restituisce l'output a NOKK.
+il terminale lo esegue subito qui (auto-approvazione predefinita) e restituisce
+l'output a NOKK. Per tornare alla conferma manuale imposta `auto_approve: false`.
 I comandi che NOKK vuole eseguire sul server passano invece dalle approvazioni
 del server e vengono mostrati con l'etichetta «server»."""
 
