@@ -1078,6 +1078,28 @@ class NokkTuiApp(App):
         self._apply_sidebar_visibility()
         self.query_one("#prompt", Input).focus()
 
+    def on_key(self, event):
+        """Riporta al composer i caratteri digitati fuori dal campo.
+
+        La sidebar può prendere il focus con Tab o con un click; senza questo
+        fallback i tasti successivi sembrano non scrivere più nella chat.
+        """
+        if self.busy or len(self.screen_stack) > 1:
+            return
+        if not event.is_printable or not event.character:
+            return
+        try:
+            prompt = self.query_one("#prompt", Input)
+        except Exception:
+            return
+        if self.focused is prompt or isinstance(self.focused, Input):
+            return
+        prompt.focus()
+        # Il focus viene applicato al prossimo refresh: inserire subito il
+        # carattere lo farebbe sovrascrivere dall'evento di focus dell'Input.
+        self.call_after_refresh(prompt.insert_text_at_cursor, event.character)
+        event.stop()
+
     def action_new_chat(self):
         if self.busy:
             self.notify("Attendi la risposta di NOKK.", severity="warning")

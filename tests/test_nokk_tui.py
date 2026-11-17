@@ -160,6 +160,24 @@ class NokkTuiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(app.query_one("#composer"))
                 self.assertTrue(app.query_one("#prompt"))
 
+    async def test_typing_returns_to_the_prompt_after_sidebar_focus(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = NokkTuiApp(
+                Config(),
+                Path(directory) / "cli.json",
+                client=FakeClient(),
+            )
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                prompt = app.query_one("#prompt")
+                await pilot.press("tab")
+                await pilot.pause()
+                self.assertIsNot(app.focused, prompt)
+                await pilot.press("c", "i", "a", "o")
+                await pilot.pause()
+                self.assertEqual(prompt.value, "ciao")
+                self.assertTrue(prompt.has_focus)
+
     async def test_update_command_applies_a_safe_update(self):
         with tempfile.TemporaryDirectory() as directory:
             app = NokkTuiApp(
