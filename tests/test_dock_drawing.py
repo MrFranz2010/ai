@@ -361,6 +361,51 @@ class DrawingTests(unittest.TestCase):
             self.assertTrue(any(":" in text for text in texts))
             self.assertGreater(len(instance.canvas.items), 3)
 
+    def test_redraw_notch_with_tabs(self):
+        with stub_tkinter():
+            from nokk_dock import layout as dock_layout
+            from nokk_dock.settings import WIDGET_LABELS
+
+            instance = self.build_app()
+            instance.expand = 1.0
+            instance._apply_geometry(1.0)
+            self.assertEqual(instance.layout.style, "notch")
+            instance._redraw()
+            texts = [
+                str(item["kwargs"].get("text", ""))
+                for item in instance.canvas.items
+                if item["kind"] == "text"
+            ]
+            for key in instance.config["widgets"]:
+                self.assertIn(WIDGET_LABELS[key].upper(), texts)
+            # la scheda aperta mostra il brano per intero, non tagliato
+            self.assertIn("Brano", texts)
+            self.assertTrue(any(text.startswith("Artista") for text in texts))
+            self.assertGreaterEqual(
+                len(instance.hits), len(instance.layout.tabs) + 1
+            )
+
+            instance.set_active("weather")
+            self.assertEqual(instance.active_tab, "weather")
+            self.assertEqual(instance.layout.tiles[0].key, "weather")
+            self.assertEqual(instance.layout.active, "weather")
+            texts = [
+                str(item["kwargs"].get("text", ""))
+                for item in instance.canvas.items
+                if item["kind"] == "text"
+            ]
+            self.assertIn("Sereno", texts)
+            self.assertNotIn("Brano", texts)
+
+            instance.set_active("clock")
+            self.assertEqual(instance.layout.tiles[0].key, "clock")
+            texts = [
+                str(item["kwargs"].get("text", ""))
+                for item in instance.canvas.items
+                if item["kind"] == "text"
+            ]
+            self.assertTrue(any(":" in text for text in texts))
+
     def test_hover_label_text(self):
         with stub_tkinter():
             from nokk_dock import layout as dock_layout

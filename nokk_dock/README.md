@@ -16,8 +16,11 @@ un'istanza su Render/Fly.
   scala, nascondiglio automatico.
 - **Forma «notch»** (predefinita): una pillola compatta **agganciata al bordo
   alto** dello schermo, con spigoli alti vivi e bassi arrotondati, che si
-  srotola verso il basso nel pannello completo al passaggio del mouse. Chi
-  preferisce la barra classica sceglie `dock.style = "dock"`.
+  srotola verso il basso nel pannello completo al passaggio del mouse. Il
+  pannello aperto è **a schede**, come Nusa: in alto una fila di tab (una per
+  widget) e sotto una sola scheda larga quanto tutto il notch, così testo e
+  copertina non vengono mai compressi né tagliati. Chi preferisce la barra
+  classica sceglie `dock.style = "dock"`.
 - **Espansione al passaggio del mouse**: molla sotto-smorzata come Nusa — parte
   decisa, supera la misura di un 2% e si posa in ~0,3 s — con ritardo di
   apertura e chiusura regolabili.

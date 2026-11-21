@@ -170,8 +170,28 @@ class NotchLayoutTests(unittest.TestCase):
         self.assertGreater(opened.height, collapsed.height)
         self.assertLessEqual(opened.x + opened.width, 1920)
         self.assertLessEqual(opened.y + opened.height, 1080)
-        # il contenuto non viene compresso: si svela crescendo
-        self.assertEqual(opened.tiles[0].width, collapsed.tiles[0].width)
+        # una sola scheda larga quanto il pannello: il testo non si taglia
+        self.assertEqual(len(opened.tiles), 1)
+        self.assertGreater(opened.tiles[0].width, collapsed.width)
+        self.assertEqual(len(opened.tabs), len(self.widgets))
+        self.assertEqual(opened.active, self.widgets[0])
+
+    def test_tabs_pick_the_open_card(self):
+        plan = self.build(1.0, active="weather")
+        self.assertEqual(plan.active, "weather")
+        self.assertEqual([tab.key for tab in plan.tabs], self.widgets)
+        self.assertEqual(plan.tiles[0].key, "weather")
+        self.assertEqual(len({tab.x for tab in plan.tabs}), len(self.widgets))
+        self.assertGreater(plan.tiles[0].y, plan.tabs[0].bottom)
+
+    def test_unknown_active_falls_back_to_the_first_tab(self):
+        plan = self.build(1.0, active="missing")
+        self.assertEqual(plan.active, self.widgets[0])
+        self.assertEqual(plan.tiles[0].key, self.widgets[0])
+
+    def test_dock_style_has_no_tabs(self):
+        plan = self.build(1.0, style="dock")
+        self.assertEqual(plan.tabs, ())
 
     def test_notch_is_glued_to_the_top_edge(self):
         for margin in (0, 18, 60):

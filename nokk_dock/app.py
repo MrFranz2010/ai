@@ -112,6 +112,7 @@ class DockApp:
     _art_source = ""
     _art_pending = ""
     _art_variants = None
+    active_tab = "music"
 
     def __init__(self, config, config_file=None):
         self.config = validate_config(config)
@@ -369,8 +370,11 @@ class DockApp:
             pointer=self._pointer,
             magnify=dock["magnify"],
             style=dock["style"],
+            active=self.active_tab,
         )
         self.layout = plan
+        if plan.active:
+            self.active_tab = plan.active
         offset_x = 0
         offset_y = 0
         # il notch vive sempre sul bordo alto, qualunque posizione sia salvata
@@ -717,7 +721,7 @@ class DockApp:
             return
         self._art_pending = url or ""
         if not url:
-            self._apply_art("", "", None)
+            self._apply_art("", "")
             return
         threading.Thread(
             target=self._art_worker, args=(url,), name="nokk-dock-art", daemon=True
@@ -909,8 +913,11 @@ class DockApp:
         if getattr(plan, "style", "dock") == "notch" and expanded < 0.85:
             self._draw_notch(plan)
             return
+        if getattr(plan, "style", "dock") == "notch" and plan.tabs:
+            self._draw_notch_tabs(plan)
+        inset = 8.0 if getattr(plan, "style", "dock") == "notch" else 14.0
         for tile in plan.tiles:
-            area = dock_layout.tile_content(tile, plan)
+            area = dock_layout.tile_content(tile, plan, inset=inset)
             hovered = tile.key == self._hovered
             if hovered:
                 round_rect(
@@ -922,6 +929,37 @@ class DockApp:
             painter = getattr(self, f"_draw_{tile.key}", None)
             if painter is not None:
                 painter(tile, area, expanded)
+
+    def _draw_notch_tabs(self, plan):
+        """Fila di schede in alto: una per widget, quella attiva evidenziata."""
+        theme = self.theme
+        canvas = self.canvas
+        for tab in plan.tabs:
+            active = tab.key == plan.active
+            round_rect(
+                canvas, tab.x, tab.y, tab.right, tab.bottom,
+                min(tab.height / 2, max(6.0, theme.radius * 0.5)),
+                fill=theme.panel_hover if active else theme.panel, outline="",
+            )
+            self._text(
+                tab.x + tab.width / 2, tab.y + tab.height / 2,
+                WIDGET_LABELS.get(tab.key, tab.key).upper(), 7.6,
+                "bold" if active else "normal",
+                fill=theme.text if active else theme.muted,
+                anchor="center",
+            )
+            self._register_hit(
+                tab.x, tab.y, tab.right, tab.bottom,
+                lambda key=tab.key: self.set_active(key),
+            )
+
+    def set_active(self, key):
+        """Mostra la scheda del widget scelto."""
+        if key == self.active_tab:
+            return
+        self.active_tab = key
+        self._apply_geometry(self.expand)
+        self._redraw()
 
     def _draw_notch(self, plan):
         """Pillola a riposo: stato di NOKK, ora e indicatore musicale."""
@@ -1267,4 +1305,4 @@ def main(config, config_file):
     app.run()
 
 
-__all__ = ["DockApp", "main", "trigger_running_capture", "mix", "NokkError", "WIDGET_LABELS"]
+__all__ = ["DockApp", "main", "trigger_running_capture", "mix", "WIDGET_LABELS"]

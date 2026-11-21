@@ -32,6 +32,8 @@ EXPANSION_HEADROOM = 0.75
 # Stile «notch»: pillola compatta in alto al centro che si srotola nel pannello.
 NOTCH_WIDTH = 208.0
 NOTCH_HEIGHT_RATIO = 0.55
+NOTCH_OPEN_RATIO = 2.2
+NOTCH_TAB_HEIGHT = 34.0
 NOTCH_REVEAL = 0.85
 
 
@@ -74,6 +76,8 @@ class DockLayout:
     expanded: float
     scale: float
     style: str = "dock"
+    tabs: tuple[Tile, ...] = ()
+    active: str = ""
 
     @property
     def geometry(self) -> str:
@@ -155,6 +159,7 @@ def compute_layout(
     magnify: float = 1.0,
     influence: float = 120.0,
     style: str = "dock",
+    active: str | None = None,
 ):
     """Calcola finestra e widget per il bordo richiesto.
 
@@ -183,7 +188,7 @@ def compute_layout(
     padding = PADDING * scale
     spans = [tile_span(key, span_progress, scale) for key in keys]
     factors = [1.0] * len(keys)
-    if pointer is not None and magnify > 1.0 and len(keys) > 1:
+    if pointer is not None and magnify > 1.0 and len(keys) > 1 and not notch:
         base = compute_layout(
             position, screen_width, screen_height, widgets,
             thickness=thickness, length=length, margin=margin, offset=offset,
@@ -242,23 +247,52 @@ def compute_layout(
 
     if notch:
         reveal = 1.0 if progress >= NOTCH_REVEAL else progress / NOTCH_REVEAL
-        compact_width = min(float(width), NOTCH_WIDTH * scale)
+        panel_width = float(width)
+        compact_width = min(panel_width, NOTCH_WIDTH * scale)
         compact_height = thickness * NOTCH_HEIGHT_RATIO * scale
-        wide = int(round(compact_width + (width - compact_width) * reveal))
-        tall = int(round(compact_height + (height - compact_height) * reveal))
+        open_height = thickness * NOTCH_OPEN_RATIO * scale
+        wide = int(round(compact_width + (panel_width - compact_width) * reveal))
+        tall = int(round(compact_height + (open_height - compact_height) * reveal))
         wide = max(1, min(wide, int(screen_width)))
         tall = max(1, min(tall, int(screen_height)))
+
+        # Pannello a schede: una fila di tab in alto e una sola scheda sotto,
+        # larga quanto tutto il notch, così il testo non viene mai tagliato.
+        chosen = active if active in keys else keys[0]
+        pad = padding * 0.6
+        tab_height = NOTCH_TAB_HEIGHT * scale
+        slot = max(1.0, (panel_width - pad * 2) / len(keys))
+        tabs = tuple(
+            Tile(
+                key,
+                int(round(pad + index * slot)),
+                int(round(pad * 0.6)),
+                int(round(slot)) - 4,
+                int(round(tab_height)),
+            )
+            for index, key in enumerate(keys)
+        )
+        card_top = pad * 0.6 + tab_height + pad * 0.5
+        card = Tile(
+            chosen,
+            int(round(pad)),
+            int(round(card_top)),
+            int(round(panel_width - pad * 2)),
+            int(round(max(1.0, open_height - card_top - pad * 0.6))),
+        )
         # agganciata al bordo alto: nessuno spazio, come il notch del portatile
         return DockLayout(
             x=int(round((screen_width - wide) / 2)),
             y=0,
             width=wide,
             height=tall,
-            tiles=final_tiles,
+            tiles=(card,),
             horizontal=True,
             expanded=progress,
             scale=scale,
             style="notch",
+            tabs=tabs,
+            active=chosen,
         )
 
     if position == "bottom":
