@@ -1,8 +1,9 @@
 """Palette e tipografia del dock.
 
-I preset riprendono i colori dell'interfaccia web di NOKK (`web/style.css`) così
-il dock sembra parte della stessa applicazione. Ogni valore può essere
-sovrascritto dalla configurazione, quindi il tema resta personalizzabile.
+Il preset predefinito è deliberatamente monocromatico — nero pieno, testo
+bianco, un solo accento bianco — come le notch native di Nusa: niente colori
+che stonano sulla scrivania. Gli altri preset restano disponibili e ogni valore
+può essere sovrascritto dalla configurazione.
 """
 
 from __future__ import annotations
@@ -24,12 +25,12 @@ DEFAULT_PRESET = "nokk"
 
 PRESETS = {
     "nokk": {
-        "background": "#10131b",
-        "panel": "#181c27",
-        "border": "#282d3b",
-        "text": "#e9ebf2",
-        "muted": "#8c93a4",
-        "accent": "#9b8cff",
+        "background": "#000000",
+        "panel": "#08080a",
+        "border": "#1d1d20",
+        "text": "#f5f5f7",
+        "muted": "#8a8a90",
+        "accent": "#ffffff",
         "light": False,
     },
     "midnight": {

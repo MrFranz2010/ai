@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from nokk_dock import artwork, layout, media, motion, settings
+from nokk_dock import artwork, layout, media, motion, settings, theme
 
 PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="
@@ -176,6 +176,17 @@ class NotchLayoutTests(unittest.TestCase):
         plan = self.build(0.0, style="dock")
         self.assertEqual(plan.style, "dock")
         self.assertGreater(plan.width, 300)
+
+
+class ThemeTests(unittest.TestCase):
+    def test_default_palette_is_black_and_white(self):
+        palette = theme.build_theme({})
+        self.assertEqual(palette.preset, "nokk")
+        self.assertEqual(palette.background, "#000000")
+        self.assertEqual(palette.accent, "#ffffff")
+        self.assertGreater(theme.luminance(palette.text), 0.85)
+        self.assertLess(theme.luminance(palette.muted), theme.luminance(palette.text))
+        self.assertEqual(palette.on_accent, "#0b0e14")
 
 
 class SettingsMagnifyTests(unittest.TestCase):

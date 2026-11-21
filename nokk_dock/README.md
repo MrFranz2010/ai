@@ -33,13 +33,15 @@ un'istanza su Render/Fly.
 - **Cattura schermo → NOKK**: la scorciatoia cattura lo schermo, apre la
   finestra «Chiedi a NOKK» con l'immagine allegata e mostra la risposta. Si può
   anche chiedere senza screenshot, oppure continuare la conversazione.
-- **Temi**: cinque preset (NOKK, Midnight, Graphite, Mint, Sand), colore accento,
-  angoli e dimensione; tutto modificabile anche dal pannello impostazioni.
+- **Temi**: cinque preset. Il predefinito **NOKK** è monocromatico — nero pieno,
+  testo bianco, un solo accento bianco — come le notch native di Nusa; Midnight,
+  Graphite, Mint e Sand restano per chi vuole il colore. Accento, angoli e
+  dimensione si cambiano anche dal pannello impostazioni.
 
 L'aspetto segue le notch moderne come **Nusa**: pillola compatta agganciata in
-alto al centro che si apre con una molla rapida, superfici in vetro (riflesso
-superiore, ombra interna, alone esterno), copertina del brano con accento
-cromatico derivato dall'immagine e ingrandimento magnetico sotto il puntatore.
+alto al centro che si apre con una molla rapida, pannello piatto nero con un
+solo filo di bordo, tipografia chiara, copertina del brano in monocromia e
+ingrandimento magnetico sotto il puntatore.
 
 ## Requisiti
 
@@ -145,8 +147,8 @@ può indicare un altro percorso con `--config FILE` o con la variabile
 | `dock.style` | `notch` | `notch` (pillola in alto al centro) o `dock` (barra sul bordo) |
 | `dock.magnify` | `1.25` | ingrandimento massimo del widget sotto il cursore (1.0–1.6) |
 | `dock.show_labels` | `true` | etichetta al passaggio del mouse |
-| `theme.preset` | `nokk` | `nokk`, `midnight`, `graphite`, `mint`, `sand` |
-| `theme.accent` | vuoto | colore accento `#rrggbb` (vuoto = preset) |
+| `theme.preset` | `nokk` | `nokk` (bianco e nero), `midnight`, `graphite`, `mint`, `sand` |
+| `theme.accent` | vuoto | colore accento `#rrggbb` (vuoto = preset; `nokk` = bianco) |
 | `theme.scale` | `1.0` | dimensione complessiva |
 | `widgets` | tutti | ordine e widget visibili |
 | `weather.city` | vuota | città per il meteo |

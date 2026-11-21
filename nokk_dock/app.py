@@ -869,25 +869,17 @@ class DockApp:
             plan.height / 2 if plan.horizontal else plan.width / 2,
             max(10.0, theme.radius),
         )
-        # alone esterno: dà profondità al pannello senza bisogno di trasparenza
+        # pannello piatto: un solo rettangolo con un bordo da 1 px, senza
+        # riflessi né aloni che sullo sfondo nero sembrano sporcature
         round_rect(
-            canvas, 0, 0, plan.width, plan.height, radius,
-            fill=mix(theme.background, theme.panel, 0.65), outline="",
-        )
-        round_rect(
-            canvas, 1.5, 1.5, plan.width - 1.5, plan.height - 1.5, radius,
+            canvas, 0.5, 0.5, plan.width - 0.5, plan.height - 0.5, radius,
             fill=theme.panel, outline=theme.border, width=1,
         )
-        # riflesso superiore e ombra interna: effetto vetro
-        if plan.width - radius * 2 > 12:
+        if plan.width - radius * 2 > 12 and plan.height > 14:
             canvas.create_line(
-                radius, 2.4, plan.width - radius, 2.4,
-                fill=mix(theme.panel, theme.text, 0.14 if not theme.light else 0.08),
+                radius, 1.2, plan.width - radius, 1.2,
+                fill=mix(theme.panel, theme.text, 0.10 if not theme.light else 0.06),
                 width=1,
-            )
-            canvas.create_line(
-                radius, plan.height - 2.4, plan.width - radius, plan.height - 2.4,
-                fill=mix(theme.panel, theme.background, 0.55), width=1,
             )
         if getattr(plan, "style", "dock") == "notch" and expanded < 0.85:
             self._draw_notch(plan)
@@ -900,9 +892,7 @@ class DockApp:
                     canvas,
                     tile.x + 3, tile.y + 3, tile.right - 3, tile.bottom - 3,
                     max(8.0, radius * 0.6),
-                    fill=theme.panel_hover,
-                    outline=mix(theme.accent, theme.panel_hover, 0.4),
-                    width=1,
+                    fill=theme.panel_hover, outline="",
                 )
             painter = getattr(self, f"_draw_{tile.key}", None)
             if painter is not None:
@@ -915,9 +905,7 @@ class DockApp:
         scale = theme.scale
         width, height = plan.width, plan.height
         center_x, center_y = width / 2, height / 2
-        color = theme.accent if self.connected else (
-            AMBER if self.connected is False else theme.muted
-        )
+        color = theme.accent if self.connected else theme.muted
         radius = max(2.0, 2.6 * scale)
         dot_x = max(radius + 8 * scale, 16 * scale)
         canvas.create_oval(
@@ -942,7 +930,8 @@ class DockApp:
         horizontal = self.layout.horizontal if self.layout else True
         scale = theme.scale
         growth = self._tile_growth(tile)
-        accent = self._art_accent or theme.accent
+        # monocromatico come Nusa: la copertina non tinge più i controlli
+        accent = theme.accent
         button = min(34 * scale * growth, height * 0.6)
         cover = self._cover_for(expanded) if state.installed else None
         if cover is not None:
@@ -1099,9 +1088,7 @@ class DockApp:
         horizontal = self.layout.horizontal if self.layout else True
         scale = theme.scale
         growth = self._tile_growth(tile)
-        color = theme.accent if self.connected else (
-            AMBER if self.connected is False else theme.muted
-        )
+        color = theme.accent if self.connected else theme.muted
         if horizontal:
             center_y = y + height / 2 - (5 * scale if expanded > 0.6 else 0)
             icons.draw(self.canvas, "spark", x + 10 * scale, center_y, 20 * scale * growth,
