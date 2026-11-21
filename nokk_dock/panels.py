@@ -19,7 +19,9 @@ import sys
 import threading
 import tkinter as tk
 
+from . import icons
 from .client import NokkError
+from .hotkey import shortcut_hint
 from .settings import (
     POSITIONS,
     POSITION_LABELS,
@@ -164,6 +166,7 @@ class _Panel:
         self.frame.pack(fill="both", expand=True, padx=1, pady=1)
         header = tk.Frame(self.frame, bg=self.theme.panel)
         header.pack(fill="x", pady=(0, 10))
+        self.header = header
         tk.Label(
             header,
             text=title,
@@ -449,75 +452,136 @@ class AskPanel(_Panel):
 
     def _build(self, question):
         theme = self.theme
+        scale = theme.scale
+        self.header.pack_forget()
+        # Barra in stile launcher: lente, campo grande, scorciatoia a destra.
+        bar = tk.Frame(self.frame, bg=theme.panel)
+        bar.pack(fill="x", pady=(0, 2))
+        marker = tk.Canvas(
+            bar, width=int(28 * scale), height=int(28 * scale),
+            bg=theme.panel, highlightthickness=0, bd=0,
+        )
+        marker.pack(side="left", padx=(0, 6))
+        icons.draw(marker, "search", 14 * scale, 14 * scale, 17 * scale,
+                   theme.muted, ("icon",))
+        self.question = tk.StringVar(value=question or "")
+        self.entry = tk.Entry(
+            bar, textvariable=self.question, bg=theme.panel, fg=theme.text,
+            insertbackground=theme.text, relief="flat", bd=0,
+            highlightthickness=0, font=theme.font(13.0),
+        )
+        self.entry.pack(side="left", fill="x", expand=True, ipady=7)
+        self.entry.bind("<Return>", lambda _event: self._send())
+        self._chip(bar, "✕", self.close).pack(side="right", padx=(6, 0))
+        self.send_button = self._chip(bar, "Invia ⏎", self._send, primary=True)
+        self.send_button.pack(side="right", padx=(8, 0))
+        self.placeholder = tk.Label(
+            self.entry, text="Chiedi qualcosa a NOKK…", bg=theme.panel,
+            fg=theme.muted, font=theme.font(12.0),
+        )
+        self.question.trace_add("write", lambda *_args: self._update_placeholder())
+        self._update_placeholder()
+
+        self._section("Allegati")
         self.attachments = tk.Frame(self.frame, bg=theme.panel)
-        self.attachments.pack(fill="x", pady=(0, 10))
+        self.attachments.pack(fill="x")
         self._render_attachments()
 
-        self.question = tk.StringVar(value=question or "")
-        input_row = tk.Frame(self.frame, bg=theme.panel)
-        input_row.pack(fill="x", pady=(0, 4))
-        self.entry = self._entry(input_row, self.question)
-        self.entry.pack(side="left", fill="x", expand=True, ipady=8)
-        self.entry.bind("<Return>", lambda _event: self._send())
-        self.send_button = self._button(input_row, "Invia", self._send, primary=True)
-        self.send_button.pack(side="left", padx=(8, 0))
-
-        self.status = self._label(self.frame, "", 8.6)
-        self.status.pack(fill="x", pady=(0, 8))
-
+        self._section("Conversazione")
         body = tk.Frame(self.frame, bg=theme.panel)
         body.pack(fill="both", expand=True)
         self.answer = tk.Text(
             body,
-            height=16,
+            height=14,
             wrap="word",
-            bg=theme.panel_soft,
+            bg=theme.panel,
             fg=theme.text,
             insertbackground=theme.text,
             relief="flat",
             bd=0,
-            padx=16,
-            pady=14,
+            padx=0,
+            pady=0,
             spacing1=1,
             spacing3=4,
-            highlightthickness=1,
-            highlightbackground=theme.border,
-            font=theme.font(10.0),
+            highlightthickness=0,
+            font=theme.font(10.2),
             cursor="arrow",
         )
         self.answer.pack(side="left", fill="both", expand=True)
         scrollbar = tk.Scrollbar(
-            body, command=self.answer.yview, width=10, bd=0,
+            body, command=self.answer.yview, width=8, bd=0,
             bg=theme.panel, troughcolor=theme.panel, activebackground=theme.muted,
             highlightthickness=0,
         )
         scrollbar.pack(side="right", fill="y")
         self.answer.configure(yscrollcommand=scrollbar.set, state="disabled")
         self.answer.tag_configure(
-            "who", foreground=theme.muted, font=theme.font(7.8, "bold"),
-            spacing1=10,
+            "who", foreground=theme.muted, font=theme.font(7.6, "bold"),
+            spacing1=12, lmargin1=2, lmargin2=2,
         )
         self.answer.tag_configure(
-            "question", foreground=theme.muted, font=theme.font(9.8),
-            spacing3=10, lmargin1=2, lmargin2=2,
+            "question", foreground=theme.text, font=theme.font(9.8),
+            background=theme.panel_soft, spacing1=4, spacing3=8,
+            lmargin1=10, lmargin2=10, rmargin=10,
         )
         self.answer.tag_configure(
-            "answer", foreground=theme.text, font=theme.font(10.4),
+            "answer", foreground=theme.text, font=theme.font(10.2),
             spacing1=1, spacing3=9, lmargin1=2, lmargin2=2,
         )
         self.answer.tag_configure(
             "error", foreground="#ff6b81", font=theme.font(9.6), spacing3=9,
         )
         self.answer.tag_configure(
-            "hint", foreground=theme.muted, font=theme.font(9.6), spacing1=2,
+            "hint", foreground=theme.muted, font=theme.font(9.8), spacing1=2,
         )
         self._insert(self._intro(), "hint")
 
         footer = tk.Frame(self.frame, bg=theme.panel)
-        footer.pack(fill="x", pady=(10, 0))
-        self._button(footer, "Copia risposta", self._copy).pack(side="left")
-        self._button(footer, "Chiudi", self.close).pack(side="right")
+        footer.pack(fill="x", pady=(8, 0))
+        tk.Frame(footer, bg=theme.divider, height=1).pack(fill="x", pady=(0, 6))
+        self.status = self._label(footer, "", 8.4)
+        self.status.pack(side="left")
+        self._chip(footer, "Copia risposta", self._copy).pack(side="right")
         self.win.after(60, lambda: self.entry.focus_set())
+
+    def _chip(self, parent, text, command, primary=False):
+        """Pulsante compatto con l'aria dei suggerimenti del launcher."""
+        theme = self.theme
+        background = theme.accent if primary else theme.panel_soft
+        return tk.Button(
+            parent,
+            text=text,
+            command=command,
+            bg=background,
+            fg=theme.on_accent if primary else theme.muted,
+            activebackground=theme.accent if primary else theme.panel_hover,
+            activeforeground=theme.on_accent if primary else theme.text,
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            padx=9,
+            pady=4,
+            cursor="hand2",
+            font=theme.font(8.4),
+        )
+
+    def _section(self, text):
+        tk.Label(
+            self.frame, text=text, bg=self.theme.panel, fg=self.theme.muted,
+            font=self.theme.font(7.8, "bold"), anchor="w",
+        ).pack(fill="x", pady=(10, 4))
+
+    def _update_placeholder(self):
+        label = getattr(self, "placeholder", None)
+        if label is None:
+            return
+        try:
+            if self.question.get():
+                label.place_forget()
+            else:
+                label.place(x=2, rely=0.5, anchor="w")
+        except tk.TclError:
+            pass
 
     def _intro(self):
         if self.image:
@@ -527,37 +591,43 @@ class AskPanel(_Panel):
             )
         return "Scrivi una domanda e premi Invio: la risposta compare qui.\n"
 
-    # -- allegati ---------------------------------------------------------
     def _render_attachments(self):
         for child in self.attachments.winfo_children():
             child.destroy()
         theme = self.theme
         if not self.image:
+            row = tk.Frame(self.attachments, bg=theme.panel)
+            row.pack(fill="x")
             tk.Label(
-                self.attachments, text="Nessun allegato", bg=theme.panel,
-                fg=theme.muted, font=theme.font(8.4), anchor="w",
-            ).pack(fill="x")
+                row, text="Nessun allegato", bg=theme.panel, fg=theme.text,
+                font=theme.font(9.8), anchor="w",
+            ).pack(side="left")
+            tk.Label(
+                row, text=shortcut_hint(self.app.config["capture"]["shortcut"]),
+                bg=theme.panel, fg=theme.muted, font=theme.font(8.0),
+                anchor="e",
+            ).pack(side="right")
             return
-        card = tk.Frame(self.attachments, bg=theme.panel_soft)
-        card.pack(fill="x")
+        row = tk.Frame(self.attachments, bg=theme.panel_soft)
+        row.pack(fill="x")
         photo = self._photo()
         if photo is not None:
-            label = tk.Label(card, image=photo, bg=theme.panel_soft, bd=0)
+            label = tk.Label(row, image=photo, bg=theme.panel_soft, bd=0)
             label.image = photo
-            label.pack(side="left", padx=12, pady=12)
-        info = tk.Frame(card, bg=theme.panel_soft)
-        info.pack(side="left", fill="both", expand=True, pady=12)
+            label.pack(side="left", padx=10, pady=8)
+        info = tk.Frame(row, bg=theme.panel_soft)
+        info.pack(side="left", fill="both", expand=True, pady=8)
         tk.Label(
-            info, text="Screenshot allegato", bg=theme.panel_soft, fg=theme.text,
-            font=theme.font(9.6, "bold"), anchor="w",
+            info, text="Screenshot", bg=theme.panel_soft, fg=theme.text,
+            font=theme.font(10.0, "bold"), anchor="w",
         ).pack(fill="x")
         tk.Label(
             info, text=self._attachment_detail(), bg=theme.panel_soft,
-            fg=theme.muted, font=theme.font(8.4), anchor="w",
-        ).pack(fill="x", pady=(3, 0))
+            fg=theme.muted, font=theme.font(8.2), anchor="w",
+        ).pack(fill="x", pady=(2, 0))
         if not self.busy:
-            self._button(card, "Rimuovi", self._remove_attachment).pack(
-                side="right", padx=12,
+            self._chip(row, "Rimuovi", self._remove_attachment).pack(
+                side="right", padx=10,
             )
 
     def _attachment_detail(self):

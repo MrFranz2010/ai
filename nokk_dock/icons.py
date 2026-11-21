@@ -192,6 +192,18 @@ def camera(canvas, cx, cy, size, color, tag, bg=None):
     )
 
 
+def search(canvas, cx, cy, size, color, tag, bg=None):
+    width = _stroke(size)
+    canvas.create_oval(
+        cx - size * 0.36, cy - size * 0.36, cx + size * 0.12, cy + size * 0.12,
+        outline=color, width=width, tags=tag,
+    )
+    _line(canvas, [
+        cx + size * 0.1, cy + size * 0.1,
+        cx + size * 0.4, cy + size * 0.4,
+    ], color, width, tag)
+
+
 def clipboard(canvas, cx, cy, size, color, tag, bg=None):
     width = _stroke(size)
     canvas.create_rectangle(
@@ -295,6 +307,7 @@ ICONS = {
     "spark": spark,
     "camera": camera,
     "clipboard": clipboard,
+    "search": search,
     "gear": gear,
     "chevron_left": chevron_left,
     "chevron_right": chevron_right,
