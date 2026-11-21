@@ -54,9 +54,12 @@ un'istanza su Render/Fly.
 - **Meteo e ora**: Open-Meteo senza chiave API (basta il nome della città),
   aggiornamento periodico e data/ora locali.
 - **Stato di NOKK**: pallino verde/ambra e testo «Connesso / Non raggiungibile».
-- **Cattura schermo → NOKK**: la scorciatoia cattura lo schermo, apre la
-  finestra «Chiedi a NOKK» con l'immagine allegata e mostra la risposta. Si può
-  anche chiedere senza screenshot, oppure continuare la conversazione.
+- **Cattura schermo → NOKK**: la scorciatoia cattura lo schermo e apre al
+  centro la finestra «Chiedi a NOKK»: in alto l'allegato con anteprima, formato,
+  peso e dimensioni (e «Rimuovi»), poi una barra per la domanda e sotto un'area
+  grande con la risposta, dove domande e risposte restano separate e leggibili
+  anche quando il testo è lungo. Si può anche chiedere senza screenshot e
+  continuare la conversazione.
 - **Temi**: cinque preset. Il predefinito **NOKK** è monocromatico — nero pieno,
   testo bianco, un solo accento bianco — come le notch native di Nusa; Midnight,
   Graphite, Mint e Sand restano per chi vuole il colore. Accento, angoli e

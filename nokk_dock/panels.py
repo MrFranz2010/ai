@@ -134,6 +134,9 @@ def strip_window_frame(window, x, y, width, height):
 class _Panel:
     """Base comune: finestra senza cornice, trascinabile e chiudibile con Esc."""
 
+    # I pannelli di richiesta vivono al centro dello schermo, non accanto al dock.
+    centered = False
+
     def __init__(self, app, title, width, height):
         self.app = app
         self.theme = app.theme
@@ -242,6 +245,9 @@ class _Panel:
                 x = plan.x - self.width - 14
                 y = plan.y
         else:
+            x = (screen_w - self.width) // 2
+            y = (screen_h - self.height) // 2
+        if self.centered:
             x = (screen_w - self.width) // 2
             y = (screen_h - self.height) // 2
         x = max(0, min(screen_w - self.width, x))
@@ -412,53 +418,72 @@ class _Panel:
         )
 
 
+def human_size(size: int) -> str:
+    """Dimensione leggibile per l'allegato."""
+    if size <= 0:
+        return "0 KB"
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{max(1, round(size / 1024))} KB"
+    return f"{size / (1024 * 1024):.1f} MB"
+
+
 class AskPanel(_Panel):
-    """Finestra «Chiedi a NOKK», con allegato immagine opzionale."""
+    """Finestra «Chiedi a NOKK»: allegato, domanda e risposta, al centro."""
 
     def __init__(self, app, image=None, question=None):
-        super().__init__(app, "Chiedi a NOKK", 560, 430)
+        super().__init__(app, "Chiedi a NOKK", 740, 620)
+        self.centered = True
         self.client = app.client
         self.image = image
         self.history: list[dict] = []
         self.queue: queue.Queue = queue.Queue()
         self.busy = False
+        self.last_reply = ""
         self._pump_job = None
+        self._photo_image = None
         self._build(question)
         self._place()
         self._pump_job = self.win.after(90, self._pump)
 
     def _build(self, question):
         theme = self.theme
-        if self.image:
-            self._build_preview()
-        entry_row = tk.Frame(self.frame, bg=theme.panel)
-        entry_row.pack(fill="x", pady=(0, 6))
+        self.attachments = tk.Frame(self.frame, bg=theme.panel)
+        self.attachments.pack(fill="x", pady=(0, 10))
+        self._render_attachments()
+
         self.question = tk.StringVar(value=question or "")
-        entry = self._entry(entry_row, self.question)
-        entry.pack(side="left", fill="x", expand=True, ipady=6)
-        entry.bind("<Return>", lambda _event: self._send())
-        self.send_button = self._button(entry_row, "Invia", self._send, primary=True)
+        input_row = tk.Frame(self.frame, bg=theme.panel)
+        input_row.pack(fill="x", pady=(0, 4))
+        self.entry = self._entry(input_row, self.question)
+        self.entry.pack(side="left", fill="x", expand=True, ipady=8)
+        self.entry.bind("<Return>", lambda _event: self._send())
+        self.send_button = self._button(input_row, "Invia", self._send, primary=True)
         self.send_button.pack(side="left", padx=(8, 0))
+
         self.status = self._label(self.frame, "", 8.6)
-        self.status.pack(fill="x", pady=(0, 6))
+        self.status.pack(fill="x", pady=(0, 8))
+
         body = tk.Frame(self.frame, bg=theme.panel)
         body.pack(fill="both", expand=True)
         self.answer = tk.Text(
             body,
-            height=8,
+            height=16,
             wrap="word",
             bg=theme.panel_soft,
             fg=theme.text,
             insertbackground=theme.text,
             relief="flat",
             bd=0,
-            padx=12,
-            pady=10,
-            spacing1=2,
-            spacing3=5,
+            padx=16,
+            pady=14,
+            spacing1=1,
+            spacing3=4,
             highlightthickness=1,
             highlightbackground=theme.border,
-            font=theme.font(9.5),
+            font=theme.font(10.0),
+            cursor="arrow",
         )
         self.answer.pack(side="left", fill="both", expand=True)
         scrollbar = tk.Scrollbar(
@@ -467,45 +492,101 @@ class AskPanel(_Panel):
             highlightthickness=0,
         )
         scrollbar.pack(side="right", fill="y")
-        self.answer.configure(yscrollcommand=scrollbar.set)
-        self.answer.configure(state="disabled")
-        self.answer.tag_configure("user", foreground=theme.muted)
-        self.answer.tag_configure("answer", foreground=theme.text)
-        self.answer.tag_configure("error", foreground="#ff6b81")
-        footer = tk.Frame(self.frame, bg=theme.panel)
-        footer.pack(fill="x", pady=(8, 0))
-        self._button(footer, "Copia ultima risposta", self._copy).pack(side="left")
-        self._button(footer, "Chiudi", self.close).pack(side="right")
-        self.win.after(60, lambda: entry.focus_set())
+        self.answer.configure(yscrollcommand=scrollbar.set, state="disabled")
+        self.answer.tag_configure(
+            "who", foreground=theme.muted, font=theme.font(7.8, "bold"),
+            spacing1=10,
+        )
+        self.answer.tag_configure(
+            "question", foreground=theme.muted, font=theme.font(9.8),
+            spacing3=10, lmargin1=2, lmargin2=2,
+        )
+        self.answer.tag_configure(
+            "answer", foreground=theme.text, font=theme.font(10.4),
+            spacing1=1, spacing3=9, lmargin1=2, lmargin2=2,
+        )
+        self.answer.tag_configure(
+            "error", foreground="#ff6b81", font=theme.font(9.6), spacing3=9,
+        )
+        self.answer.tag_configure(
+            "hint", foreground=theme.muted, font=theme.font(9.6), spacing1=2,
+        )
+        self._insert(self._intro(), "hint")
 
-    def _build_preview(self):
+        footer = tk.Frame(self.frame, bg=theme.panel)
+        footer.pack(fill="x", pady=(10, 0))
+        self._button(footer, "Copia risposta", self._copy).pack(side="left")
+        self._button(footer, "Chiudi", self.close).pack(side="right")
+        self.win.after(60, lambda: self.entry.focus_set())
+
+    def _intro(self):
+        if self.image:
+            return (
+                "Screenshot allegato: scrivi cosa vuoi sapere e premi Invia. "
+                "Senza domanda parte la richiesta predefinita.\n"
+            )
+        return "Scrivi una domanda e premi Invio: la risposta compare qui.\n"
+
+    # -- allegati ---------------------------------------------------------
+    def _render_attachments(self):
+        for child in self.attachments.winfo_children():
+            child.destroy()
         theme = self.theme
-        holder = tk.Frame(self.frame, bg=theme.panel_soft)
-        holder.pack(fill="x", pady=(0, 8))
+        if not self.image:
+            tk.Label(
+                self.attachments, text="Nessun allegato", bg=theme.panel,
+                fg=theme.muted, font=theme.font(8.4), anchor="w",
+            ).pack(fill="x")
+            return
+        card = tk.Frame(self.attachments, bg=theme.panel_soft)
+        card.pack(fill="x")
         photo = self._photo()
         if photo is not None:
-            label = tk.Label(holder, image=photo, bg=theme.panel_soft, bd=0)
+            label = tk.Label(card, image=photo, bg=theme.panel_soft, bd=0)
             label.image = photo
-            label.pack(padx=8, pady=8)
-        else:
-            tk.Label(
-                holder,
-                text="Screenshot pronto: l'anteprima non è disponibile, "
-                     "l'immagine viene comunque allegata.",
-                bg=theme.panel_soft,
-                fg=theme.muted,
-                font=theme.font(8.6),
-                padx=10,
-                pady=9,
-            ).pack(fill="x")
+            label.pack(side="left", padx=12, pady=12)
+        info = tk.Frame(card, bg=theme.panel_soft)
+        info.pack(side="left", fill="both", expand=True, pady=12)
+        tk.Label(
+            info, text="Screenshot allegato", bg=theme.panel_soft, fg=theme.text,
+            font=theme.font(9.6, "bold"), anchor="w",
+        ).pack(fill="x")
+        tk.Label(
+            info, text=self._attachment_detail(), bg=theme.panel_soft,
+            fg=theme.muted, font=theme.font(8.4), anchor="w",
+        ).pack(fill="x", pady=(3, 0))
+        if not self.busy:
+            self._button(card, "Rimuovi", self._remove_attachment).pack(
+                side="right", padx=12,
+            )
+
+    def _attachment_detail(self):
+        image = self.image or {}
+        kind = str(image.get("mime_type") or "image/png").rsplit("/", 1)[-1].upper()
+        data = str(image.get("data") or "")
+        parts = [kind, human_size(len(data) * 3 // 4)]
+        photo = self._photo_image
+        if photo is not None:
+            parts.append(f"{photo.width()}×{photo.height()}")
+        return " · ".join(parts)
+
+    def _remove_attachment(self):
+        if self.busy:
+            return
+        self.image = None
+        self._photo_image = None
+        self._render_attachments()
+        self._set_status("Allegato rimosso.")
 
     def _preview_limits(self):
-        """Spazio massimo dell'anteprima, così il resto del pannello resta visibile."""
-        width = max(96, self.width - 48)
-        height = max(72, int(150 * self.theme.scale))
+        """Miniatura dell'allegato: grande ma senza rubare spazio alla risposta."""
+        width = max(96, int(200 * self.theme.scale))
+        height = max(64, int(112 * self.theme.scale))
         return width, height
 
     def _photo(self):
+        if self._photo_image is not None:
+            return self._photo_image
         if not self.image or not self.image.get("data"):
             return None
         data = str(self.image["data"])
@@ -513,11 +594,11 @@ class AskPanel(_Panel):
             raw = base64.b64decode(data + "=" * (-len(data) % 4))
         except (ValueError, TypeError):
             raw = b""
-        if raw:
-            photo = self._photo_with_pillow(raw)
-            if photo is not None:
-                return photo
-        return self._photo_with_tk(data, self.image.get("mime_type"))
+        photo = self._photo_with_pillow(raw) if raw else None
+        if photo is None:
+            photo = self._photo_with_tk(data, self.image.get("mime_type"))
+        self._photo_image = photo
+        return photo
 
     def _photo_with_pillow(self, raw):
         """Anteprima di qualsiasi formato (anche il JPEG degli scatti ridotti)."""
@@ -563,11 +644,13 @@ class AskPanel(_Panel):
             return
         image = self.image
         self.image = None
+        self._photo_image = None
+        self._render_attachments()
         self.busy = True
         self.send_button.configure(state="disabled")
         self._set_status("NOKK sta pensando…")
         self.question.set("")
-        self._append(f"Tu: {text}\n", "user")
+        self._append_question(text)
         threading.Thread(
             target=self._worker, args=(text, image), name="nokk-dock-ask", daemon=True
         ).start()
@@ -599,19 +682,22 @@ class AskPanel(_Panel):
                 kind, payload = self.queue.get_nowait()
                 if kind == "partial":
                     length = len(payload or "")
-                    self._set_status(f"NOKK sta scrivendo… {length} caratteri" if length
-                                     else "NOKK sta pensando…")
+                    self._set_status(
+                        f"NOKK sta scrivendo… {length} caratteri" if length
+                        else "NOKK sta pensando…"
+                    )
                 elif kind == "reply":
                     text, result = payload
                     reply = (result.get("reply") or "").strip() or "(nessun testo)"
-                    self._append(f"NOKK: {reply}\n\n", "answer")
+                    self.last_reply = reply
+                    self._append_answer(reply)
                     self.history.append({"role": "user", "content": text})
                     self.history.append({"role": "assistant", "content": reply})
                     self.history = self.history[-12:]
                     self._set_status("Risposta pronta.")
                     self._finish()
                 elif kind == "error":
-                    self._append(f"{payload}\n\n", "error")
+                    self._append_error(str(payload))
                     self._set_status(str(payload), error=True)
                     self._finish()
         except queue.Empty:
@@ -626,7 +712,19 @@ class AskPanel(_Panel):
         except tk.TclError:
             pass
 
-    def _append(self, text, tag):
+    def _append_question(self, text):
+        self._insert("Tu\n", "who")
+        self._insert(f"{text}\n", "question")
+
+    def _append_answer(self, text):
+        self._insert("NOKK\n", "who")
+        self._insert(f"{text}\n", "answer")
+
+    def _append_error(self, text):
+        self._insert("NOKK\n", "who")
+        self._insert(f"{text}\n", "error")
+
+    def _insert(self, text, tag):
         try:
             self.answer.configure(state="normal")
             self.answer.insert("end", text, tag)
@@ -642,10 +740,12 @@ class AskPanel(_Panel):
             pass
 
     def _copy(self):
+        if not self.last_reply:
+            self._set_status("Nessuna risposta da copiare.")
+            return
         try:
-            content = self.answer.get("1.0", "end").strip()
             self.win.clipboard_clear()
-            self.win.clipboard_append(content)
+            self.win.clipboard_append(self.last_reply)
             self._set_status("Risposta copiata negli appunti.")
         except tk.TclError:
             pass
@@ -661,7 +761,6 @@ class AskPanel(_Panel):
                 pass
             self._pump_job = None
         super().close()
-
 
 class SettingsPanel(_Panel):
     """Pannello di personalizzazione completo del dock."""
