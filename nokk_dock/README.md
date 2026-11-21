@@ -26,9 +26,10 @@ un'istanza su Render/Fly.
 - **Espansione al passaggio del mouse**: molla sotto-smorzata come Nusa — parte
   decisa, supera la misura di un 2% e si posa in ~0,3 s — con ritardo di
   apertura e chiusura regolabili.
-- **Pagine come Nusa**: clic sulla pillola per aprirla e tenerla ferma (un altro
-  clic la richiude), rotella del mouse sopra il pannello aperto per passare da
-  una scheda all'altra, `Esc` per richiudere subito.
+- **Pagine come Nusa**: clic sulla pillola per aprirla, rotella del mouse sopra
+  il pannello aperto per passare da una scheda all'altra, `Esc` per richiudere
+  subito. Uscendo con il mouse il pannello torna sempre compatto (c'è anche un
+  controllo ogni secondo che lo riporta giù se il mouse è fuori).
 - **Ingrandimento magnetico**: i widget vicini al cursore si allargano e il
   contenuto cresce con loro; l'intensità è regolabile (`dock.magnify`).
 - **Etichette al passaggio del mouse**: una pillola compatta spiega ogni widget

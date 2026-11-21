@@ -103,6 +103,12 @@ class FakeRoot:
     def winfo_height(self):
         return 10
 
+    def after(self, _milliseconds, _callback=None):
+        return "job"
+
+    def after_cancel(self, _job):
+        pass
+
 
 def _forget_dock_modules():
     """Dimentica app e pannelli (moduli e attributi del pacchetto)."""
@@ -443,7 +449,7 @@ class DrawingTests(unittest.TestCase):
             self.assertIsNone(instance._on_notch_wheel(down))
             self.assertEqual(instance.active_tab, before)
 
-    def test_click_pins_and_unpins_the_notch(self):
+    def test_click_opens_the_notch_without_locking_it(self):
         with stub_tkinter():
             instance = self.build_app()
             instance.expand = 0.0
@@ -452,17 +458,35 @@ class DrawingTests(unittest.TestCase):
 
             click = types.SimpleNamespace(x=instance.layout.width // 2, y=10)
             instance._on_click(click)
-            self.assertTrue(instance._pinned)
             self.assertEqual(instance.target, 1.0)
+            self.assertFalse(hasattr(instance, "_pinned"))
 
+            # e uscendo dal notch si richiude comunque
             instance.expand = 1.0
             instance._apply_geometry(1.0)
             instance._redraw()
-            empty = types.SimpleNamespace(
-                x=int(instance.layout.width // 2), y=int(instance.layout.height - 2)
-            )
-            instance._on_click(empty)
-            self.assertFalse(instance._pinned)
+            instance._pointer_inside = lambda: False
+            instance._on_leave()
+            self.assertIsNotNone(instance._collapse_job)
+            instance._maybe_collapse()
+            self.assertEqual(instance.target, 0.0)
+            self.assertFalse(instance._hover_locked)
+
+    def test_watchdog_collapses_when_the_pointer_left(self):
+        with stub_tkinter():
+            instance = self.build_app()
+            instance.expand = 1.0
+            instance.target = 1.0
+            instance._apply_geometry(1.0)
+            instance._animate = lambda target: setattr(instance, "target", target)
+            instance._redraw()
+
+            instance._pointer_inside = lambda: True
+            instance._watchdog()
+            self.assertEqual(instance.target, 1.0)
+
+            instance._pointer_inside = lambda: False
+            instance._watchdog()
             self.assertEqual(instance.target, 0.0)
 
     def test_settings_wheel_scrolls_on_windows_and_x11(self):

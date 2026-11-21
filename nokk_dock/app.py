@@ -113,8 +113,12 @@ class DockApp:
     _art_source = ""
     _art_pending = ""
     _art_variants = None
+    _anim_job = None
+    _expand_job = None
+    _collapse_job = None
+    _panels = 0
+    _hover_locked = False
     active_tab = "music"
-    _pinned = False
 
     def __init__(self, config, config_file=None):
         self.config = validate_config(config)
@@ -356,7 +360,18 @@ class DockApp:
         if not self._alive:
             return
         self._redraw()
+        self._watchdog()
         self._clock_job = self.root.after(1000, self._schedule_clock)
+
+    def _watchdog(self):
+        """Rete di sicurezza: con il mouse fuori il notch torna sempre compatto."""
+        if not self.layout or self.layout.style != "notch" or self._panels:
+            return
+        if self.expand <= 0.02 and self.target <= 0.02:
+            return
+        if self._pointer_inside():
+            return
+        self._close_notch()
 
     # ------------------------------------------------------------ geometry
     def _apply_geometry(self, expand):
@@ -436,14 +451,12 @@ class DockApp:
         self._cancel(self._expand_job)
         self._expand_job = None
         self._hide_hover_label()
-        if self._pinned:
-            return
         delay = int(self.config["dock"]["collapse_delay_ms"])
         self._collapse_job = self.root.after(delay, self._maybe_collapse)
 
     def _maybe_collapse(self):
         self._collapse_job = None
-        if not self._alive or self._panels or self._pinned:
+        if not self._alive or self._panels:
             return
         if self._pointer_inside():
             self._collapse_job = self.root.after(220, self._maybe_collapse)
@@ -492,22 +505,16 @@ class DockApp:
         if not self.layout:
             return
         if self.layout.style == "notch":
-            # un clic sulla pillola la apre e la tiene aperta, un altro la chiude
+            # un clic sulla pillola chiusa la apre; si richiude da sola quando il
+            # mouse esce, quindi niente stato bloccato
             if self.expand < 0.85:
-                self._pinned = True
-                self._hover_locked = True
                 self._animate(1.0)
-            elif self._pinned:
-                self._pinned = False
-                self._hover_locked = False
-                self._animate(0.0)
             return
         tile = self.layout.tile_at(event.x, event.y)
         if tile is not None:
             self._activate(tile.key)
 
     def _on_escape(self, _event=None):
-        self._pinned = False
         self._close_notch()
 
     def _close_notch(self):
