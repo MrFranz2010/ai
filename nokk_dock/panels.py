@@ -41,13 +41,11 @@ class _Panel:
         self.theme = app.theme
         self.closed = False
         self.win = tk.Toplevel(app.root)
-        # Anche su Windows i pannelli sono senza cornice: la barra di sistema
-        # chiara stona con il tema scuro e il titolo è già nell'intestazione.
+        # Si crea nascosto e senza cornice: la barra di sistema chiara non deve
+        # mai comparire, nemmeno per un istante, e la finestra viene mostrata
+        # solo in _place(), quando posizione e contenuto sono pronti.
+        self.win.withdraw()
         self.win.overrideredirect(True)
-        try:
-            self.win.wm_attributes("-topmost", True)
-        except tk.TclError:
-            pass
         self.win.configure(bg=self.theme.border)
         self.width = int(width * self.theme.scale)
         self.height = int(height * self.theme.scale)
@@ -140,13 +138,35 @@ class _Panel:
             y = (screen_h - self.height) // 2
         x = max(0, min(screen_w - self.width, x))
         y = max(0, min(screen_h - self.height, y))
-        self.win.geometry(f"{self.width}x{self.height}+{x}+{y}")
+        geometry = f"{self.width}x{self.height}+{x}+{y}"
+        self.win.geometry(geometry)
         self.win.deiconify()
+        self.win.update_idletasks()
+        # Ripetuta dopo la mappatura: su Windows la misura presa prima di
+        # mostrare la finestra può andare persa e il pannello resterebbe 1×1.
+        self.win.geometry(geometry)
+        # Riemerge sopra tutto anche se il dock è «sempre sopra le finestre»:
+        # senza questo il pannello può restare dietro la finestra di NOKK.
+        try:
+            self.win.wm_attributes("-topmost", True)
+        except tk.TclError:
+            pass
         self.win.lift()
         self._focus()
         # Su Windows una finestra senza cornice appena mostrata non sempre
         # riceve subito il focus: un secondo tentativo dopo il map lo aggancia.
         self.win.after(60, self._focus)
+        self.win.after(120, self._raise_panel)
+
+    def _raise_panel(self):
+        """Riporta il pannello in cima dopo la mappatura (Windows è permaloso)."""
+        if self.closed:
+            return
+        try:
+            self.win.wm_attributes("-topmost", True)
+            self.win.lift()
+        except tk.TclError:
+            pass
 
     def close(self):
         if self.closed:

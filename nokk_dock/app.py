@@ -307,11 +307,22 @@ class DockApp:
         try:
             while True:
                 kind, payload = self.queue.get_nowait()
-                self._dispatch(kind, payload)
+                try:
+                    self._dispatch(kind, payload)
+                except Exception as error:  # noqa: BLE001 - un evento non ferma il dock
+                    self._event_error(kind, error)
         except queue.Empty:
             pass
         finally:
             self._pump_job = self.root.after(60, self._pump)
+
+    def _event_error(self, source, error):
+        message = f"Errore del dock ({source}): {error}"
+        print(message)
+        try:
+            self.toast(message, seconds=8)
+        except Exception:  # noqa: BLE001 - il messaggio non deve fermare il loop
+            pass
 
     def _dispatch(self, kind, payload):
         if kind == "music":
@@ -658,8 +669,11 @@ class DockApp:
     # -------------------------------------------------------------- ask UI
     def open_ask(self, image=None, question=None):
         self.show_dock()
-        panel = AskPanel(self, image=image, question=question)
-        return panel
+        try:
+            return AskPanel(self, image=image, question=question)
+        except Exception as error:  # noqa: BLE001 - mostrato all'utente
+            self._panel_error("Chiedi a NOKK", error)
+            return None
 
     def request_capture(self):
         self.show_dock()
@@ -683,7 +697,19 @@ class DockApp:
 
     def open_settings(self):
         self.show_dock()
-        return SettingsPanel(self)
+        try:
+            return SettingsPanel(self)
+        except Exception as error:  # noqa: BLE001 - mostrato all'utente
+            self._panel_error("Impostazioni del dock", error)
+            return None
+
+    def _panel_error(self, title, error):
+        message = f"{title} non si apre: {error}"
+        print(message)
+        try:
+            self.toast(message, seconds=8)
+        except Exception:  # noqa: BLE001 - il dock resta in piedi
+            pass
 
     def panel_opened(self):
         self._panels += 1
