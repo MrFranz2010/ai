@@ -14,11 +14,12 @@ un'istanza su Render/Fly.
 - **Dock personalizzabile**: quattro bordi (basso, alto, sinistra, destra),
   posizione lungo il bordo, spessore, lunghezza, distanza dal bordo, opacità,
   scala, nascondiglio automatico.
-- **Forma «notch»** (predefinita): una pillola compatta in alto al centro, con
-  ora e stato di NOKK, che si srotola nel pannello completo al passaggio del
-  mouse. Chi preferisce la barra classica sceglie `dock.style = "dock"`.
-- **Espansione al passaggio del mouse**: molla smorzata e rigida (non
-  interpolazione lineare), ~0,2 s dall'apertura alla posa, con ritardo di
+- **Forma «notch»** (predefinita): una pillola compatta **agganciata al bordo
+  alto** dello schermo, con spigoli alti vivi e bassi arrotondati, che si
+  srotola verso il basso nel pannello completo al passaggio del mouse. Chi
+  preferisce la barra classica sceglie `dock.style = "dock"`.
+- **Espansione al passaggio del mouse**: molla sotto-smorzata come Nusa — parte
+  decisa, supera la misura di un 2% e si posa in ~0,3 s — con ritardo di
   apertura e chiusura regolabili.
 - **Ingrandimento magnetico**: i widget vicini al cursore si allargano e il
   contenuto cresce con loro; l'intensità è regolabile (`dock.magnify`).

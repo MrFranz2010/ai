@@ -33,13 +33,23 @@ class SpringTests(unittest.TestCase):
         self.assertAlmostEqual(value, target, places=3)
         self.assertLess(peak, target + 0.05)
 
-    def test_monotonic_opening(self):
+    def test_rises_without_reversing_before_the_target(self):
         value, velocity = 0.0, 0.0
         previous = value
         for _ in range(200):
             value, velocity = motion.spring_step(value, 1.0, velocity)
-            self.assertGreaterEqual(value, previous - 1e-9)
+            if previous < 0.98:
+                self.assertGreaterEqual(value, previous - 1e-9)
             previous = value
+
+    def test_overshoots_like_a_native_notch_but_only_slightly(self):
+        value, velocity, peak = 0.0, 0.0, 0.0
+        for _ in range(200):
+            value, velocity = motion.spring_step(value, 1.0, velocity)
+            peak = max(peak, value)
+        self.assertGreater(peak, 1.0)
+        self.assertLess(peak, 1.05)
+        self.assertAlmostEqual(value, 1.0, places=3)
 
     def test_settled(self):
         self.assertTrue(motion.settled(1.0, 1.0, 0.0))
@@ -156,7 +166,7 @@ class NotchLayoutTests(unittest.TestCase):
         self.assertTrue(plan.horizontal)
         self.assertLessEqual(plan.width, int(layout.NOTCH_WIDTH) + 1)
         self.assertLess(plan.height, 45)
-        self.assertEqual(plan.y, 18)
+        self.assertEqual(plan.y, 0)
         self.assertAlmostEqual(plan.x + plan.width / 2, 960, delta=1)
 
     def test_opening_reveals_the_full_panel(self):
@@ -168,6 +178,11 @@ class NotchLayoutTests(unittest.TestCase):
         self.assertLessEqual(opened.y + opened.height, 1080)
         # il contenuto non viene compresso: si svela crescendo
         self.assertEqual(opened.tiles[0].width, collapsed.tiles[0].width)
+
+    def test_notch_is_glued_to_the_top_edge(self):
+        for margin in (0, 18, 60):
+            with self.subTest(margin=margin):
+                self.assertEqual(self.build(0.0, margin=margin).y, 0)
 
     def test_offset_does_not_move_the_notch(self):
         self.assertEqual(self.build(1.0, offset=0.0).x, self.build(1.0, offset=1.0).x)

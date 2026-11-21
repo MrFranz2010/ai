@@ -9,6 +9,7 @@ il tema senza ricostruire l'interfaccia.
 from __future__ import annotations
 
 import base64
+import math
 import queue
 import sys
 import threading
@@ -58,6 +59,24 @@ def enable_dpi_awareness():
             return True
     except Exception:  # noqa: BLE001 - il dock funziona anche senza
         return False
+
+
+def notch_rect(canvas, x1, y1, x2, y2, radius, **kwargs):
+    """Pannello agganciato al bordo alto: spigoli alti vivi, bassi arrotondati."""
+    r = max(0.0, min(float(radius), (x2 - x1) / 2, (y2 - y1)))
+    steps = 10
+    points = [x1, y1, x2, y1]
+    for index in range(steps + 1):
+        angle = (math.pi / 2) * index / steps
+        points.extend(
+            (x2 - r + r * math.cos(angle), y2 - r + r * math.sin(angle))
+        )
+    for index in range(steps, -1, -1):
+        angle = (math.pi / 2) * index / steps
+        points.extend(
+            (x1 + r - r * math.cos(angle), y2 - r + r * math.sin(angle))
+        )
+    return canvas.create_polygon(points, **kwargs)
 
 
 def round_rect(canvas, x1, y1, x2, y2, radius, **kwargs):
@@ -357,13 +376,15 @@ class DockApp:
         self.layout = plan
         offset_x = 0
         offset_y = 0
+        # il notch vive sempre sul bordo alto, qualunque posizione sia salvata
+        position = "top" if dock["style"] == "notch" else dock["position"]
         if dock["auto_hide"] and self.expand <= 0.02 and not self._hover_locked:
             peek = int(round(8 * self.theme.scale))
-            if dock["position"] == "bottom":
+            if position == "bottom":
                 offset_y = plan.height - peek
-            elif dock["position"] == "top":
+            elif position == "top":
                 offset_y = -(plan.height - peek)
-            elif dock["position"] == "left":
+            elif position == "left":
                 offset_x = -(plan.width - peek)
             else:
                 offset_x = plan.width - peek
@@ -827,7 +848,10 @@ class DockApp:
             window.update_idletasks()
             width = window.winfo_reqwidth()
             height = window.winfo_reqheight()
-            position = self.config["dock"]["position"]
+            position = (
+                "top" if getattr(plan, "style", "dock") == "notch"
+                else self.config["dock"]["position"]
+            )
             if plan.horizontal:
                 x = plan.x + tile.x + tile.width // 2 - width // 2
                 y = plan.y - height - 8 if position == "bottom" else plan.y + plan.height + 8
@@ -871,16 +895,23 @@ class DockApp:
         )
         # pannello piatto: un solo rettangolo con un bordo da 1 px, senza
         # riflessi né aloni che sullo sfondo nero sembrano sporcature
-        round_rect(
-            canvas, 0.5, 0.5, plan.width - 0.5, plan.height - 0.5, radius,
-            fill=theme.panel, outline=theme.border, width=1,
-        )
-        if plan.width - radius * 2 > 12 and plan.height > 14:
-            canvas.create_line(
-                radius, 1.2, plan.width - radius, 1.2,
-                fill=mix(theme.panel, theme.text, 0.10 if not theme.light else 0.06),
-                width=1,
+        if getattr(plan, "style", "dock") == "notch":
+            # agganciato al bordo: spigoli alti vivi, nessun filo di luce
+            notch_rect(
+                canvas, 0, 0, plan.width, plan.height, radius,
+                fill=theme.panel, outline=theme.border, width=1,
             )
+        else:
+            round_rect(
+                canvas, 0.5, 0.5, plan.width - 0.5, plan.height - 0.5, radius,
+                fill=theme.panel, outline=theme.border, width=1,
+            )
+            if plan.width - radius * 2 > 12 and plan.height > 14:
+                canvas.create_line(
+                    radius, 1.2, plan.width - radius, 1.2,
+                    fill=mix(theme.panel, theme.text, 0.10 if not theme.light else 0.06),
+                    width=1,
+                )
         if getattr(plan, "style", "dock") == "notch" and expanded < 0.85:
             self._draw_notch(plan)
             return

@@ -270,7 +270,10 @@ class DrawingTests(unittest.TestCase):
             plan = instance.layout
             geometry = instance.root.geometry_value
             top = int(geometry.rsplit("+", 1)[1])
-            self.assertGreater(top, plan.y)
+            if plan.style == "notch":
+                self.assertLess(top, plan.y)
+            else:
+                self.assertGreater(top, plan.y)
 
     def test_ellipsize(self):
         with stub_tkinter():

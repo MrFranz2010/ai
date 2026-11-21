@@ -100,8 +100,8 @@ def default_config() -> dict:
             "auto_hide": False,
             "always_on_top": True,
             "opacity": 1.0,
-            "hover_delay_ms": 30,
-            "collapse_delay_ms": 160,
+            "hover_delay_ms": 20,
+            "collapse_delay_ms": 140,
             "magnify": 1.25,
             "show_labels": True,
             "style": "notch",
@@ -287,9 +287,9 @@ def validate_config(saved) -> dict:
             "auto_hide": _boolean(dock.get("auto_hide"), "dock.auto_hide", False),
             "always_on_top": _boolean(dock.get("always_on_top"), "dock.always_on_top", True),
             "opacity": _number(dock.get("opacity"), "dock.opacity", 0.4, 1.0, 1.0),
-            "hover_delay_ms": _number(dock.get("hover_delay_ms"), "dock.hover_delay_ms", 0, 1000, 30, integer=True),
+            "hover_delay_ms": _number(dock.get("hover_delay_ms"), "dock.hover_delay_ms", 0, 1000, 20, integer=True),
             "collapse_delay_ms": _number(
-                dock.get("collapse_delay_ms"), "dock.collapse_delay_ms", 0, 2000, 160, integer=True
+                dock.get("collapse_delay_ms"), "dock.collapse_delay_ms", 0, 2000, 140, integer=True
             ),
             "magnify": _number(dock.get("magnify"), "dock.magnify", 1.0, 1.6, 1.25),
             "show_labels": _boolean(dock.get("show_labels"), "dock.show_labels", True),

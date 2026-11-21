@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import math
 
-# Parametri tarati su un passo di ~1/90 s: scatto immediato e posa senza
-# oscillazioni, come le notch native.
-STIFFNESS = 520.0
-DAMPING = 44.0
+# Parametri tarati su un passo di ~1/90 s e leggermente sotto-smorzati: il
+# pannello scatta, supera di poco la misura e si posa, come le notch native.
+STIFFNESS = 480.0
+DAMPING = 31.0
 FRAME_SECONDS = 1.0 / 90.0
-SETTLE_EPSILON = 0.004
+SETTLE_EPSILON = 0.003
 
 
 def spring_step(

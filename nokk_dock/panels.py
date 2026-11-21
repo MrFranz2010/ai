@@ -118,7 +118,10 @@ class _Panel:
         screen_w = self.app.root.winfo_screenwidth()
         screen_h = self.app.root.winfo_screenheight()
         if plan is not None:
-            position = self.app.config["dock"]["position"]
+            position = (
+                "top" if getattr(plan, "style", "dock") == "notch"
+                else self.app.config["dock"]["position"]
+            )
             x = plan.x + (plan.width - self.width) // 2
             if position == "bottom":
                 y = plan.y - self.height - 14

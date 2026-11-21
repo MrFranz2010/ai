@@ -248,9 +248,10 @@ def compute_layout(
         tall = int(round(compact_height + (height - compact_height) * reveal))
         wide = max(1, min(wide, int(screen_width)))
         tall = max(1, min(tall, int(screen_height)))
+        # agganciata al bordo alto: nessuno spazio, come il notch del portatile
         return DockLayout(
             x=int(round((screen_width - wide) / 2)),
-            y=int(round(_clamp(margin, 0, max(0, screen_height - tall)))),
+            y=0,
             width=wide,
             height=tall,
             tiles=final_tiles,
