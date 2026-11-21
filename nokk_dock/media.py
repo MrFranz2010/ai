@@ -62,6 +62,7 @@ function Await($operation, $type) {
 }
 $artKey = ''
 $artPath = ''
+$artTries = 0
 try {
     Get-ChildItem ([System.IO.Path]::GetTempPath()) -Filter 'nokk-art-*.png' -ErrorAction SilentlyContinue |
         Where-Object { $_.LastWriteTime -lt (Get-Date).AddHours(-2) } |
@@ -71,22 +72,46 @@ function Save-Art($thumbnail, $key) {
     try {
         if ($null -eq $thumbnail) { return '' }
         $stream = Await ($thumbnail.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType])
-        $input = [System.IO.WindowsRuntimeStreamExtensions]::AsStreamForRead($stream.GetInputStreamAt(0))
-        $image = [System.Drawing.Image]::FromStream($input)
-        $bitmap = New-Object System.Drawing.Bitmap 128, 128
-        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-        $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-        $graphics.DrawImage($image, 0, 0, 128, 128)
+        # I byte vengono letti in memoria: lo stream WinRT non è sempre
+        # ricercabile e System.Drawing lo rifiuterebbe.
+        $size = [uint32]$stream.Size
+        $reader = [Windows.Storage.Streams.DataReader]::new($stream.GetInputStreamAt(0))
+        $loaded = Await ($reader.LoadAsync($size)) ([uint32])
+        $bytes = New-Object byte[] $loaded
+        $reader.ReadBytes($bytes)
+        $reader.Dispose()
+        $stream.Dispose()
         $sha = [System.Security.Cryptography.SHA1]::Create()
         $hash = [System.BitConverter]::ToString($sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($key))).Replace('-', '').ToLower()
         $target = Join-Path ([System.IO.Path]::GetTempPath()) ("nokk-art-$hash.png")
-        $bitmap.Save($target, [System.Drawing.Imaging.ImageFormat]::Png)
-        $graphics.Dispose()
-        $bitmap.Dispose()
-        $image.Dispose()
-        $input.Dispose()
-        $stream.Dispose()
-        return $target
+        # GDI+ non sovrascrive un file esistente: va tolto prima, altrimenti
+        # dopo un riavvio la copertina non viene più salvata.
+        if (Test-Path $target) { Remove-Item $target -Force -ErrorAction SilentlyContinue }
+        try {
+            $memory = New-Object System.IO.MemoryStream
+            $memory.Write($bytes, 0, $bytes.Length)
+            $memory.Position = 0
+            $image = [System.Drawing.Image]::FromStream($memory)
+            $bitmap = New-Object System.Drawing.Bitmap 256, 256
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+            $graphics.DrawImage($image, 0, 0, 256, 256)
+            $bitmap.Save($target, [System.Drawing.Imaging.ImageFormat]::Png)
+            $graphics.Dispose()
+            $bitmap.Dispose()
+            $image.Dispose()
+            $memory.Dispose()
+            return $target
+        } catch { }
+        # Ripiego: i byte originali, se il ridimensionamento non riesce.
+        $suffix = 'img'
+        if ($bytes.Length -gt 3 -and $bytes[0] -eq 0x89) { $suffix = 'png' }
+        elseif ($bytes.Length -gt 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xD8) { $suffix = 'jpg' }
+        $raw = Join-Path ([System.IO.Path]::GetTempPath()) ("nokk-art-$hash.$suffix")
+        if (Test-Path $raw) { Remove-Item $raw -Force -ErrorAction SilentlyContinue }
+        [System.IO.File]::WriteAllBytes($raw, $bytes)
+        return $raw
     } catch {
         return ''
     }
@@ -102,9 +127,18 @@ while ($true) {
             $properties = Await ($session.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties])
             $info = $session.GetPlaybackInfo()
             $key = "$($properties.Artist)|$($properties.Title)|$($properties.AlbumTitle)"
-            if ($key -ne $artKey) {
+            # Se la copertina non si salva si riprova nei cicli successivi,
+            # invece di restare senza immagine per tutto il brano.
+            if ($key -ne $artKey) { $artTries = 0 }
+            if ($key -ne $artKey -or (-not $artPath -and $artTries -lt 5)) {
                 $artPath = Save-Art $properties.Thumbnail $key
-                if ($artPath) { $artKey = $key }
+                if ($artPath) {
+                    $artKey = $key
+                    $artTries = 0
+                } else {
+                    $artPath = ''
+                    $artTries = $artTries + 1
+                }
             }
             @{
                 active = $true

@@ -20,7 +20,7 @@ from pathlib import Path
 MAX_BYTES = 2 * 1024 * 1024
 TIMEOUT = 8
 ALLOWED_SCHEMES = ("http", "https", "file")
-THUMBNAIL_SIZES = (32, 40, 48, 56, 64 , 72)
+THUMBNAIL_SIZES = (32, 40, 48, 56, 64, 72, 88, 96, 112, 128)
 
 
 def is_windows(platform=None) -> bool:
@@ -75,7 +75,12 @@ def local_path(url, directory=None, downloader=None):
     if parsed.scheme.lower() == "file":
         raw = urllib.request.url2pathname(parsed.path)
         local = Path(raw)
-        if local.exists() and local.is_file() and local.stat().st_size <= MAX_BYTES:
+        try:
+            size = local.stat().st_size
+        except OSError:
+            return None
+        # Un file vuoto (scrittura interrotta) non è una copertina.
+        if local.is_file() and 0 < size <= MAX_BYTES:
             return local
         return None
     try:

@@ -116,6 +116,7 @@ class DockApp:
     _art_path = None
     _art_source = ""
     _art_pending = ""
+    _art_failures = 0
     _art_variants = None
     _anim_job = None
     _expand_job = None
@@ -180,6 +181,7 @@ class DockApp:
         self._art_path = None
         self._art_source = ""
         self._art_pending = ""
+        self._art_failures = 0
         self._art_variants = {}
         self._tray = None
         self._hidden = False
@@ -936,7 +938,8 @@ class DockApp:
             resolved = artwork.local_path(url)
             if resolved is not None:
                 path = str(resolved)
-        except Exception:  # noqa: BLE001 - la copertina non deve fermare il dock
+        except Exception as error:  # noqa: BLE001 - la copertina non ferma il dock
+            self._log_ui_error(f"Copertina non leggibile: {url}", error)
             path = ""
         self.post("art", (url, path))
 
@@ -944,10 +947,24 @@ class DockApp:
         self._art_pending = ""
         if url != self.music.art_url:
             return
-        self._art_source = url
-        if (path or None) != self._art_path:
-            self._art_path = path or None
+        if path:
+            self._art_failures = 0
+            self._art_source = url
+            if path != self._art_path:
+                self._art_path = path
+                self._art_variants = {}
+        else:
+            # Copertina non leggibile: si lascia libero il segnaposto così un
+            # secondo tentativo può riprovare (l'helper può scrivere in ritardo).
+            self._art_source = ""
+            self._art_path = None
             self._art_variants = {}
+            if url:
+                self._art_failures += 1
+                if self._art_failures == 1:
+                    self._log_ui_error(f"Copertina non disponibile: {url}")
+                if self._art_failures <= 3:
+                    self.root.after(4000, lambda: self._request_art(url))
         self._redraw()
 
     def _art_photo_for(self, size):

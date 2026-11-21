@@ -237,6 +237,20 @@ class WindowsMediaTests(unittest.TestCase):
             "https://i.scdn.co/image/x.jpg",
         )
 
+    def test_helper_saves_the_cover_even_if_the_file_exists(self):
+        script = media.WINDOWS_HELPER_SCRIPT
+        # Lo stream WinRT non è ricercabile: i byte si leggono in memoria.
+        self.assertIn("DataReader", script)
+        self.assertIn("MemoryStream", script)
+        # GDI+ non sovrascrive un file esistente: va tolto prima di salvare.
+        self.assertIn("Remove-Item $target -Force", script)
+        self.assertIn("256, 256", script)
+
+    def test_helper_retries_a_missing_cover(self):
+        script = media.WINDOWS_HELPER_SCRIPT
+        self.assertIn("$artTries", script)
+        self.assertIn("$artTries -lt 5", script)
+
     def test_parse_inactive_and_invalid(self):
         inactive = media.parse_windows_media_line('{"active": false}')
         self.assertFalse(inactive.active)

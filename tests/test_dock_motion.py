@@ -331,6 +331,7 @@ class ArtworkTests(unittest.TestCase):
     def test_thumbnail_buckets(self):
         self.assertEqual(artwork.thumbnail_size(38), 40)
         self.assertEqual(artwork.thumbnail_size(64), 64)
+        self.assertEqual(artwork.thumbnail_size(116), 112)
         self.assertEqual(artwork.thumbnail_size(1000), max(artwork.THUMBNAIL_SIZES))
 
     def test_thumbnail_from_png(self):
