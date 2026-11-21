@@ -1,8 +1,9 @@
 """Pannelli del dock: «Chiedi a NOKK» e impostazioni.
 
-Sono finestre costruite con widget Tk standard, colorate con il tema attivo:
-senza cornice su Linux, con la cornice di sistema scurita su Windows (le
-finestre senza cornice di Tk non vengono mostrate in modo affidabile lì). Il
+Sono finestre costruite con widget Tk standard, colorate con il tema attivo e
+senza cornice su entrambe le piattaforme. Su Windows non si usa
+`overrideredirect` (può lasciare la finestra non mappata): il pannello nasce
+come finestra di sistema e la cornice viene rimossa a mappatura avvenuta. Il
 pannello delle domande invia lo screenshot come allegato immagine all'API di
 NOKK e mostra la risposta, mantenendo il contesto delle domande successive.
 """
@@ -31,6 +32,7 @@ from .settings import (
     validate_config,
 )
 from .theme import PRESET_LABELS, PRESETS, mix
+from .tray import ICON_ICO
 
 WINDOWS = sys.platform.startswith("win")
 
@@ -38,7 +40,7 @@ ACCENT_SWATCHES = ("#9b8cff", "#4f9dff", "#4fd1a5", "#f0b429", "#ff7a90", "#b464
 
 
 def dark_title_bar(window):
-    """Scurisce la barra del titolo su Windows 10/11; altrove non fa nulla."""
+    """Barra del titolo nera su Windows 11, scura su Windows 10."""
     if not WINDOWS:
         return False
     try:
@@ -48,25 +50,89 @@ def dark_title_bar(window):
         user32 = ctypes.WinDLL("user32")
     except (AttributeError, OSError):
         return False
+    applied = False
     try:
         window.update_idletasks()
         handle = window.winfo_id()
-        parent = user32.GetParent(handle)
-        hwnd = parent or handle
+        hwnd = user32.GetParent(handle) or handle
+        # COLORREF = 0x00BBGGRR: barra nera, testo bianco, filo di bordo scuro.
+        for attribute, color in ((35, 0x000000), (36, 0x00FFFFFF), (34, 0x00181515)):
+            value = ctypes.c_uint(color)
+            if dwmapi.DwmSetWindowAttribute(
+                hwnd, attribute, ctypes.byref(value), ctypes.sizeof(value)
+            ) == 0:
+                applied = True
         value = ctypes.c_int(1)
         for attribute in (20, 19):
-            result = dwmapi.DwmSetWindowAttribute(
+            if dwmapi.DwmSetWindowAttribute(
                 hwnd, attribute, ctypes.byref(value), ctypes.sizeof(value)
-            )
-            if result == 0:
-                return True
+            ) == 0:
+                applied = True
+                break
     except Exception:  # noqa: BLE001 - la decorazione non è essenziale
         pass
-    return False
+    return applied
+
+
+def strip_window_frame(window, x, y, width, height):
+    """Toglie barra del titolo e cornice alla finestra nativa (solo Windows).
+
+    Si usa al posto di `overrideredirect`, che su Windows può lasciare la
+    finestra non mappata: qui Tk la mostra normalmente e solo dopo si tolgono i
+    pezzi di cornice, portandola alle misure volute.
+    """
+    if not WINDOWS:
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.GetParent.argtypes = (wintypes.HWND,)
+        user32.GetParent.restype = wintypes.HWND
+        get_long = getattr(user32, "GetWindowLongPtrW", None) or user32.GetWindowLongW
+        set_long = getattr(user32, "SetWindowLongPtrW", None) or user32.SetWindowLongW
+        get_long.argtypes = (wintypes.HWND, ctypes.c_int)
+        get_long.restype = ctypes.c_ssize_t
+        set_long.argtypes = (wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t)
+        set_long.restype = ctypes.c_ssize_t
+        user32.SetWindowPos.argtypes = (
+            wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+            ctypes.c_int, ctypes.c_int, wintypes.UINT,
+        )
+        user32.SetWindowPos.restype = wintypes.BOOL
+
+        handle = window.winfo_id()
+        hwnd = user32.GetParent(handle) or handle
+        viewable = bool(window.winfo_viewable())
+        # WS_CAPTION, WS_THICKFRAME, WS_SYSMENU, WS_MINIMIZEBOX, WS_MAXIMIZEBOX
+        frame = 0x00C00000 | 0x00040000 | 0x00080000 | 0x00020000 | 0x00010000
+        previous = set_long(hwnd, -16, get_long(hwnd, -16) & ~frame)
+        if not previous:
+            return False
+        # Niente pulsante nella barra delle applicazioni: è un pannello.
+        extra = get_long(hwnd, -20)
+        set_long(hwnd, -20, (extra | 0x00000080) & ~0x00040000)
+        # Le misure sono quelle volute: senza cornice cliente e finestra
+        # coincidono, quindi il pannello non resta più grande o 1×1.
+        ok = bool(user32.SetWindowPos(
+            hwnd, None, int(x), int(y), int(width), int(height), 0x0004 | 0x0020
+        ))
+        if not ok or (viewable and not window.winfo_viewable()):
+            # Ripristina la cornice: meglio una finestra con barra che una
+            # finestra che non si vede.
+            set_long(hwnd, -16, previous)
+            user32.SetWindowPos(
+                hwnd, None, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0020
+            )
+            return False
+        return True
+    except Exception:  # noqa: BLE001 - in caso di problemi resta la cornice
+        return False
 
 
 class _Panel:
-    """Base comune: finestra senza cornice, trascinabile e chiusa con Esc."""
+    """Base comune: finestra senza cornice, trascinabile e chiudibile con Esc."""
 
     def __init__(self, app, title, width, height):
         self.app = app
@@ -79,8 +145,13 @@ class _Panel:
         self.win.withdraw()
         if WINDOWS:
             # Su Windows una finestra senza cornice non viene mostrata in modo
-            # affidabile: si tiene la cornice di sistema, scurita dal tema.
+            # affidabile: si mostra come finestra normale e la si alleggerisce
+            # di cornice in _place(), a mappatura avvenuta.
             self.win.title(title)
+            try:
+                self.win.iconbitmap(default=str(ICON_ICO))
+            except tk.TclError:
+                pass
         else:
             self.win.overrideredirect(True)
         self.win.configure(bg=self.theme.border)
@@ -180,7 +251,12 @@ class _Panel:
         self.win.deiconify()
         self.win.update_idletasks()
         if WINDOWS:
-            dark_title_bar(self.win)
+            if not strip_window_frame(self.win, x, y, self.width, self.height):
+                # Ripiego: cornice di sistema ma almeno nera, non grigia.
+                self.win.geometry(geometry)
+                self.win.deiconify()
+                self.win.update_idletasks()
+                dark_title_bar(self.win)
             logger = getattr(self.app, "_log_ui_error", None)
             if logger is not None:
                 logger(
@@ -188,9 +264,10 @@ class _Panel:
                     f"{self.win.winfo_geometry()} "
                     f"viewable={self.win.winfo_viewable()}"
                 )
-        # Ripetuta dopo la mappatura: su Windows la misura presa prima di
-        # mostrare la finestra può andare persa e il pannello resterebbe 1×1.
-        self.win.geometry(geometry)
+        else:
+            # Ripetuta dopo la mappatura: la misura presa prima di mostrare la
+            # finestra può andare persa e il pannello resterebbe 1×1.
+            self.win.geometry(geometry)
         # Riemerge sopra tutto anche se il dock è «sempre sopra le finestre»:
         # senza questo il pannello può restare dietro la finestra di NOKK.
         try:

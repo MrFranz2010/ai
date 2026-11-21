@@ -221,13 +221,15 @@ viene mai scritta nei log e non viene mostrata in chiaro nel pannello.
 - **Windows: nessuna copertina**: quel player non pubblica il thumbnail nella
   sessione multimediale (alcuni lo fanno solo mentre il brano è in
   riproduzione); titolo e controlli restano attivi.
-- **Una finestra del dock non si apre**: su Windows i pannelli usano la
-  cornice di sistema scurita, perché le finestre Tk senza cornice non sempre
-  vengono mostrate; se qualcosa fallisce il dettaglio (con traceback) finisce
-  in `dock.log` accanto a `dock.json`, cioè `%APPDATA%\nokk\dock.log`.
-- **Barra del titolo chiara su Windows**: il tema scuro della barra è
-  disponibile da Windows 10 1809; su versioni precedenti resta quella di
-  sistema e il pannello funziona lo stesso.
+- **Una finestra del dock non si apre**: su Windows i pannelli sono finestre
+  di sistema da cui la cornice viene tolta solo dopo la mappatura (le finestre
+  Tk senza cornice, create direttamente così, possono non comparire); se
+  qualcosa fallisce il dettaglio (con traceback) finisce in `dock.log` accanto
+  a `dock.json`, cioè `%APPDATA%\nokk\dock.log`.
+- **Su Windows resta la barra del titolo**: se il sistema non permette di
+  rimuoverla (versioni molto vecchie o criteri di gruppo) il pannello resta
+  una normale finestra, con la barra scurita dove supportato (Windows 10
+  1809+), e funziona lo stesso.
 - **Il widget musicale dice «Nessun player attivo»**: avvia la musica in Spotify,
   Firefox, VLC o un altro player MPRIS; verifica con `playerctl status`.
 - **La cattura non funziona su Wayland**: installa `grim`; su GNOME Wayland
