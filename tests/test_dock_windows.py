@@ -208,9 +208,39 @@ class WindowsMediaTests(unittest.TestCase):
         self.assertTrue(state.playing)
         self.assertEqual(state.title, "Brano")
         self.assertEqual(state.subtitle, "Artista — Album")
+        self.assertEqual(state.art_url, "")
+
+    def test_parse_line_with_cover(self):
+        line = json.dumps({
+            "active": True,
+            "status": "Playing",
+            "title": "Brano",
+            "artist": "Artista",
+            "album": "Album",
+            "art": r"C:\Users\Anna\AppData\Local\Temp\nokk-art-1234.png",
+        })
+        state = media.parse_windows_media_line(line)
+        self.assertEqual(
+            state.art_url,
+            "file:///C:/Users/Anna/AppData/Local/Temp/nokk-art-1234.png",
+        )
+
+    def test_cover_paths_become_file_urls(self):
+        self.assertEqual(media.windows_file_url(""), "")
+        self.assertEqual(media.windows_file_url(None), "")
+        self.assertEqual(
+            media.windows_file_url(r"C:\Temp\nokk-art-abc.png"),
+            "file:///C:/Temp/nokk-art-abc.png",
+        )
+        self.assertEqual(
+            media.windows_file_url("https://i.scdn.co/image/x.jpg"),
+            "https://i.scdn.co/image/x.jpg",
+        )
 
     def test_parse_inactive_and_invalid(self):
-        self.assertFalse(media.parse_windows_media_line('{"active": false}').active)
+        inactive = media.parse_windows_media_line('{"active": false}')
+        self.assertFalse(inactive.active)
+        self.assertEqual(inactive.art_url, "")
         self.assertIsNone(media.parse_windows_media_line("non json"))
 
     def test_controller_without_powershell(self):

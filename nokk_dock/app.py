@@ -870,6 +870,12 @@ class DockApp:
             photo = tk.PhotoImage(data=base64.b64encode(data).decode("ascii"))
         except tk.TclError:
             return None
+        # Senza Pillow l'immagine resta a piena risoluzione: Tk la riduce a
+        # passi interi, così la copertina entra comunque nel suo riquadro.
+        if photo.width() > bucket:
+            factor = max(1, int(round(photo.width() / float(bucket))))
+            if factor > 1:
+                photo = photo.subsample(factor, factor)
         if len(variants) > 12:
             variants.clear()
         variants[key] = photo

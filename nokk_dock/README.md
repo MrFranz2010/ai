@@ -73,15 +73,17 @@ backend di scorciatoia, cattura e musica.
     ritagliare le copertine con gli angoli arrotondati:
     `python -m pip install -r requirements-dock.txt`.
 
-Senza Pillow la copertina compare solo se il player fornisce già un PNG/GIF
-della dimensione giusta; tutto il resto funziona ugualmente.
+Senza Pillow la copertina viene ridotta da Tk a passi interi (senza angoli
+arrotondati); con Pillow il ritaglio è più morbido. Tutto il resto funziona
+ugualmente.
 
 Su Windows non serve installare nulla: la cattura usa PowerShell con
 `System.Drawing` e i controlli musicali usano i tasti multimediali di sistema
 (`VK_MEDIA_*`), quindi funzionano con Spotify, browser, Groove e qualsiasi
-altro player collegato alla sessione multimediale. I titoli dei brani arrivano
-dai metadati WinRT; se Windows non li espone i controlli restano attivi e il
-widget lo segnala.
+altro player collegato alla sessione multimediale. I titoli e la copertina
+arrivano dai metadati WinRT: l'helper PowerShell converte il thumbnail della
+sessione in un PNG 128×128 dentro `%TEMP%` e lo passa al dock; se Windows non
+li espone i controlli restano attivi e il widget lo segnala.
 
 Nessuno di questi strumenti è obbligatorio: se manca qualcosa il widget lo dice
 invece di bloccare il dock.
@@ -216,6 +218,9 @@ viene mai scritta nei log e non viene mostrata in chiaro nel pannello.
 - **Windows: nessun titolo nel widget musica**: i metadati WinRT non sono
   disponibili per quel player; i pulsanti funzionano comunque con i tasti
   multimediali.
+- **Windows: nessuna copertina**: quel player non pubblica il thumbnail nella
+  sessione multimediale (alcuni lo fanno solo mentre il brano è in
+  riproduzione); titolo e controlli restano attivi.
 - **Il widget musicale dice «Nessun player attivo»**: avvia la musica in Spotify,
   Firefox, VLC o un altro player MPRIS; verifica con `playerctl status`.
 - **La cattura non funziona su Wayland**: installa `grim`; su GNOME Wayland

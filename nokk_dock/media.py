@@ -49,6 +49,7 @@ WINDOWS_HELPER_SCRIPT = r"""
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
+Add-Type -AssemblyName System.Drawing
 $managerType = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
 $asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
     $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and
@@ -59,24 +60,63 @@ function Await($operation, $type) {
     $task.Wait(-1) | Out-Null
     $task.Result
 }
+$artKey = ''
+$artPath = ''
+try {
+    Get-ChildItem ([System.IO.Path]::GetTempPath()) -Filter 'nokk-art-*.png' -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -lt (Get-Date).AddHours(-2) } |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+} catch { }
+function Save-Art($thumbnail, $key) {
+    try {
+        if ($null -eq $thumbnail) { return '' }
+        $stream = Await ($thumbnail.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType])
+        $input = [System.IO.WindowsRuntimeStreamExtensions]::AsStreamForRead($stream.GetInputStreamAt(0))
+        $image = [System.Drawing.Image]::FromStream($input)
+        $bitmap = New-Object System.Drawing.Bitmap 128, 128
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $graphics.DrawImage($image, 0, 0, 128, 128)
+        $sha = [System.Security.Cryptography.SHA1]::Create()
+        $hash = [System.BitConverter]::ToString($sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($key))).Replace('-', '').ToLower()
+        $target = Join-Path ([System.IO.Path]::GetTempPath()) ("nokk-art-$hash.png")
+        $bitmap.Save($target, [System.Drawing.Imaging.ImageFormat]::Png)
+        $graphics.Dispose()
+        $bitmap.Dispose()
+        $image.Dispose()
+        $input.Dispose()
+        $stream.Dispose()
+        return $target
+    } catch {
+        return ''
+    }
+}
 while ($true) {
     try {
         $manager = Await ($managerType::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
         $session = $manager.GetCurrentSession()
         if ($null -eq $session) {
+            $artKey = ''
             @{ active = $false } | ConvertTo-Json -Compress
         } else {
             $properties = Await ($session.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties])
             $info = $session.GetPlaybackInfo()
+            $key = "$($properties.Artist)|$($properties.Title)|$($properties.AlbumTitle)"
+            if ($key -ne $artKey) {
+                $artPath = Save-Art $properties.Thumbnail $key
+                if ($artPath) { $artKey = $key }
+            }
             @{
                 active = $true
                 status = [string]$info.PlaybackStatus
                 title = [string]$properties.Title
                 artist = [string]$properties.Artist
                 album = [string]$properties.AlbumTitle
+                art = $artPath
             } | ConvertTo-Json -Compress
         }
     } catch {
+        $artKey = ''
         @{ active = $false; error = $true } | ConvertTo-Json -Compress
     }
     Start-Sleep -Milliseconds 1500
@@ -166,6 +206,18 @@ def parse_metadata(text: str) -> MusicState:
     )
 
 
+def windows_file_url(path) -> str:
+    """Trasforma il percorso di un file in un URL `file:///` per le copertine."""
+    value = str(path or "").strip().replace("\\", "/")
+    if not value:
+        return ""
+    if "://" in value:
+        return value
+    if not value.startswith("/"):
+        value = "/" + value
+    return "file://" + value
+
+
 def parse_windows_media_line(line: str):
     """Legge una riga JSON emessa dall'helper PowerShell di Windows."""
     if not line or not line.strip():
@@ -186,6 +238,7 @@ def parse_windows_media_line(line: str):
         title=str(data.get("title") or "").strip(),
         artist=str(data.get("artist") or "").strip(),
         album=str(data.get("album") or "").strip(),
+        art_url=windows_file_url(data.get("art")),
     )
 
 
