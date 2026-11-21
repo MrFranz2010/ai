@@ -1,0 +1,8 @@
+# Dipendenze opzionali del dock di NOKK.
+#
+# Il dock funziona senza: queste righe servono solo a ridurre automaticamente
+# gli screenshot oltre i 4 MB accettati dall'API di NOKK e a permettere la
+# cattura su sistemi senza grim/scrot/gnome-screenshot.
+#
+#   python -m pip install -r requirements-dock.txt
+Pillow>=10,<12
