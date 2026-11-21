@@ -1,9 +1,10 @@
 """Pannelli del dock: «Chiedi a NOKK» e impostazioni.
 
-Sono finestre senza cornice costruite con widget Tk standard, colorate con il
-tema attivo. Il pannello delle domande invia lo screenshot come allegato
-immagine all'API di NOKK e mostra la risposta, mantenendo il contesto delle
-domande successive.
+Sono finestre costruite con widget Tk standard, colorate con il tema attivo:
+senza cornice su Linux, con la cornice di sistema scurita su Windows (le
+finestre senza cornice di Tk non vengono mostrate in modo affidabile lì). Il
+pannello delle domande invia lo screenshot come allegato immagine all'API di
+NOKK e mostra la risposta, mantenendo il contesto delle domande successive.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import copy
 import io
 import math
 import queue
+import sys
 import threading
 import tkinter as tk
 
@@ -30,7 +32,37 @@ from .settings import (
 )
 from .theme import PRESET_LABELS, PRESETS, mix
 
+WINDOWS = sys.platform.startswith("win")
+
 ACCENT_SWATCHES = ("#9b8cff", "#4f9dff", "#4fd1a5", "#f0b429", "#ff7a90", "#b4643a")
+
+
+def dark_title_bar(window):
+    """Scurisce la barra del titolo su Windows 10/11; altrove non fa nulla."""
+    if not WINDOWS:
+        return False
+    try:
+        import ctypes
+
+        dwmapi = ctypes.WinDLL("dwmapi")
+        user32 = ctypes.WinDLL("user32")
+    except (AttributeError, OSError):
+        return False
+    try:
+        window.update_idletasks()
+        handle = window.winfo_id()
+        parent = user32.GetParent(handle)
+        hwnd = parent or handle
+        value = ctypes.c_int(1)
+        for attribute in (20, 19):
+            result = dwmapi.DwmSetWindowAttribute(
+                hwnd, attribute, ctypes.byref(value), ctypes.sizeof(value)
+            )
+            if result == 0:
+                return True
+    except Exception:  # noqa: BLE001 - la decorazione non è essenziale
+        pass
+    return False
 
 
 class _Panel:
@@ -39,13 +71,18 @@ class _Panel:
     def __init__(self, app, title, width, height):
         self.app = app
         self.theme = app.theme
+        self.title = title
         self.closed = False
         self.win = tk.Toplevel(app.root)
-        # Si crea nascosto e senza cornice: la barra di sistema chiara non deve
-        # mai comparire, nemmeno per un istante, e la finestra viene mostrata
-        # solo in _place(), quando posizione e contenuto sono pronti.
+        # Si crea nascosto e viene mostrata solo in _place(), quando posizione
+        # e contenuto sono pronti.
         self.win.withdraw()
-        self.win.overrideredirect(True)
+        if WINDOWS:
+            # Su Windows una finestra senza cornice non viene mostrata in modo
+            # affidabile: si tiene la cornice di sistema, scurita dal tema.
+            self.win.title(title)
+        else:
+            self.win.overrideredirect(True)
         self.win.configure(bg=self.theme.border)
         self.width = int(width * self.theme.scale)
         self.height = int(height * self.theme.scale)
@@ -142,6 +179,15 @@ class _Panel:
         self.win.geometry(geometry)
         self.win.deiconify()
         self.win.update_idletasks()
+        if WINDOWS:
+            dark_title_bar(self.win)
+            logger = getattr(self.app, "_log_ui_error", None)
+            if logger is not None:
+                logger(
+                    f"Pannello «{self.title}» mostrato: "
+                    f"{self.win.winfo_geometry()} "
+                    f"viewable={self.win.winfo_viewable()}"
+                )
         # Ripetuta dopo la mappatura: su Windows la misura presa prima di
         # mostrare la finestra può andare persa e il pannello resterebbe 1×1.
         self.win.geometry(geometry)

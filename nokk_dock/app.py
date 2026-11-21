@@ -16,8 +16,10 @@ import threading
 import time
 import tkinter as tk
 import tkinter.font as tkfont
+import traceback
 import webbrowser
 from datetime import datetime
+from pathlib import Path
 
 from . import artwork, icons
 from . import layout as dock_layout
@@ -318,11 +320,27 @@ class DockApp:
 
     def _event_error(self, source, error):
         message = f"Errore del dock ({source}): {error}"
-        print(message)
+        self._log_ui_error(message, error)
         try:
             self.toast(message, seconds=8)
         except Exception:  # noqa: BLE001 - il messaggio non deve fermare il loop
             pass
+
+    def _log_ui_error(self, message, error=None):
+        """Annota l'errore in `dock.log`: con pythonw non c'è una console."""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        details = message
+        if error is not None:
+            details += "\n" + "".join(
+                traceback.format_exception(type(error), error, error.__traceback__)
+            )
+        try:
+            log_path = Path(config_path()).with_name("dock.log")
+            with log_path.open("a", encoding="utf-8") as stream:
+                stream.write(f"[{timestamp}] {details}\n")
+        except OSError:
+            pass
+        print(message)
 
     def _dispatch(self, kind, payload):
         if kind == "music":
@@ -705,7 +723,7 @@ class DockApp:
 
     def _panel_error(self, title, error):
         message = f"{title} non si apre: {error}"
-        print(message)
+        self._log_ui_error(message, error)
         try:
             self.toast(message, seconds=8)
         except Exception:  # noqa: BLE001 - il dock resta in piedi
