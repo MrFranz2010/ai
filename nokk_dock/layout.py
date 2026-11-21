@@ -33,7 +33,7 @@ EXPANSION_HEADROOM = 0.75
 # Stile «notch»: pillola compatta in alto al centro che si srotola nel pannello.
 NOTCH_WIDTH = 250.0
 NOTCH_HEIGHT_RATIO = 0.62
-NOTCH_OPEN_RATIO = 2.35
+NOTCH_OPEN_RATIO = 3.2
 NOTCH_TAB_HEIGHT = 36.0
 NOTCH_REVEAL = 0.85
 

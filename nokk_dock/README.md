@@ -23,7 +23,10 @@ un'istanza su Render/Fly.
   e copertina non vengono mai compressi né tagliati. Le schede sono cinque —
   musica, meteo, ora, appunti e **NOKK** — e quella dell'assistente tiene insieme lo
   stato della connessione e «Cattura schermo»; le impostazioni non hanno una
-  scheda, sono il pulsante a ingranaggio in fondo alla barra. A riposo, se
+  scheda, sono il pulsante a ingranaggio in fondo alla barra. Ogni scheda
+  riempie il pannello come in Nusa: copertina grande con barra e comandi per la
+  musica, temperatura con minima e massima per il meteo, ora e batteria per
+  l'orologio, cronologia da cliccare per gli appunti e le azioni di NOKK. A riposo, se
   qualcosa sta suonando, la pillola mostra copertina, titolo, artista e tempo
   mancante; altrimenti l'ora. Chi preferisce la barra classica sceglie
   `dock.style = "dock"`.

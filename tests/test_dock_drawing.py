@@ -461,12 +461,12 @@ class DrawingTests(unittest.TestCase):
             )
             self.assertIsNotNone(hit)
             hit["command"]()
-            capture_hit = instance._hit_at(
-                instance.layout.tiles[0].right - 20,
-                instance.layout.tiles[0].y + instance.layout.tiles[0].height / 2,
-            )
-            self.assertIsNotNone(capture_hit)
-            capture_hit["command"]()
+            capture_hits = [
+                item for item in instance.hits
+                if item["command"] == instance.request_capture
+            ]
+            self.assertTrue(capture_hits)
+            capture_hits[0]["command"]()
             self.assertEqual(opened, [True, "capture"])
 
     def test_clipboard_page_previews_and_copies(self):
@@ -484,13 +484,13 @@ class DrawingTests(unittest.TestCase):
                 if item["kind"] == "text"
             ]
             self.assertIn("Appunti", texts)
-            self.assertIn("1 di 2", texts)
+            self.assertTrue(any(text.startswith("1 di 2") for text in texts))
             self.assertTrue(any("secondo testo" in text for text in texts))
 
             messages = []
             instance.toast = lambda message, seconds=5: messages.append(message)
             tile = instance.layout.tiles[0]
-            hit = instance._hit_at(tile.x + 20, tile.y + tile.height / 2)
+            hit = instance._hit_at(tile.x + 20, tile.y + 40)
             self.assertIsNotNone(hit)
             hit["command"]()
             self.assertEqual(instance.root.clipboard, "secondo testo")

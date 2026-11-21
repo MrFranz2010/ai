@@ -1152,7 +1152,7 @@ class DockApp:
             round_rect(
                 canvas, tab.x, tab.y, tab.right, tab.bottom,
                 min(tab.height / 2, max(6.0, theme.radius * 0.5)),
-                fill=mix(theme.panel, theme.text, 0.13) if active else theme.panel,
+                fill=theme.panel_soft if active else theme.panel,
                 outline="",
             )
             center = tab.y + tab.height / 2
@@ -1160,7 +1160,8 @@ class DockApp:
             icon_size = 12 * scale
             icons.draw(
                 canvas, WIDGET_ICONS.get(tab.key, "dot"),
-                tab.x + 14 * scale, center, icon_size, color, ("icon",),
+                tab.x + 14 * scale, center, icon_size,
+                theme.accent if active else theme.muted, ("icon",),
             )
             label_width = tab.width - 28 * scale
             if label_width > 12:
@@ -1267,7 +1268,215 @@ class DockApp:
             self._text(width - 12 * scale, center_y, label, 7.6,
                        fill=theme.muted, anchor="e")
 
+    def _page_card(self, left, top, right, bottom, icon_name, title, detail, command):
+        """Pulsante a tutta larghezza delle schede del notch."""
+        theme = self.theme
+        canvas = self.canvas
+        scale = theme.scale
+        round_rect(canvas, left, top, right, bottom,
+                   min(12 * scale, (bottom - top) / 2),
+                   fill=theme.panel_soft, outline="")
+        center = (top + bottom) / 2
+        icons.draw(canvas, icon_name, left + 18 * scale, center, 16 * scale,
+                   theme.text, ("icon",), theme.panel_soft)
+        text_x = left + 32 * scale
+        self._text(text_x, center - (7 * scale if detail else 0), title, 9.8,
+                   "bold", fill=theme.text, width=right - 8 * scale - text_x)
+        if detail:
+            self._text(text_x, center + 8 * scale, detail, 7.6, fill=theme.muted,
+                       width=right - 8 * scale - text_x)
+        self._register_hit(left, top, right, bottom, command)
+
+    def _copy_history(self, index):
+        """Copia una voce della cronologia degli appunti."""
+        history = self.clipboard_history
+        if not history:
+            return
+        position = max(0, min(len(history) - 1, int(index)))
+        self.clipboard_index = position
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(history[position])
+            self.root.update_idletasks()
+        except tk.TclError:
+            self.toast("Impossibile scrivere negli appunti.")
+            return
+        self.toast("Copiato negli appunti.")
+        self._redraw()
+
+    def _draw_page_music(self, tile, area, expanded):
+        """Scheda Musica: copertina grande, brano, barra e comandi."""
+        theme = self.theme
+        state = self.music
+        scale = theme.scale
+        x, y, width, height = area
+        if not state.installed:
+            self._draw_placeholder(tile, area, "music", "Musica", INSTALL_HINT)
+            return
+        center_y = y + height / 2
+        cover = None
+        if self._art_path:
+            cover = self._art_photo_for(int(min(height - 6, 116 * scale)))
+        if cover is not None:
+            self.canvas.create_image(x + 4 + cover.width() / 2, center_y, image=cover)
+            text_x = x + cover.width() + 16 * scale
+        else:
+            icons.draw(self.canvas, "music", x + 28 * scale, center_y, 44 * scale,
+                       theme.muted, ("icon",), theme.panel)
+            text_x = x + 60 * scale
+        right = tile.right - 6
+        self._text(text_x, y + 22 * scale, state.label, 15.0, "bold",
+                   fill=theme.text, width=right - text_x)
+        subtitle = state.subtitle or state.message
+        if subtitle:
+            self._text(text_x, y + 44 * scale, subtitle, 9.4, fill=theme.muted,
+                       width=right - text_x)
+        if state.length_seconds > 0:
+            bar_y = y + height - 56 * scale
+            self.canvas.create_line(text_x, bar_y, right, bar_y,
+                                    fill=theme.divider, width=3, capstyle="round")
+            progress_x = text_x + max(0.0, (right - text_x) * state.progress)
+            if progress_x - text_x > 2:
+                self.canvas.create_line(
+                    text_x, bar_y, progress_x, bar_y,
+                    fill=theme.accent, width=3, capstyle="round",
+                )
+            self._text(text_x, bar_y + 8 * scale,
+                       format_seconds(state.position_seconds), 7.8,
+                       fill=theme.muted)
+            self._text(right, bar_y + 8 * scale,
+                       format_seconds(state.length_seconds), 7.8,
+                       fill=theme.muted, anchor="e")
+        button = 30 * scale
+        controls_y = y + height - 20 * scale
+        prev_cx = text_x + button * 0.55
+        play_cx = prev_cx + button * 1.2
+        next_cx = play_cx + button * 1.2
+        self._mini_button(prev_cx, controls_y, button, "previous", self.previous_track)
+        self._play_button(play_cx, controls_y, button, state)
+        self._mini_button(next_cx, controls_y, button, "next", self.next_track)
+
+    def _draw_page_weather(self, tile, area, expanded):
+        """Scheda Meteo: icona grande, temperatura, città e minima/massima."""
+        theme = self.theme
+        state = self.weather
+        scale = theme.scale
+        x, y, width, height = area
+        center_y = y + height / 2
+        icon_name = state.icon if state.updated_at else "cloud"
+        if state.error:
+            icon_name = "cloud"
+        icon_size = min(60 * scale, height * 0.5)
+        icons.draw(self.canvas, icon_name, x + icon_size * 0.7, center_y, icon_size,
+                   theme.accent if not state.error else theme.muted,
+                   ("icon",), theme.panel)
+        text_x = x + icon_size * 1.25
+        right = tile.right - 6
+        value = state.temperature_text if not state.error else "—"
+        self._text(text_x, y + 24 * scale, value, 32.0, "bold",
+                   fill=theme.text, width=right - text_x)
+        detail = state.label if not state.error else state.error
+        self._text(text_x, y + 67 * scale, detail, 10.2, fill=theme.text,
+                   width=right - text_x)
+        line = " · ".join(part for part in (state.city, state.range_text) if part)
+        if line:
+            self._text(text_x, y + 89 * scale, line, 8.6, fill=theme.muted,
+                       width=right - text_x)
+        if state.updated_at:
+            updated = datetime.fromtimestamp(state.updated_at).strftime("%H:%M")
+            self._text(right, y + height - 12 * scale, "aggiornato " + updated,
+                       7.4, fill=theme.muted, anchor="e")
+
+    def _draw_page_clock(self, tile, area, expanded):
+        """Scheda Ora: ora grande, data e batteria con la barra di carica."""
+        theme = self.theme
+        canvas = self.canvas
+        scale = theme.scale
+        x, y, width, height = area
+        now = datetime.now()
+        self._text(x + 4, y + 36 * scale, now.strftime("%H:%M"), 46.0, "bold",
+                   fill=theme.text)
+        self._text(x + 6, y + 84 * scale, now.strftime("%A %d %B"), 10.0,
+                   fill=theme.muted, width=width * 0.6)
+        right = tile.right - 6
+        battery = self._battery
+        if battery.present:
+            self._text(right, y + height - 64 * scale, battery.label, 10.0,
+                       "bold", fill=theme.text, anchor="e")
+            bar_width = 120 * scale
+            bar_y = y + height - 42 * scale
+            round_rect(canvas, right - bar_width, bar_y - 3 * scale, right,
+                       bar_y + 3 * scale, 4 * scale,
+                       fill=theme.divider, outline="")
+            filled = bar_width * max(0.0, min(1.0, (battery.percent or 0.0) / 100))
+            if filled > 2:
+                round_rect(canvas, right - bar_width, bar_y - 3 * scale,
+                           right - bar_width + filled, bar_y + 3 * scale,
+                           4 * scale, fill=theme.accent, outline="")
+        else:
+            self._text(right, y + height - 44 * scale, "Rete elettrica", 9.4,
+                       fill=theme.muted, anchor="e")
+
+    def _draw_page_clipboard(self, tile, area, expanded):
+        """Scheda Appunti: le ultime copie come righe da cliccare."""
+        theme = self.theme
+        canvas = self.canvas
+        scale = theme.scale
+        x, y, width, height = area
+        history = self.clipboard_history
+        right = tile.right - 2
+        index = max(0, min(len(history) - 1, self.clipboard_index)) if history else 0
+        icons.draw(canvas, "clipboard", x + 9 * scale, y + 14 * scale, 14 * scale,
+                   theme.muted, ("icon",), theme.panel)
+        self._text(x + 20 * scale, y + 14 * scale, "Appunti", 10.0, "bold",
+                   fill=theme.text)
+        if history:
+            count = f"{index + 1} di {len(history)} · clic per copiare"
+        else:
+            count = "vuoto"
+        self._text(x + 74 * scale, y + 14 * scale, count, 8.0, fill=theme.muted,
+                   width=max(10.0, right - 52 * scale - (x + 74 * scale)))
+        if len(history) > 1:
+            for left, step, icon_name in (
+                (right - 44 * scale, -1, "chevron_left"),
+                (right - 20 * scale, 1, "chevron_right"),
+            ):
+                icons.draw(canvas, icon_name, left + 10 * scale, y + 14 * scale,
+                           11 * scale, theme.text, ("icon",))
+                self._register_hit(
+                    left, y + 2 * scale, left + 20 * scale, y + 26 * scale,
+                    lambda value=step: self._step_clipboard(value),
+                )
+        if not history:
+            self._text(x + 2, y + height / 2 + 6 * scale,
+                       "Copia un testo: lo ritrovi qui", 10.5, fill=theme.muted)
+            return
+        row_height = min(30 * scale, (height - 42 * scale) / 3)
+        top = y + 30 * scale
+        for offset in range(3):
+            position = index + offset
+            if position >= len(history):
+                break
+            row_top = top + offset * (row_height + 4 * scale)
+            selected = offset == 0
+            round_rect(canvas, x, row_top, right, row_top + row_height,
+                       min(8 * scale, row_height / 2),
+                       fill=theme.panel_soft if selected else theme.panel,
+                       outline="")
+            self._text(x + 9 * scale, row_top + row_height / 2,
+                       clipboard_preview(history[position], 160), 8.6,
+                       "bold" if selected else "normal",
+                       fill=theme.text if selected else theme.muted,
+                       width=right - 12 * scale - x)
+            self._register_hit(
+                x, row_top, right, row_top + row_height,
+                lambda value=position: self._copy_history(value),
+            )
+
     def _draw_music(self, tile, area, expanded):
+        if getattr(self.layout, "style", "dock") == "notch":
+            self._draw_page_music(tile, area, expanded)
+            return
         theme = self.theme
         state = self.music
         x, y, width, height = area
@@ -1368,6 +1577,9 @@ class DockApp:
         self.hits.append({"x1": x1, "y1": y1, "x2": x2, "y2": y2, "command": command})
 
     def _draw_weather(self, tile, area, expanded):
+        if getattr(self.layout, "style", "dock") == "notch":
+            self._draw_page_weather(tile, area, expanded)
+            return
         theme = self.theme
         state = self.weather
         x, y, width, height = area
@@ -1405,6 +1617,9 @@ class DockApp:
                            7.8 * growth, fill=theme.muted, anchor="n", width=width - 8)
 
     def _draw_clock(self, tile, area, expanded):
+        if getattr(self.layout, "style", "dock") == "notch":
+            self._draw_page_clock(tile, area, expanded)
+            return
         theme = self.theme
         x, y, width, height = area
         now = datetime.now()
@@ -1469,86 +1684,31 @@ class DockApp:
                        fill=theme.text, anchor="n")
 
     def _draw_clipboard(self, tile, area, expanded):
-        """Scheda Appunti: testo copiato, cronologia con ‹ › e pulsante copia."""
+        """Appunti: scheda del notch oppure widget della barra classica."""
         theme = self.theme
         canvas = self.canvas
         scale = theme.scale
         x, y, width, height = area
-        if getattr(self.layout, "style", "dock") != "notch":
-            # Nella barra classica resta un widget come gli altri.
-            growth = self._tile_growth(tile)
-            horizontal = self.layout.horizontal if self.layout else True
-            if horizontal:
-                center_y = y + height / 2
-                icons.draw(canvas, "clipboard", x + 10 * scale, center_y,
-                           20 * scale * growth, theme.text, ("icon",), theme.panel)
-                text_x = x + 26 * scale
-                self._text(text_x, center_y, "Appunti", 10 * growth, "bold",
-                           fill=theme.text, width=tile.right - 12 - text_x)
-            else:
-                icons.draw(canvas, "clipboard", x + width / 2, y + 30 * scale,
-                           20 * scale * growth, theme.text, ("icon",), theme.panel)
-                self._text(x + width / 2, y + 46 * scale, "Appunti", 8.4,
-                           fill=theme.muted, anchor="n")
+        if getattr(self.layout, "style", "dock") == "notch":
+            self._draw_page_clipboard(tile, area, expanded)
             return
-        center_y = y + height / 2
-        history = self.clipboard_history
-        text = self._clipboard_value()
-        preview = clipboard_preview(text, 400)
-        split = x + min(width * 0.34, 210 * scale)
-        self._register_hit(x, y, tile.right, tile.bottom, self.copy_clipboard)
-        # stato a sinistra
-        icons.draw(canvas, "clipboard", x + 12 * scale, center_y, 20 * scale,
-                   theme.text, ("icon",), theme.panel)
-        text_x = x + 28 * scale
-        available = max(10.0, split - 10 - text_x)
-        self._text(text_x, center_y - 8 * scale, "Appunti", 10.5, "bold",
-                   fill=theme.text, width=available)
-        if len(history) > 1:
-            index = max(0, min(len(history) - 1, self.clipboard_index))
-            detail = f"{index + 1} di {len(history)}"
+        growth = self._tile_growth(tile)
+        horizontal = self.layout.horizontal if self.layout else True
+        if horizontal:
+            center_y = y + height / 2
+            icons.draw(canvas, "clipboard", x + 10 * scale, center_y,
+                       20 * scale * growth, theme.text, ("icon",), theme.panel)
+            text_x = x + 26 * scale
+            self._text(text_x, center_y, "Appunti", 10 * growth, "bold",
+                       fill=theme.text, width=tile.right - 12 - text_x)
         else:
-            detail = "Vuoto" if not text else "Ultimo copiato"
-        self._text(text_x, center_y + 8 * scale, detail, 8.0, fill=theme.muted,
-                   width=available)
-        # a destra il pulsante copia, con le frecce della cronologia accanto
-        right = tile.right - 2
-        copy_left = right - 62 * scale
-        arrow = 22 * scale
-        next_left = copy_left - 8 * scale - arrow
-        prev_left = next_left - 3 * scale - arrow
-        preview_right = (
-            prev_left - 8 * scale if len(history) > 1 else copy_left - 8 * scale
-        )
-        preview_x = split + 4 * scale
-        if preview_right - preview_x > 30 * scale:
-            if preview:
-                self._text(preview_x, center_y, preview, 8.6, fill=theme.text,
-                           width=preview_right - preview_x)
-            else:
-                self._text(preview_x, center_y, "Copia un testo: lo ritrovi qui",
-                           8.6, fill=theme.muted, width=preview_right - preview_x)
-        if len(history) > 1:
-            for left, step, icon_name in (
-                (prev_left, -1, "chevron_left"),
-                (next_left, 1, "chevron_right"),
-            ):
-                icons.draw(canvas, icon_name, left + arrow / 2, center_y,
-                           12 * scale, theme.muted, ("icon",))
-                self._register_hit(
-                    left, center_y - height * 0.3, left + arrow,
-                    center_y + height * 0.3,
-                    lambda value=step: self._step_clipboard(value),
-                )
-        round_rect(canvas, copy_left, center_y - height * 0.28, right,
-                   center_y + height * 0.28,
-                   min(10 * scale, height * 0.28),
-                   fill=theme.panel_soft, outline="")
-        self._text((copy_left + right) / 2, center_y, "Copia", 8.4, "bold",
-                   fill=theme.text, anchor="center", width=62 * scale - 8)
+            icons.draw(canvas, "clipboard", x + width / 2, y + 30 * scale,
+                       20 * scale * growth, theme.text, ("icon",), theme.panel)
+            self._text(x + width / 2, y + 46 * scale, "Appunti", 8.4,
+                       fill=theme.muted, anchor="n")
 
     def _draw_assistant(self, tile, area, expanded):
-        """Scheda unica dell'assistente: stato di NOKK e cattura schermo."""
+        """Scheda unica dell'assistente: stato di NOKK e azioni."""
         theme = self.theme
         canvas = self.canvas
         scale = theme.scale
@@ -1557,43 +1717,39 @@ class DockApp:
         widgets = self.config["widgets"]
         show_nokk = "nokk" in widgets
         show_capture = "capture" in widgets
-        split = x + width * 0.54 if show_nokk and show_capture else (
+        split = x + width * 0.44 if show_nokk and show_capture else (
             tile.right if show_nokk else x
         )
         if show_nokk:
             color = theme.accent if self.connected else theme.muted
-            icons.draw(canvas, "spark", x + 12 * scale, center_y, 20 * scale,
-                       color, ("icon",), theme.panel)
-            text_x = x + 28 * scale
-            available = max(10.0, split - 10 - text_x)
-            self._text(text_x, center_y - 8 * scale, "NOKK", 10.5, "bold",
-                       fill=theme.text, width=available)
+            icons.draw(canvas, "spark", x + 18 * scale, center_y - 26 * scale,
+                       28 * scale, color, ("icon",), theme.panel)
+            self._text(x + 38 * scale, center_y - 26 * scale, "NOKK", 14.0,
+                       "bold", fill=theme.text,
+                       width=max(10.0, split - x - 44 * scale))
             status = "Connesso" if self.connected else (
                 "Non raggiungibile" if self.connected is False else "Verifica…"
             )
-            self._text(text_x, center_y + 8 * scale, status, 8.0,
-                       fill=theme.muted, width=available)
+            self._text(x + 38 * scale, center_y - 4 * scale, status, 9.0,
+                       fill=theme.muted, width=max(10.0, split - x - 44 * scale))
+            self._text(x + 2, center_y + 40 * scale, "clic per chiedere", 7.6,
+                       fill=theme.muted)
             self._register_hit(x, y, split, tile.bottom, self.open_ask)
         if show_capture:
             left = split + (6 * scale if show_nokk else 0)
             right = tile.right - 2
-            if right - left > 40 * scale:
-                round_rect(
-                    canvas, left, center_y - height * 0.33,
-                    right, center_y + height * 0.33,
-                    min(11 * scale, height * 0.33),
-                    fill=theme.panel_soft, outline="",
+            top = center_y - (46 * scale if show_nokk else 22 * scale)
+            self._page_card(
+                left, top, right, top + 44 * scale, "camera",
+                "Cattura schermo",
+                shortcut_hint(self.config["capture"]["shortcut"]),
+                self.request_capture,
+            )
+            if show_nokk:
+                self._page_card(
+                    left, top + 52 * scale, right, top + 96 * scale, "spark",
+                    "Chiedi a NOKK", "Screenshot e domanda", self.open_ask,
                 )
-            icons.draw(canvas, "camera", left + 16 * scale, center_y,
-                       18 * scale, theme.text, ("icon",), theme.panel_soft)
-            label_x = left + 30 * scale
-            available = max(10.0, right - 8 - label_x)
-            self._text(label_x, center_y - 6 * scale, "Cattura schermo", 8.8,
-                       "bold", fill=theme.text, width=available)
-            self._text(label_x, center_y + 8 * scale,
-                       shortcut_hint(self.config["capture"]["shortcut"]), 7.4,
-                       fill=theme.muted, width=available)
-            self._register_hit(left, y, tile.right, tile.bottom, self.request_capture)
 
     def _draw_capture(self, tile, area, expanded):
         theme = self.theme
@@ -1632,6 +1788,18 @@ class DockApp:
         x, y, width, height = area
         horizontal = self.layout.horizontal if self.layout else True
         scale = theme.scale
+        if getattr(self.layout, "style", "dock") == "notch":
+            center_y = y + height / 2
+            icons.draw(self.canvas, icon_name, x + 22 * scale, center_y - 18 * scale,
+                       26 * scale, theme.muted, ("icon",), theme.panel)
+            text_x = x + 44 * scale
+            available = max(10.0, tile.right - 10 - text_x)
+            self._text(text_x, center_y - 18 * scale, title, 12.5, "bold",
+                       fill=theme.text, width=available)
+            if hint:
+                self._text(text_x, center_y + 6 * scale, hint, 8.4,
+                           fill=theme.muted, width=available)
+            return
         if horizontal:
             center_y = y + height / 2
             icons.draw(self.canvas, icon_name, x + 10 * scale, center_y,
