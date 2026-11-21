@@ -581,7 +581,10 @@ class DockApp:
         return "break"
 
     def _cycle_tab(self, step):
-        keys = [key for key in self.config["widgets"] if key in WIDGET_LABELS]
+        if self.layout is not None and self.layout.tabs:
+            keys = [tab.key for tab in self.layout.tabs]
+        else:
+            keys = [key for key in self.config["widgets"] if key in WIDGET_LABELS]
         if len(keys) < 2:
             return
         try:
@@ -1096,6 +1099,23 @@ class DockApp:
                 lambda key=tab.key: self.set_active(key),
             )
 
+        gear = getattr(plan, "gear", None)
+        if gear is not None:
+            # Le impostazioni non occupano una scheda: un pulsante nella barra.
+            round_rect(
+                canvas, gear.x, gear.y, gear.right, gear.bottom,
+                min(gear.height / 2, max(6.0, theme.radius * 0.5)),
+                fill=theme.panel, outline="",
+            )
+            icons.draw(
+                canvas, "gear",
+                gear.x + gear.width / 2, gear.y + gear.height / 2,
+                15 * scale, theme.text, ("icon",),
+            )
+            self._register_hit(
+                gear.x, gear.y, gear.right, gear.bottom, self.open_settings,
+            )
+
     def set_active(self, key):
         """Mostra la scheda del widget scelto."""
         if key == self.active_tab:
@@ -1323,6 +1343,9 @@ class DockApp:
                            now.strftime("%d/%m"), 8.0 * growth, fill=theme.muted, anchor="n")
 
     def _draw_nokk(self, tile, area, expanded):
+        if getattr(self.layout, "style", "dock") == "notch":
+            self._draw_assistant(tile, area, expanded)
+            return
         theme = self.theme
         x, y, width, height = area
         horizontal = self.layout.horizontal if self.layout else True
@@ -1352,6 +1375,54 @@ class DockApp:
                        24 * scale * growth, color, ("icon",), theme.panel)
             self._text(x + width / 2, y + 52 * scale, "NOKK", 9.5 * growth, "bold",
                        fill=theme.text, anchor="n")
+
+    def _draw_assistant(self, tile, area, expanded):
+        """Scheda unica dell'assistente: stato di NOKK e cattura schermo."""
+        theme = self.theme
+        canvas = self.canvas
+        scale = theme.scale
+        x, y, width, height = area
+        center_y = y + height / 2
+        widgets = self.config["widgets"]
+        show_nokk = "nokk" in widgets
+        show_capture = "capture" in widgets
+        split = x + width * 0.54 if show_nokk and show_capture else (
+            tile.right if show_nokk else x
+        )
+        if show_nokk:
+            color = theme.accent if self.connected else theme.muted
+            icons.draw(canvas, "spark", x + 12 * scale, center_y, 20 * scale,
+                       color, ("icon",), theme.panel)
+            text_x = x + 28 * scale
+            available = max(10.0, split - 10 - text_x)
+            self._text(text_x, center_y - 8 * scale, "NOKK", 10.5, "bold",
+                       fill=theme.text, width=available)
+            status = "Connesso" if self.connected else (
+                "Non raggiungibile" if self.connected is False else "Verifica…"
+            )
+            self._text(text_x, center_y + 8 * scale, status, 8.0,
+                       fill=theme.muted, width=available)
+            self._register_hit(x, y, split, tile.bottom, self.open_ask)
+        if show_capture:
+            left = split + (6 * scale if show_nokk else 0)
+            right = tile.right - 2
+            if right - left > 40 * scale:
+                round_rect(
+                    canvas, left, center_y - height * 0.33,
+                    right, center_y + height * 0.33,
+                    min(11 * scale, height * 0.33),
+                    fill=theme.panel_soft, outline="",
+                )
+            icons.draw(canvas, "camera", left + 16 * scale, center_y,
+                       18 * scale, theme.text, ("icon",), theme.panel_soft)
+            label_x = left + 30 * scale
+            available = max(10.0, right - 8 - label_x)
+            self._text(label_x, center_y - 6 * scale, "Cattura schermo", 8.8,
+                       "bold", fill=theme.text, width=available)
+            self._text(label_x, center_y + 8 * scale,
+                       shortcut_hint(self.config["capture"]["shortcut"]), 7.4,
+                       fill=theme.muted, width=available)
+            self._register_hit(left, y, tile.right, tile.bottom, self.request_capture)
 
     def _draw_capture(self, tile, area, expanded):
         theme = self.theme

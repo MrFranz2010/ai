@@ -78,6 +78,7 @@ class DockLayout:
     style: str = "dock"
     tabs: tuple[Tile, ...] = ()
     active: str = ""
+    gear: Tile | None = None
 
     @property
     def geometry(self) -> str:
@@ -88,6 +89,18 @@ class DockLayout:
             if tile.contains(point_x, point_y):
                 return tile
         return None
+
+
+def notch_pages(widgets) -> list[str]:
+    """Schede del notch: cattura e NOKK insieme, impostazioni fuori."""
+    pages = []
+    for key in widgets:
+        if key == "settings":
+            continue
+        page = "nokk" if key in ("nokk", "capture") else key
+        if page in TILE_SPANS and page not in pages:
+            pages.append(page)
+    return pages
 
 
 def tile_span(key: str, expand: float, scale: float) -> float:
@@ -258,10 +271,30 @@ def compute_layout(
 
         # Pannello a schede: una fila di tab in alto e una sola scheda sotto,
         # larga quanto tutto il notch, così il testo non viene mai tagliato.
-        chosen = active if active in keys else keys[0]
+        # Le impostazioni non hanno una scheda: restano un pulsante a destra,
+        # mentre cattura e NOKK dividono la scheda dell'assistente.
+        pages = notch_pages(keys) or [keys[0]]
+        if active in pages:
+            chosen = active
+        elif active in ("capture", "settings") and "nokk" in pages:
+            chosen = "nokk"
+        else:
+            chosen = pages[0]
         pad = padding * 0.6
         tab_height = NOTCH_TAB_HEIGHT * scale
-        slot = max(1.0, (panel_width - pad * 2) / len(keys))
+        available = panel_width - pad * 2
+        gear = None
+        if "settings" in keys:
+            gear_size = min(tab_height, 30 * scale)
+            available -= gear_size + pad * 0.4
+            gear = Tile(
+                "settings",
+                int(round(panel_width - pad - gear_size)),
+                int(round(pad * 0.6 + (tab_height - gear_size) / 2)),
+                int(round(gear_size)),
+                int(round(gear_size)),
+            )
+        slot = max(1.0, available / len(pages))
         tabs = tuple(
             Tile(
                 key,
@@ -270,7 +303,7 @@ def compute_layout(
                 int(round(slot)) - 4,
                 int(round(tab_height)),
             )
-            for index, key in enumerate(keys)
+            for index, key in enumerate(pages)
         )
         card_top = pad * 0.6 + tab_height + pad * 0.5
         card = Tile(
@@ -293,6 +326,7 @@ def compute_layout(
             style="notch",
             tabs=tabs,
             active=chosen,
+            gear=gear,
         )
 
     if position == "bottom":

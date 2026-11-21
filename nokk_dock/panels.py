@@ -251,7 +251,13 @@ class _Panel:
         self.win.deiconify()
         self.win.update_idletasks()
         if WINDOWS:
-            if not strip_window_frame(self.win, x, y, self.width, self.height):
+            stripped = strip_window_frame(self.win, x, y, self.width, self.height)
+            if not stripped:
+                # Secondo tentativo a finestra davvero visibile: la modifica
+                # dello stile a volte non attecchisce al primo map.
+                self.win.update()
+                stripped = strip_window_frame(self.win, x, y, self.width, self.height)
+            if not stripped:
                 # Ripiego: cornice di sistema ma almeno nera, non grigia.
                 self.win.geometry(geometry)
                 self.win.deiconify()
@@ -262,7 +268,8 @@ class _Panel:
                 logger(
                     f"Pannello «{self.title}» mostrato: "
                     f"{self.win.winfo_geometry()} "
-                    f"viewable={self.win.winfo_viewable()}"
+                    f"viewable={self.win.winfo_viewable()} "
+                    f"senza_cornice={stripped}"
                 )
         else:
             # Ripetuta dopo la mappatura: la misura presa prima di mostrare la

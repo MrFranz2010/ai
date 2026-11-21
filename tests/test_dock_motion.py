@@ -137,6 +137,7 @@ class LayoutMagnificationTests(unittest.TestCase):
 
 class NotchLayoutTests(unittest.TestCase):
     widgets = LayoutMagnificationTests.widgets
+    pages = ["music", "weather", "clock", "nokk"]
 
     def build(self, expand, **kwargs):
         options = dict(
@@ -174,21 +175,40 @@ class NotchLayoutTests(unittest.TestCase):
         # una sola scheda larga quanto il pannello: il testo non si taglia
         self.assertEqual(len(opened.tiles), 1)
         self.assertGreater(opened.tiles[0].width, collapsed.width)
-        self.assertEqual(len(opened.tabs), len(self.widgets))
-        self.assertEqual(opened.active, self.widgets[0])
+        self.assertEqual(len(opened.tabs), len(self.pages))
+        self.assertEqual(opened.active, self.pages[0])
 
     def test_tabs_pick_the_open_card(self):
         plan = self.build(1.0, active="weather")
         self.assertEqual(plan.active, "weather")
-        self.assertEqual([tab.key for tab in plan.tabs], self.widgets)
+        self.assertEqual([tab.key for tab in plan.tabs], self.pages)
         self.assertEqual(plan.tiles[0].key, "weather")
-        self.assertEqual(len({tab.x for tab in plan.tabs}), len(self.widgets))
+        self.assertEqual(len({tab.x for tab in plan.tabs}), len(self.pages))
         self.assertGreater(plan.tiles[0].y, plan.tabs[0].bottom)
+
+    def test_settings_is_a_button_not_a_tab(self):
+        plan = self.build(1.0)
+        self.assertNotIn("settings", [tab.key for tab in plan.tabs])
+        self.assertIsNotNone(plan.gear)
+        self.assertEqual(plan.gear.key, "settings")
+        self.assertGreater(plan.gear.x, plan.tabs[-1].right)
+        self.assertLessEqual(plan.gear.right, plan.width)
+        # senza il widget impostazioni non c'è nemmeno il pulsante
+        self.assertIsNone(self.build(1.0, widgets=["music", "clock"]).gear)
+
+    def test_assistant_tabs_share_one_page(self):
+        plan = self.build(1.0)
+        self.assertEqual([tab.key for tab in plan.tabs].count("nokk"), 1)
+        self.assertNotIn("capture", [tab.key for tab in plan.tabs])
+        # una configurazione con la sola cattura resta nella scheda NOKK
+        capture_only = self.build(1.0, widgets=["music", "capture"])
+        self.assertEqual([tab.key for tab in capture_only.tabs], ["music", "nokk"])
+        self.assertEqual(self.build(1.0, active="capture").active, "nokk")
 
     def test_unknown_active_falls_back_to_the_first_tab(self):
         plan = self.build(1.0, active="missing")
-        self.assertEqual(plan.active, self.widgets[0])
-        self.assertEqual(plan.tiles[0].key, self.widgets[0])
+        self.assertEqual(plan.active, self.pages[0])
+        self.assertEqual(plan.tiles[0].key, self.pages[0])
 
     def test_dock_style_has_no_tabs(self):
         plan = self.build(1.0, style="dock")

@@ -386,11 +386,13 @@ class DrawingTests(unittest.TestCase):
                 for item in instance.canvas.items
                 if item["kind"] == "text"
             ]
-            for key in instance.config["widgets"]:
+            for key in dock_layout.notch_pages(instance.config["widgets"]):
                 label = WIDGET_LABELS[key].upper()
                 self.assertTrue(
                     any(text.startswith(label[:6]) for text in texts), label
                 )
+            # le impostazioni sono un pulsante nella barra, non una scheda
+            self.assertIsNotNone(instance.layout.gear)
             # la scheda aperta mostra il brano per intero, non tagliato
             self.assertIn("Brano", texts)
             self.assertTrue(any(text.startswith("Artista") for text in texts))
@@ -419,28 +421,64 @@ class DrawingTests(unittest.TestCase):
             ]
             self.assertTrue(any(":" in text for text in texts))
 
+    def test_assistant_page_holds_nokk_and_capture(self):
+        with stub_tkinter():
+            instance = self.build_app()
+            instance.expand = 1.0
+            instance._apply_geometry(1.0)
+            instance.set_active("nokk")
+            self.assertEqual(instance.layout.tiles[0].key, "nokk")
+            texts = [
+                str(item["kwargs"].get("text", ""))
+                for item in instance.canvas.items
+                if item["kind"] == "text"
+            ]
+            self.assertIn("NOKK", texts)
+            self.assertIn("Connesso", texts)
+            self.assertIn("Cattura schermo", texts)
+
+            opened = []
+            instance.open_settings = lambda: opened.append(True)
+            instance.request_capture = lambda: opened.append("capture")
+            instance._redraw()
+            gear = instance.layout.gear
+            self.assertIsNotNone(gear)
+            hit = instance._hit_at(
+                gear.x + gear.width / 2, gear.y + gear.height / 2
+            )
+            self.assertIsNotNone(hit)
+            hit["command"]()
+            capture_hit = instance._hit_at(
+                instance.layout.tiles[0].right - 20,
+                instance.layout.tiles[0].y + instance.layout.tiles[0].height / 2,
+            )
+            self.assertIsNotNone(capture_hit)
+            capture_hit["command"]()
+            self.assertEqual(opened, [True, "capture"])
+
     def test_notch_wheel_cycles_pages(self):
         with stub_tkinter():
             instance = self.build_app()
             instance.expand = 1.0
             instance._apply_geometry(1.0)
             instance._redraw()
-            widgets = instance.config["widgets"]
+            pages = [tab.key for tab in instance.layout.tabs]
+            self.assertEqual(pages, ["music", "weather", "clock", "nokk"])
 
             down = types.SimpleNamespace(num=None, delta=-120)
             self.assertEqual(instance._on_notch_wheel(down), "break")
-            self.assertEqual(instance.active_tab, widgets[1])
-            self.assertEqual(instance.layout.tiles[0].key, widgets[1])
+            self.assertEqual(instance.active_tab, pages[1])
+            self.assertEqual(instance.layout.tiles[0].key, pages[1])
 
             up = types.SimpleNamespace(num=4, delta=0)
             instance._on_notch_wheel(up)
-            self.assertEqual(instance.active_tab, widgets[0])
+            self.assertEqual(instance.active_tab, pages[0])
             # la rotella avanti dall'ultima scheda torna alla prima
-            for _ in range(len(widgets) - 1):
+            for _ in range(len(pages) - 1):
                 instance._on_notch_wheel(down)
-            self.assertEqual(instance.active_tab, widgets[-1])
+            self.assertEqual(instance.active_tab, pages[-1])
             instance._on_notch_wheel(down)
-            self.assertEqual(instance.active_tab, widgets[0])
+            self.assertEqual(instance.active_tab, pages[0])
 
             # a notch chiuso la rotella non cambia nulla
             instance.expand = 0.0

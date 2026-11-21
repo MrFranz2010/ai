@@ -18,8 +18,11 @@ un'istanza su Render/Fly.
   alto** dello schermo, con spigoli alti vivi e bassi arrotondati, che si
   srotola verso il basso nel pannello completo al passaggio del mouse. Il
   pannello aperto è **a schede**, come Nusa: in alto una barra pagine con icona
-  ed etichetta per widget e sotto una sola scheda larga quanto tutto il notch,
-  così testo e copertina non vengono mai compressi né tagliati. A riposo, se
+  ed etichetta e sotto una sola scheda larga quanto tutto il notch, così testo
+  e copertina non vengono mai compressi né tagliati. Le schede sono quattro —
+  musica, meteo, ora e **NOKK** — e quella dell'assistente tiene insieme lo
+  stato della connessione e «Cattura schermo»; le impostazioni non hanno una
+  scheda, sono il pulsante a ingranaggio in fondo alla barra. A riposo, se
   qualcosa sta suonando, la pillola mostra copertina, titolo, artista e tempo
   mancante; altrimenti l'ora. Chi preferisce la barra classica sceglie
   `dock.style = "dock"`.
