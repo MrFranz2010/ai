@@ -566,6 +566,32 @@ class IconTests(unittest.TestCase):
         self.assertTrue(canvas.calls)
 
 
+class TrayTests(unittest.TestCase):
+    def test_menu_lists_the_dock_actions(self):
+        from nokk_dock import tray
+
+        entries = tray.menu_entries()
+        actions = [action for action, _label in entries if action]
+        self.assertEqual(actions, ["toggle", "ask", "capture", "settings", "quit"])
+        self.assertIn((None, None), entries)
+        self.assertTrue(tray.ICON_ICO.exists())
+        self.assertTrue(tray.ICON_PNG.exists())
+
+    def test_missing_backend_is_not_fatal(self):
+        from nokk_dock import tray
+
+        class Broken:
+            def __init__(self, _actions):
+                pass
+
+            def start(self):
+                raise OSError("nessun backend")
+
+        with mock.patch.object(tray, "is_windows", lambda platform=None: False):
+            with mock.patch.object(tray, "_PystrayTray", Broken):
+                self.assertIsNone(tray.create_tray({"toggle": lambda: None}))
+
+
 class LauncherTests(unittest.TestCase):
     def test_parser(self):
         import dock_start

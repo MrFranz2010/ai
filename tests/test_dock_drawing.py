@@ -532,6 +532,63 @@ class DrawingTests(unittest.TestCase):
             self.assertIsNone(panel._on_wheel(other))
             self.assertEqual(len(calls), 3)
 
+    def test_tray_hides_and_restores_the_dock(self):
+        with stub_tkinter():
+            instance = self.build_app()
+
+            class TrayRoot(FakeRoot):
+                def __init__(self):
+                    super().__init__()
+                    self.pending = []
+                    self.calls = []
+
+                def after(self, delay, callback=None):
+                    self.pending.append((delay, callback))
+                    return len(self.pending)
+
+                def after_cancel(self, job):
+                    pass
+
+                def withdraw(self):
+                    self.calls.append("withdraw")
+
+                def deiconify(self):
+                    self.calls.append("deiconify")
+
+                def lift(self):
+                    self.calls.append("lift")
+
+            instance.root = TrayRoot()
+            instance._hidden = False
+            instance._hide_job = None
+            instance._hover_label = None
+            instance._hover_label_job = None
+            instance._toast = None
+            instance._toast_job = None
+            instance._animate = lambda target: setattr(instance, "target", target)
+
+            instance.hide_dock()
+            self.assertTrue(instance._hidden)
+            self.assertEqual(instance.target, 0.0)
+            withdraw = [
+                callback for delay, callback in instance.root.pending if delay == 180
+            ]
+            self.assertTrue(withdraw)
+            withdraw[0]()
+            self.assertIn("withdraw", instance.root.calls)
+
+            instance.show_dock()
+            self.assertFalse(instance._hidden)
+            self.assertIn("deiconify", instance.root.calls)
+            self.assertIn("lift", instance.root.calls)
+            self.assertNotEqual(instance.root.geometry_value, "")
+
+            # l'icona della tray alterna le due azioni
+            instance.toggle_visibility()
+            self.assertTrue(instance._hidden)
+            instance.toggle_visibility()
+            self.assertFalse(instance._hidden)
+
     def test_hover_label_text(self):
         with stub_tkinter():
             from nokk_dock import layout as dock_layout

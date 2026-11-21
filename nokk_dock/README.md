@@ -30,6 +30,9 @@ un'istanza su Render/Fly.
   il pannello aperto per passare da una scheda all'altra, `Esc` per richiudere
   subito. Uscendo con il mouse il pannello torna sempre compatto (c'è anche un
   controllo ogni secondo che lo riporta giù se il mouse è fuori).
+- **System tray**: icona accanto all'orologio per ridurre e riportare il dock;
+  un clic alterna la visibilità, il menu offre le stesse azioni della dock.
+  Ridotto, il dock continua a rispondere alla scorciatoia e ai comandi IPC.
 - **Ingrandimento magnetico**: i widget vicini al cursore si allargano e il
   contenuto cresce con loro; l'intensità è regolabile (`dock.magnify`).
 - **Etichette al passaggio del mouse**: una pillola compatta spiega ogni widget
@@ -109,6 +112,22 @@ e creare un collegamento nella cartella Esecuzione automatica
 Su Windows il dock si ancora ai bordi del monitor primario, usa la trasparenza
 per gli angoli arrotondati e attiva la consapevolezza DPI così testo e icone
 restano nitidi con il ridimensionamento dello schermo al 125% o 150%.
+
+### System tray
+
+Il dock mette un'icona nella tray all'avvio, con l'aspetto della pillola (tacca
+bianca su fondo nero):
+
+- **Windows**: icona nativa tramite `Shell_NotifyIcon`, senza dipendenze.
+- **Linux**: se `pystray` è installato (`python -m pip install pystray`); senza,
+  il dock funziona identico ma resta senza icona e si riporta a schermo con
+  `python dock_start.py --settings` o con la scorciatoia della cattura.
+
+Un clic sull'icona riduce o riporta il dock; il menu offre «Mostra / nascondi il
+dock», «Chiedi a NOKK», «Cattura schermo e chiedi», «Impostazioni del dock» ed
+«Esci». Anche il menu del tasto destro sul dock ha «Riduci nella tray». Ridotto,
+il dock continua a girare — la scorciatoia di cattura e l'IPC restano attivi — e
+riappare compatto al bordo quando lo si richiama.
 
 ## Scorciatoia per lo screenshot
 
@@ -216,6 +235,6 @@ python -m unittest discover -s tests
 
 I test coprono configurazione, geometria del notch e del dock, ingrandimento magnetico,
 molla dell'animazione, copertine (download, cache, miniature), temi,
-client HTTP, cattura, meteo, MPRIS, scorciatoia, IPC e icone. Non aprono
+client HTTP, cattura, meteo, MPRIS, scorciatoia, IPC, tray e icone. Non aprono
 finestre: `tests/test_dock_drawing.py` sostituisce Tk con uno stub e verifica
 che i widget vengano davvero disegnati, anche con l'ingrandimento attivo.

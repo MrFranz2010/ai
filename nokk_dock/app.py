@@ -37,6 +37,7 @@ from .settings import (
     validate_config,
 )
 from .theme import Theme, build_theme, mix, pick_font
+from .tray import create_tray
 from .weather import WeatherNow, WeatherService
 
 WINDOWS = sys.platform.startswith("win")
@@ -118,6 +119,9 @@ class DockApp:
     _collapse_job = None
     _panels = 0
     _hover_locked = False
+    _tray = None
+    _hidden = False
+    _hide_job = None
     active_tab = "music"
 
     def __init__(self, config, config_file=None):
@@ -169,12 +173,16 @@ class DockApp:
         self._art_source = ""
         self._art_pending = ""
         self._art_variants = {}
+        self._tray = None
+        self._hidden = False
+        self._hide_job = None
 
         self.font_family = pick_font(tkfont.families(self.root))
         self._bind_events()
         self._apply_config(self.config, persist=False)
         self._install_ipc()
         self._install_hotkey()
+        self._install_tray()
         self._start_threads()
         self.root.deiconify()
         self._apply_geometry(self.expand)
@@ -336,7 +344,12 @@ class DockApp:
         elif kind == "reload":
             self._reload_from_disk()
         elif kind == "toggle":
-            self._animate(1.0 if self.target < 0.5 else 0.0)
+            if self._hidden:
+                self.show_dock()
+            else:
+                self._animate(1.0 if self.target < 0.5 else 0.0)
+        elif kind == "tray_toggle":
+            self.toggle_visibility()
         elif kind == "quit":
             self.shutdown()
 
@@ -568,6 +581,8 @@ class DockApp:
             )
         menu.add_separator()
         menu.add_command(label="Impostazioni del dock", command=self.open_settings)
+        if self._tray is not None:
+            menu.add_command(label="Riduci nella tray", command=self.hide_dock)
         menu.add_command(
             label="Apri NOKK nel browser",
             command=lambda: webbrowser.open(self.config["nokk"]["base_url"]),
@@ -642,10 +657,12 @@ class DockApp:
 
     # -------------------------------------------------------------- ask UI
     def open_ask(self, image=None, question=None):
+        self.show_dock()
         panel = AskPanel(self, image=image, question=question)
         return panel
 
     def request_capture(self):
+        self.show_dock()
         self._hover_locked = True
         self._animate(1.0)
         self.toast("Cattura dello schermo…", seconds=2)
@@ -665,6 +682,7 @@ class DockApp:
         self.post("capture_ready", image)
 
     def open_settings(self):
+        self.show_dock()
         return SettingsPanel(self)
 
     def panel_opened(self):
@@ -1335,6 +1353,64 @@ class DockApp:
             self._text(x + width / 2, y + 46 * scale, title, 8.4,
                        fill=theme.muted, anchor="n")
 
+    # ---------------------------------------------------------------- tray
+    def _install_tray(self):
+        self._tray = create_tray({
+            "toggle": lambda: self.post("tray_toggle", None),
+            "ask": lambda: self.post("ask", ""),
+            "capture": lambda: self.post("capture", None),
+            "settings": lambda: self.post("settings", None),
+            "quit": lambda: self.post("quit", None),
+        })
+
+    def toggle_visibility(self):
+        """Mostra il dock o lo riduce nella system tray."""
+        if self._hidden:
+            self.show_dock()
+        else:
+            self.hide_dock()
+
+    def hide_dock(self):
+        """Riduce il dock nella tray: scorciatoia, IPC e widget restano attivi."""
+        if self._hidden:
+            return
+        self._hidden = True
+        self._hide_hover_label()
+        self._close_toast()
+        self._animate(0.0)
+        self._cancel(self._hide_job)
+        try:
+            self._hide_job = self.root.after(180, self._withdraw_dock)
+        except tk.TclError:
+            self._hide_job = None
+
+    def _withdraw_dock(self):
+        self._hide_job = None
+        if not self._hidden:
+            return
+        try:
+            self.root.withdraw()
+        except tk.TclError:
+            pass
+
+    def show_dock(self):
+        """Riporta il dock dalla tray, compatto e agganciato al bordo."""
+        if not self._hidden:
+            return
+        self._hidden = False
+        self._cancel(self._hide_job)
+        self._hide_job = None
+        try:
+            self.root.deiconify()
+            self.root.lift()
+            self.root.wm_attributes(
+                "-topmost", bool(self.config["dock"]["always_on_top"])
+            )
+        except tk.TclError:
+            pass
+        self._apply_geometry(self.expand)
+        self._redraw()
+
     # -------------------------------------------------------------- system
     def _ipc_command(self, action, payload):
         if action == "capture":
@@ -1371,6 +1447,10 @@ class DockApp:
             self._cancel(job)
         if self._hotkey is not None:
             self._hotkey.stop()
+        tray = self._tray
+        self._tray = None
+        if tray is not None:
+            tray.stop()
         if self._server is not None:
             self._server.stop()
         weather_service = getattr(self, "weather_service", None)
