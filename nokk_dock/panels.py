@@ -515,8 +515,12 @@ class SettingsPanel(_Panel):
             "<Configure>",
             lambda event: canvas.itemconfigure(self._body_window, width=event.width),
         )
-        canvas.bind_all("<Button-4>", lambda _event: canvas.yview_scroll(-2, "units"))
-        canvas.bind_all("<Button-5>", lambda _event: canvas.yview_scroll(2, "units"))
+        # La rotella va presa su tutta la finestra: sopra le etichette e i
+        # controlli l'evento non arriva al canvas, e Windows usa <MouseWheel>
+        # con delta mentre X11 manda Button-4/5.
+        canvas.bind_all("<MouseWheel>", self._on_wheel)
+        canvas.bind_all("<Button-4>", self._on_wheel)
+        canvas.bind_all("<Button-5>", self._on_wheel)
         self.canvas = canvas
 
         self._build_position_section()
@@ -527,6 +531,30 @@ class SettingsPanel(_Panel):
         self._build_capture_section()
         self._build_dock_section()
         self._build_footer()
+
+    def _on_wheel(self, event):
+        """Scorre il contenuto con la rotella, qualunque widget sia sotto il mouse."""
+        try:
+            if event.widget.winfo_toplevel() is not self.win:
+                return None
+        except (AttributeError, tk.TclError):
+            return None
+        number = getattr(event, "num", None)
+        delta = getattr(event, "delta", 0) or 0
+        if number == 4:
+            direction, notches = -1, 1
+        elif number == 5:
+            direction, notches = 1, 1
+        elif delta:
+            notches = max(1, abs(int(delta)) // 120)
+            direction = -1 if delta > 0 else 1
+        else:
+            return None
+        try:
+            self.canvas.yview_scroll(direction * notches * 2, "units")
+        except tk.TclError:
+            return None
+        return "break"
 
     def _section(self, title):
         theme = self.theme
@@ -981,6 +1009,7 @@ class SettingsPanel(_Panel):
                 pass
             self._pump_job = None
         try:
+            self.canvas.unbind_all("<MouseWheel>")
             self.canvas.unbind_all("<Button-4>")
             self.canvas.unbind_all("<Button-5>")
         except tk.TclError:

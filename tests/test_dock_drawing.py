@@ -406,6 +406,49 @@ class DrawingTests(unittest.TestCase):
             ]
             self.assertTrue(any(":" in text for text in texts))
 
+    def test_settings_wheel_scrolls_on_windows_and_x11(self):
+        with stub_tkinter():
+            from nokk_dock import panels as dock_panels
+
+            panel = object.__new__(dock_panels.SettingsPanel)
+            panel.win = object()
+            calls = []
+            panel.canvas = types.SimpleNamespace(
+                yview_scroll=lambda amount, unit: calls.append((amount, unit))
+            )
+
+            class Widget:
+                def __init__(self, toplevel):
+                    self.toplevel = toplevel
+
+                def winfo_toplevel(self):
+                    return self.toplevel
+
+            wheel = types.SimpleNamespace(
+                widget=Widget(panel.win), delta=120, num=None
+            )
+            self.assertEqual(panel._on_wheel(wheel), "break")
+            self.assertEqual(calls, [(-2, "units")])
+
+            bigger = types.SimpleNamespace(
+                widget=Widget(panel.win), delta=-240, num=None
+            )
+            panel._on_wheel(bigger)
+            self.assertEqual(calls[-1], (4, "units"))
+
+            x11 = types.SimpleNamespace(
+                widget=Widget(panel.win), delta=0, num=5
+            )
+            panel._on_wheel(x11)
+            self.assertEqual(calls[-1], (2, "units"))
+
+            # la rotella su un'altra finestra non deve muovere le impostazioni
+            other = types.SimpleNamespace(
+                widget=Widget(object()), delta=-120, num=None
+            )
+            self.assertIsNone(panel._on_wheel(other))
+            self.assertEqual(len(calls), 3)
+
     def test_hover_label_text(self):
         with stub_tkinter():
             from nokk_dock import layout as dock_layout

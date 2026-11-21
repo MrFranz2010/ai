@@ -24,7 +24,8 @@ if str(ROOT) not in sys.path:
 from nokk_dock import capture, hotkey, ipc, media, settings
 
 PNG_BYTES = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="
+    "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR4nGPQsKmgKWIYtWDUglELRi0Y"
+    "tWDUglELRi0YtWDUglELhooFAAS5cC7WiDFbAAAAAElFTkSuQmCC"
 )
 
 
