@@ -55,12 +55,6 @@ class SpringTests(unittest.TestCase):
         self.assertTrue(motion.settled(1.0, 1.0, 0.0))
         self.assertFalse(motion.settled(0.0, 1.0, 0.0))
 
-    def test_ease_out_cubic(self):
-        self.assertAlmostEqual(motion.ease_out_cubic(0.0), 0.0)
-        self.assertAlmostEqual(motion.ease_out_cubic(1.0), 1.0)
-        self.assertGreater(motion.ease_out_cubic(0.5), 0.5)
-
-
 class MagnificationTests(unittest.TestCase):
     def test_curve_falls_off(self):
         self.assertAlmostEqual(motion.magnification_factor(0.0, 120.0, 1.25), 1.25)
@@ -296,20 +290,16 @@ class ArtworkTests(unittest.TestCase):
         self.assertEqual(artwork.thumbnail_size(64), 64)
         self.assertEqual(artwork.thumbnail_size(1000), max(artwork.THUMBNAIL_SIZES))
 
-    def test_thumbnail_and_accent(self):
+    def test_thumbnail_from_png(self):
         with tempfile.TemporaryDirectory() as temporary:
             cover = Path(temporary) / "cover.png"
             cover.write_bytes(PNG_BYTES)
             data = artwork.thumbnail_bytes(cover, 40)
             self.assertIsNotNone(data)
             self.assertTrue(data.startswith(b"\x89PNG"))
-            accent = artwork.accent_color(cover)
-            if accent is not None:
-                self.assertRegex(accent, r"^#[0-9a-f]{6}$")
 
     def test_thumbnail_without_path(self):
         self.assertIsNone(artwork.thumbnail_bytes(None, 40))
-        self.assertIsNone(artwork.accent_color(None))
 
 
 class MediaArtTests(unittest.TestCase):

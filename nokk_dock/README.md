@@ -26,8 +26,7 @@ un'istanza su Render/Fly.
 - **Etichette al passaggio del mouse**: una pillola compatta spiega ogni widget
   e mostra brano o città correnti (`dock.show_labels`).
 - **Widget musicali** via MPRIS (`playerctl`): copertina del brano, brano,
-  artista, barra di avanzamento colorata con l'accento estratto dalla
-  copertina, precedente / play-pausa / successivo.
+  artista, barra di avanzamento, precedente / play-pausa / successivo.
 - **Meteo e ora**: Open-Meteo senza chiave API (basta il nome della città),
   aggiornamento periodico e data/ora locali.
 - **Stato di NOKK**: pallino verde/ambra e testo «Connesso / Non raggiungibile».
@@ -62,8 +61,8 @@ backend di scorciatoia, cattura e musica.
     ritagliare le copertine con gli angoli arrotondati:
     `python -m pip install -r requirements-dock.txt`.
 
-Senza Pillow la copertina compare solo se il player fornisce già un PNG/GIF e
-l'accento resta quello del tema; tutto il resto funziona ugualmente.
+Senza Pillow la copertina compare solo se il player fornisce già un PNG/GIF
+della dimensione giusta; tutto il resto funziona ugualmente.
 
 Su Windows non serve installare nulla: la cattura usa PowerShell con
 `System.Drawing` e i controlli musicali usano i tasti multimediali di sistema
@@ -207,7 +206,7 @@ python -m unittest discover -s tests
 ```
 
 I test coprono configurazione, geometria del notch e del dock, ingrandimento magnetico,
-molla dell'animazione, copertine (download, cache, miniature, accento), temi,
+molla dell'animazione, copertine (download, cache, miniature), temi,
 client HTTP, cattura, meteo, MPRIS, scorciatoia, IPC e icone. Non aprono
 finestre: `tests/test_dock_drawing.py` sostituisce Tk con uno stub e verifica
 che i widget vengano davvero disegnati, anche con l'ingrandimento attivo.

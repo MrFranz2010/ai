@@ -38,11 +38,6 @@ def settled(value: float, target: float, velocity: float) -> bool:
     return abs(target - value) < SETTLE_EPSILON and abs(velocity) < 0.02
 
 
-def ease_out_cubic(progress: float) -> float:
-    clamped = max(0.0, min(1.0, float(progress)))
-    return 1.0 - (1.0 - clamped) ** 3
-
-
 def magnification_factor(distance: float, reach: float, strength: float) -> float:
     """Fattore di ingrandimento con caduta cosinusoidale (stile dock macOS).
 

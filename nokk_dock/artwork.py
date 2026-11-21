@@ -4,7 +4,7 @@ La copertina arriva dal player tramite MPRIS (`mpris:artUrl`): può essere un
 file locale oppure un URL remoto (Spotify usa `https://i.scdn.co/...`). Qui
 l'immagine viene validata, scaricata con limiti di dimensione e tempo, salvata
 in cache e ridotta in una miniatura PNG pronta per Tk. Pillow è opzionale:
-senza, si usano solo PNG/GIF già adatti e nessun colore dominante.
+senza, si usano solo PNG/GIF già adatti alla dimensione richiesta.
 """
 
 from __future__ import annotations
@@ -162,41 +162,3 @@ def _plain_png_bytes(path):
     return None
 
 
-def accent_color(path):
-    """Colore dominante della copertina, schiarito per restare leggibile."""
-    if path is None:
-        return None
-    try:
-        from PIL import Image  # type: ignore[import-not-found]
-    except Exception:
-        return None
-    try:
-        with Image.open(path) as image:
-            small = image.convert("RGB").resize((1, 1), Image.LANCZOS)
-            red, green, blue = small.getpixel((0, 0))
-    except Exception:
-        return None
-    # Alza la luminosità verso il chiaro: il colore deve reggere su fondo scuro.
-    average = (red + green + blue) / 3
-    lift = max(0.0, min(1.0, (average / 255 - 0.25) * 0.9))
-    red = int(red + (255 - red) * (0.18 + lift * 0.22))
-    green = int(green + (255 - green) * (0.18 + lift * 0.22))
-    blue = int(blue + (255 - blue) * (0.22 + lift * 0.24))
-    return "#{:02x}{:02x}{:02x}".format(
-        max(0, min(255, red)), max(0, min(255, green)), max(0, min(255, blue))
-    )
-
-
-def clear_cache(directory=None):
-    target = Path(directory) if directory else cache_dir()
-    removed = 0
-    if not target.exists():
-        return 0
-    for entry in target.glob("*"):
-        try:
-            if entry.is_file():
-                entry.unlink()
-                removed += 1
-        except OSError:
-            continue
-    return removed

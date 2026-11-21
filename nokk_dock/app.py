@@ -23,7 +23,7 @@ from . import artwork, icons
 from . import layout as dock_layout
 from .motion import settled, spring_step
 from .capture import CaptureError, capture_screen, cleanup, load_image
-from .client import NokkClient, NokkError
+from .client import NokkClient
 from .hotkey import backend_name, create_hotkey, shortcut_hint
 from .ipc import DockServer, send as ipc_send
 from .media import INSTALL_HINT, MusicState, create_controller
@@ -35,10 +35,9 @@ from .settings import (
     save_config,
     validate_config,
 )
-from .theme import Theme, build_theme, mix, pick_font, readable_text
+from .theme import Theme, build_theme, mix, pick_font
 from .weather import WeatherNow, WeatherService
 
-AMBER = "#f0b429"
 WINDOWS = sys.platform.startswith("win")
 # Colore chiave usato su Windows per rendere trasparenti gli angoli arrotondati.
 TRANSPARENT_KEY = "#010203"
@@ -112,7 +111,6 @@ class DockApp:
     _art_path = None
     _art_source = ""
     _art_pending = ""
-    _art_accent = None
     _art_variants = None
 
     def __init__(self, config, config_file=None):
@@ -163,7 +161,6 @@ class DockApp:
         self._art_path = None
         self._art_source = ""
         self._art_pending = ""
-        self._art_accent = None
         self._art_variants = {}
 
         self.font_family = pick_font(tkfont.families(self.root))
@@ -728,17 +725,15 @@ class DockApp:
 
     def _art_worker(self, url):
         path = ""
-        accent = None
         try:
             resolved = artwork.local_path(url)
             if resolved is not None:
                 path = str(resolved)
-                accent = artwork.accent_color(resolved)
         except Exception:  # noqa: BLE001 - la copertina non deve fermare il dock
-            path, accent = "", None
-        self.post("art", (url, path, accent))
+            path = ""
+        self.post("art", (url, path))
 
-    def _apply_art(self, url, path, accent):
+    def _apply_art(self, url, path):
         self._art_pending = ""
         if url != self.music.art_url:
             return
@@ -746,7 +741,6 @@ class DockApp:
         if (path or None) != self._art_path:
             self._art_path = path or None
             self._art_variants = {}
-        self._art_accent = accent or None
         self._redraw()
 
     def _art_photo_for(self, size):
@@ -961,8 +955,6 @@ class DockApp:
         horizontal = self.layout.horizontal if self.layout else True
         scale = theme.scale
         growth = self._tile_growth(tile)
-        # monocromatico come Nusa: la copertina non tinge più i controlli
-        accent = theme.accent
         button = min(34 * scale * growth, height * 0.6)
         cover = self._cover_for(expanded) if state.installed else None
         if cover is not None:
@@ -984,13 +976,13 @@ class DockApp:
                 next_cx = play_cx + button * 1.28
                 self._mini_button(prev_cx, center_y, button * 0.8, "previous",
                                   self.previous_track)
-                self._play_button(play_cx, center_y, button, state, accent)
+                self._play_button(play_cx, center_y, button, state)
                 self._mini_button(next_cx, center_y, button * 0.8, "next",
                                   self.next_track)
                 text_x = next_cx + button * 0.5
             else:
                 play_cx = cursor + button * 0.62
-                self._play_button(play_cx, center_y, button, state, accent)
+                self._play_button(play_cx, center_y, button, state)
                 text_x = play_cx + button * 0.68
             available = tile.right - 12 - text_x
             if available > 24:
@@ -1008,7 +1000,7 @@ class DockApp:
                                    fill=theme.divider, width=3, capstyle="round")
                 progress_x = x + max(2.0, width * state.progress)
                 canvas.create_line(x, bar_y, progress_x, bar_y,
-                                   fill=accent, width=3, capstyle="round")
+                                   fill=theme.accent, width=3, capstyle="round")
                 timecode = state.timecode
                 if timecode:
                     self._text(tile.right - 12, bar_y - 9 * scale, timecode, 7.6,
@@ -1018,9 +1010,7 @@ class DockApp:
             if cover is not None:
                 self.canvas.create_image(icon_center[0], icon_center[1], image=cover)
             else:
-                self._play_button(
-                    icon_center[0], icon_center[1], button * 0.9, state, accent
-                )
+                self._play_button(icon_center[0], icon_center[1], button * 0.9, state)
             text_width = width - 8
             self._text(x + width / 2, y + 30 * scale + button * 0.62,
                        state.label, 9.0 * growth, "bold", fill=theme.text,
@@ -1030,18 +1020,17 @@ class DockApp:
                            state.subtitle, 8.0 * growth, fill=theme.muted, anchor="n",
                            width=text_width)
 
-    def _play_button(self, cx, cy, size, state, accent=None):
+    def _play_button(self, cx, cy, size, state):
         theme = self.theme
-        fill = accent or theme.accent
         radius = size / 2
         self.canvas.create_oval(
             cx - radius, cy - radius, cx + radius, cy + radius,
-            fill=fill, outline="",
+            fill=theme.accent, outline="",
         )
         icons.draw(
             self.canvas,
             "pause" if state.playing else "play",
-            cx, cy, size * 0.5, readable_text(fill), ("icon",),
+            cx, cy, size * 0.5, theme.on_accent, ("icon",),
         )
         self._register_hit(cx - radius, cy - radius, cx + radius, cy + radius, self.toggle_music)
 
