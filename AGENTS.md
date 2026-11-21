@@ -59,10 +59,11 @@ Fanno eccezione le richieste che riguardano solo il client CLI/TUI: vanno sempre
 e solo su `nokk-cli-unified`, come descritto sopra, e non richiedono i due
 commit desktop/hosting.
 
-1. Implementa sul ramo desktop (`main`) e committa lì.
-2. Implementa la stessa funzionalità sul ramo hosting
-   (`copilot/supabase-config-storage`), adattandola al suo entrypoint e al suo
-   storage, e committa lì con un messaggio separato.
+1. Crea un ramo dedicato da `origin/main`, implementa lì e committa: è il ramo
+   desktop della modifica.
+2. Crea un ramo dedicato da `origin/copilot/supabase-config-storage`, implementa
+   la stessa funzionalità adattandola al suo entrypoint e al suo storage, e
+   committa con un messaggio separato.
 3. Verifica ogni ramo sul proprio codice, con il proprio comando di avvio e la
    propria suite di test.
 
@@ -99,6 +100,36 @@ applicare una patch pensata per l'altro ramo senza adattarla.
 
 Lo stesso vale per questo file: `AGENTS.md` è versionato su entrambi i rami e ogni
 sua modifica richiede due commit separati, senza merge.
+
+## Ogni modifica ha il suo ramo
+
+Nessun lavoro si committa direttamente su un ramo condiviso. Ogni richiesta —
+funzionalità, correzione, documentazione — vive su un **ramo dedicato**, creato
+dal ramo di destinazione aggiornato, e resta lì finché non viene revisionata.
+
+| Ramo | Contenuto |
+| --- | --- |
+| `main` | app desktop/locale (variante desktop dell'app web) |
+| `copilot/supabase-config-storage` | hosting web su Supabase |
+| `nokk-cli-unified` | solo client CLI/TUI |
+| `nokk-dock` | dock da scrivania (programma desktop separato) |
+
+Regole:
+
+- Un ramo per richiesta: non mescolare nello stesso ramo lavori non correlati e
+  non riusare un ramo già chiuso per una modifica nuova.
+- Il ramo si crea dal ramo di destinazione aggiornato (`origin/main`,
+  `origin/copilot/supabase-config-storage`, `origin/nokk-cli-unified`) e non si
+  cambia ramo dentro un worktree aperto da altri.
+- Il nome descrive il lavoro (`nokk-dock`, `nokk-cli-unified`, `fix-…`,
+  `docs-…`), non la persona che lo scrive.
+- Restano valide le regole di consegna qui sopra: una modifica all'app web vive
+  su due rami dedicati (uno derivato da `main`, uno da
+  `copilot/supabase-config-storage`) con due commit separati; una modifica
+  CLI/TUI sul suo ramo derivato da `nokk-cli-unified`; il dock sul ramo
+  `nokk-dock`. Nessun ramo si fonde con un altro, in nessuna direzione.
+- Il dock è un programma desktop a sé: non tocca `web/`, non tocca `app.py`, non
+  viene pubblicato dall'hosting e vive solo su `nokk-dock`.
 
 ## Segreti e configurazione
 
