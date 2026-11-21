@@ -46,6 +46,16 @@ WIDGET_LABELS = {
     "capture": "Schermo",
     "settings": "Impostazioni",
 }
+
+# Icona della barra a schede, una per widget.
+WIDGET_ICONS = {
+    "music": "music",
+    "weather": "sun",
+    "clock": "clock",
+    "nokk": "spark",
+    "capture": "camera",
+    "settings": "gear",
+}
 MODES = ("", "codice", "studio", "analista")
 API_KEY_PATTERN = re.compile(r"^nokk_[A-Za-z0-9_-]{32}$")
 URL_PATTERN = re.compile(r"^https?://[^\s/]+(?::\d+)?(?:/[^\s]*)?$")

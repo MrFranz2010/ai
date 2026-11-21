@@ -26,10 +26,11 @@ from .capture import CaptureError, capture_screen, cleanup, load_image
 from .client import NokkClient
 from .hotkey import backend_name, create_hotkey, shortcut_hint
 from .ipc import DockServer, send as ipc_send
-from .media import INSTALL_HINT, MusicState, create_controller
+from .media import INSTALL_HINT, MusicState, create_controller, format_seconds
 from .panels import AskPanel, SettingsPanel
 from .settings import (
     POSITION_LABELS,
+    WIDGET_ICONS,
     WIDGET_LABELS,
     config_path,
     save_config,
@@ -113,6 +114,7 @@ class DockApp:
     _art_pending = ""
     _art_variants = None
     active_tab = "music"
+    _pinned = False
 
     def __init__(self, config, config_file=None):
         self.config = validate_config(config)
@@ -183,6 +185,11 @@ class DockApp:
         self.canvas.bind("<Button-3>", self._on_context_menu)
         self.canvas.bind("<Enter>", self._on_enter)
         self.canvas.bind("<Leave>", self._on_leave)
+        # come Nusa: rotella sulle schede e Esc per richiudere
+        self.canvas.bind("<MouseWheel>", self._on_notch_wheel)
+        self.canvas.bind("<Button-4>", self._on_notch_wheel)
+        self.canvas.bind("<Button-5>", self._on_notch_wheel)
+        self.root.bind("<Escape>", self._on_escape)
 
     def _apply_config(self, config, persist=True):
         """Applica una configurazione (tema, widget, servizi, geometria)."""
@@ -429,12 +436,14 @@ class DockApp:
         self._cancel(self._expand_job)
         self._expand_job = None
         self._hide_hover_label()
+        if self._pinned:
+            return
         delay = int(self.config["dock"]["collapse_delay_ms"])
         self._collapse_job = self.root.after(delay, self._maybe_collapse)
 
     def _maybe_collapse(self):
         self._collapse_job = None
-        if not self._alive or self._panels:
+        if not self._alive or self._panels or self._pinned:
             return
         if self._pointer_inside():
             self._collapse_job = self.root.after(220, self._maybe_collapse)
@@ -482,11 +491,55 @@ class DockApp:
             return
         if not self.layout:
             return
-        if self.layout.style == "notch" and self.expand < 0.85:
+        if self.layout.style == "notch":
+            # un clic sulla pillola la apre e la tiene aperta, un altro la chiude
+            if self.expand < 0.85:
+                self._pinned = True
+                self._hover_locked = True
+                self._animate(1.0)
+            elif self._pinned:
+                self._pinned = False
+                self._hover_locked = False
+                self._animate(0.0)
             return
         tile = self.layout.tile_at(event.x, event.y)
         if tile is not None:
             self._activate(tile.key)
+
+    def _on_escape(self, _event=None):
+        self._pinned = False
+        self._close_notch()
+
+    def _close_notch(self):
+        """Richiude il pannello senza aspettare che il mouse esca."""
+        self._cancel(self._collapse_job)
+        self._collapse_job = None
+        self._hover_locked = False
+        self._hovered = None
+        self._hide_hover_label()
+        self._animate(0.0)
+
+    def _on_notch_wheel(self, event):
+        """Rotella sul notch aperto: cambia scheda, come la barra pagine di Nusa."""
+        if not self.layout or self.layout.style != "notch" or self.expand < 0.85:
+            return None
+        number = getattr(event, "num", None)
+        delta = getattr(event, "delta", 0) or 0
+        if number == 4 or delta > 0:
+            self._cycle_tab(-1)
+        elif number == 5 or delta < 0:
+            self._cycle_tab(1)
+        return "break"
+
+    def _cycle_tab(self, step):
+        keys = [key for key in self.config["widgets"] if key in WIDGET_LABELS]
+        if len(keys) < 2:
+            return
+        try:
+            index = keys.index(self.active_tab)
+        except ValueError:
+            index = 0
+        self.set_active(keys[(index + int(step)) % len(keys)])
 
     def _on_context_menu(self, event):
         menu = tk.Menu(
@@ -931,23 +984,38 @@ class DockApp:
                 painter(tile, area, expanded)
 
     def _draw_notch_tabs(self, plan):
-        """Fila di schede in alto: una per widget, quella attiva evidenziata."""
+        """Barra pagine come Nusa: icona, etichetta e scheda attiva evidenziata."""
         theme = self.theme
         canvas = self.canvas
+        scale = theme.scale
         for tab in plan.tabs:
             active = tab.key == plan.active
             round_rect(
                 canvas, tab.x, tab.y, tab.right, tab.bottom,
                 min(tab.height / 2, max(6.0, theme.radius * 0.5)),
-                fill=theme.panel_hover if active else theme.panel, outline="",
+                fill=mix(theme.panel, theme.text, 0.13) if active else theme.panel,
+                outline="",
             )
-            self._text(
-                tab.x + tab.width / 2, tab.y + tab.height / 2,
-                WIDGET_LABELS.get(tab.key, tab.key).upper(), 7.6,
-                "bold" if active else "normal",
-                fill=theme.text if active else theme.muted,
-                anchor="center",
+            center = tab.y + tab.height / 2
+            color = theme.text if active else theme.muted
+            icon_size = 12 * scale
+            icons.draw(
+                canvas, WIDGET_ICONS.get(tab.key, "dot"),
+                tab.x + 14 * scale, center, icon_size, color, ("icon",),
             )
+            label_width = tab.width - 28 * scale
+            if label_width > 12:
+                self._text(
+                    tab.x + 24 * scale, center,
+                    WIDGET_LABELS.get(tab.key, tab.key).upper(), 7.6,
+                    "bold" if active else "normal", fill=color, width=label_width,
+                )
+            if active and tab.width > 40 * scale:
+                canvas.create_line(
+                    tab.x + 12 * scale, tab.bottom - 3 * scale,
+                    tab.right - 12 * scale, tab.bottom - 3 * scale,
+                    fill=theme.accent, width=2, capstyle="round",
+                )
             self._register_hit(
                 tab.x, tab.y, tab.right, tab.bottom,
                 lambda key=tab.key: self.set_active(key),
@@ -962,29 +1030,62 @@ class DockApp:
         self._redraw()
 
     def _draw_notch(self, plan):
-        """Pillola a riposo: stato di NOKK, ora e indicatore musicale."""
+        """Pillola a riposo: se qualcosa suona mostra il brano, altrimenti l'ora."""
         theme = self.theme
         canvas = self.canvas
         scale = theme.scale
         width, height = plan.width, plan.height
-        center_x, center_y = width / 2, height / 2
-        color = theme.accent if self.connected else theme.muted
-        radius = max(2.0, 2.6 * scale)
-        dot_x = max(radius + 8 * scale, 16 * scale)
+        center_y = height / 2
+        state = self.music
+        live = bool(state.installed and state.active and state.title)
+        dot_radius = max(2.0, 2.6 * scale)
+        dot_x = 13 * scale
         canvas.create_oval(
-            dot_x - radius, center_y - radius, dot_x + radius, center_y + radius,
-            fill=color, outline="",
+            dot_x - dot_radius, center_y - dot_radius,
+            dot_x + dot_radius, center_y + dot_radius,
+            fill=theme.accent if self.connected else theme.muted, outline="",
         )
+        if live:
+            cursor = dot_x + 9 * scale
+            cover = self._cover_for(0.0)
+            if cover is not None:
+                canvas.create_image(cursor + cover.width() / 2, center_y, image=cover)
+                cursor += cover.width() + 8 * scale
+            remaining = ""
+            if state.length_seconds > 0:
+                left = state.length_seconds - state.position_seconds
+                if left >= 1:
+                    remaining = "-" + format_seconds(left)
+            self._mini_button(
+                width - 40 * scale, center_y, 13 * scale,
+                "pause" if state.playing else "play", self.toggle_music,
+                color=theme.text,
+            )
+            if remaining:
+                self._text(width - 10 * scale, center_y, remaining, 7.8,
+                           fill=theme.muted, anchor="e")
+            available = width - cursor - (58 if remaining else 46) * scale
+            if available > 20:
+                self._text(cursor, center_y - 6 * scale, state.label, 9.0, "bold",
+                           fill=theme.text, width=available)
+                if state.subtitle:
+                    self._text(cursor, center_y + 7 * scale, state.subtitle, 7.4,
+                               fill=theme.muted, width=available)
+            return
         if width > 90 * scale:
             self._text(
-                center_x, center_y, datetime.now().strftime("%H:%M"), 11.0,
+                width / 2, center_y, datetime.now().strftime("%H:%M"), 12.0,
                 "bold", fill=theme.text, anchor="center",
             )
-        if self.music.active and width > 60 * scale:
-            icons.draw(
-                canvas, "pause" if self.music.playing else "play",
-                width - dot_x, center_y, 10.5 * scale, theme.muted, ("icon",),
+        if state.installed:
+            self._mini_button(
+                width - 24 * scale, center_y, 12 * scale,
+                "pause" if state.playing else "play", self.toggle_music,
+                color=theme.muted,
             )
+        else:
+            self._text(width - 12 * scale, center_y, "NOKK", 7.6,
+                       fill=theme.muted, anchor="e")
 
     def _draw_music(self, tile, area, expanded):
         theme = self.theme
@@ -1039,10 +1140,13 @@ class DockApp:
                 progress_x = x + max(2.0, width * state.progress)
                 canvas.create_line(x, bar_y, progress_x, bar_y,
                                    fill=theme.accent, width=3, capstyle="round")
-                timecode = state.timecode
-                if timecode:
-                    self._text(tile.right - 12, bar_y - 9 * scale, timecode, 7.6,
-                               fill=theme.muted, anchor="e")
+                # tempi ai due estremi, come il player di Nusa
+                self._text(x, bar_y - 9 * scale,
+                           format_seconds(state.position_seconds), 7.6,
+                           fill=theme.muted)
+                self._text(tile.right - 12, bar_y - 9 * scale,
+                           format_seconds(state.length_seconds), 7.6,
+                           fill=theme.muted, anchor="e")
         else:
             icon_center = (x + width / 2, y + 30 * scale)
             if cover is not None:
@@ -1072,8 +1176,11 @@ class DockApp:
         )
         self._register_hit(cx - radius, cy - radius, cx + radius, cy + radius, self.toggle_music)
 
-    def _mini_button(self, cx, cy, size, icon_name, command):
-        icons.draw(self.canvas, icon_name, cx, cy, size * 0.9, self.theme.muted, ("icon",))
+    def _mini_button(self, cx, cy, size, icon_name, command, color=None):
+        icons.draw(
+            self.canvas, icon_name, cx, cy, size * 0.9,
+            color or self.theme.muted, ("icon",),
+        )
         radius = size / 2
         self._register_hit(cx - radius, cy - radius, cx + radius, cy + radius, command)
 

@@ -17,13 +17,18 @@ un'istanza su Render/Fly.
 - **Forma «notch»** (predefinita): una pillola compatta **agganciata al bordo
   alto** dello schermo, con spigoli alti vivi e bassi arrotondati, che si
   srotola verso il basso nel pannello completo al passaggio del mouse. Il
-  pannello aperto è **a schede**, come Nusa: in alto una fila di tab (una per
-  widget) e sotto una sola scheda larga quanto tutto il notch, così testo e
-  copertina non vengono mai compressi né tagliati. Chi preferisce la barra
-  classica sceglie `dock.style = "dock"`.
+  pannello aperto è **a schede**, come Nusa: in alto una barra pagine con icona
+  ed etichetta per widget e sotto una sola scheda larga quanto tutto il notch,
+  così testo e copertina non vengono mai compressi né tagliati. A riposo, se
+  qualcosa sta suonando, la pillola mostra copertina, titolo, artista e tempo
+  mancante; altrimenti l'ora. Chi preferisce la barra classica sceglie
+  `dock.style = "dock"`.
 - **Espansione al passaggio del mouse**: molla sotto-smorzata come Nusa — parte
   decisa, supera la misura di un 2% e si posa in ~0,3 s — con ritardo di
   apertura e chiusura regolabili.
+- **Pagine come Nusa**: clic sulla pillola per aprirla e tenerla ferma (un altro
+  clic la richiude), rotella del mouse sopra il pannello aperto per passare da
+  una scheda all'altra, `Esc` per richiudere subito.
 - **Ingrandimento magnetico**: i widget vicini al cursore si allargano e il
   contenuto cresce con loro; l'intensità è regolabile (`dock.magnify`).
 - **Etichette al passaggio del mouse**: una pillola compatta spiega ogni widget

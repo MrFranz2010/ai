@@ -360,6 +360,10 @@ class DrawingTests(unittest.TestCase):
             ]
             self.assertTrue(any(":" in text for text in texts))
             self.assertGreater(len(instance.canvas.items), 3)
+            # a riposo con un brano in corso: titolo, artista e tempo mancante
+            self.assertIn("Brano", texts)
+            self.assertTrue(any("Artista" in text for text in texts))
+            self.assertTrue(any(text.startswith("-") for text in texts))
 
     def test_redraw_notch_with_tabs(self):
         with stub_tkinter():
@@ -377,7 +381,10 @@ class DrawingTests(unittest.TestCase):
                 if item["kind"] == "text"
             ]
             for key in instance.config["widgets"]:
-                self.assertIn(WIDGET_LABELS[key].upper(), texts)
+                label = WIDGET_LABELS[key].upper()
+                self.assertTrue(
+                    any(text.startswith(label[:6]) for text in texts), label
+                )
             # la scheda aperta mostra il brano per intero, non tagliato
             self.assertIn("Brano", texts)
             self.assertTrue(any(text.startswith("Artista") for text in texts))
@@ -405,6 +412,58 @@ class DrawingTests(unittest.TestCase):
                 if item["kind"] == "text"
             ]
             self.assertTrue(any(":" in text for text in texts))
+
+    def test_notch_wheel_cycles_pages(self):
+        with stub_tkinter():
+            instance = self.build_app()
+            instance.expand = 1.0
+            instance._apply_geometry(1.0)
+            instance._redraw()
+            widgets = instance.config["widgets"]
+
+            down = types.SimpleNamespace(num=None, delta=-120)
+            self.assertEqual(instance._on_notch_wheel(down), "break")
+            self.assertEqual(instance.active_tab, widgets[1])
+            self.assertEqual(instance.layout.tiles[0].key, widgets[1])
+
+            up = types.SimpleNamespace(num=4, delta=0)
+            instance._on_notch_wheel(up)
+            self.assertEqual(instance.active_tab, widgets[0])
+            # la rotella avanti dall'ultima scheda torna alla prima
+            for _ in range(len(widgets) - 1):
+                instance._on_notch_wheel(down)
+            self.assertEqual(instance.active_tab, widgets[-1])
+            instance._on_notch_wheel(down)
+            self.assertEqual(instance.active_tab, widgets[0])
+
+            # a notch chiuso la rotella non cambia nulla
+            instance.expand = 0.0
+            instance._apply_geometry(0.0)
+            before = instance.active_tab
+            self.assertIsNone(instance._on_notch_wheel(down))
+            self.assertEqual(instance.active_tab, before)
+
+    def test_click_pins_and_unpins_the_notch(self):
+        with stub_tkinter():
+            instance = self.build_app()
+            instance.expand = 0.0
+            instance._apply_geometry(0.0)
+            instance._animate = lambda target: setattr(instance, "target", target)
+
+            click = types.SimpleNamespace(x=instance.layout.width // 2, y=10)
+            instance._on_click(click)
+            self.assertTrue(instance._pinned)
+            self.assertEqual(instance.target, 1.0)
+
+            instance.expand = 1.0
+            instance._apply_geometry(1.0)
+            instance._redraw()
+            empty = types.SimpleNamespace(
+                x=int(instance.layout.width // 2), y=int(instance.layout.height - 2)
+            )
+            instance._on_click(empty)
+            self.assertFalse(instance._pinned)
+            self.assertEqual(instance.target, 0.0)
 
     def test_settings_wheel_scrolls_on_windows_and_x11(self):
         with stub_tkinter():
