@@ -76,7 +76,9 @@ class MagnificationTests(unittest.TestCase):
 
 
 class LayoutMagnificationTests(unittest.TestCase):
-    widgets = ["music", "weather", "clock", "nokk", "capture", "settings"]
+    widgets = [
+        "music", "weather", "clock", "clipboard", "nokk", "capture", "settings",
+    ]
 
     def layout(self, **kwargs):
         options = dict(
@@ -137,7 +139,7 @@ class LayoutMagnificationTests(unittest.TestCase):
 
 class NotchLayoutTests(unittest.TestCase):
     widgets = LayoutMagnificationTests.widgets
-    pages = ["music", "weather", "clock", "nokk"]
+    pages = ["music", "weather", "clock", "clipboard", "nokk"]
 
     def build(self, expand, **kwargs):
         options = dict(

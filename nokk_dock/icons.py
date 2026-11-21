@@ -192,6 +192,23 @@ def camera(canvas, cx, cy, size, color, tag, bg=None):
     )
 
 
+def clipboard(canvas, cx, cy, size, color, tag, bg=None):
+    width = _stroke(size)
+    canvas.create_rectangle(
+        cx - size * 0.3, cy - size * 0.32, cx + size * 0.3, cy + size * 0.38,
+        outline=color, width=width, tags=tag,
+    )
+    canvas.create_rectangle(
+        cx - size * 0.13, cy - size * 0.42, cx + size * 0.13, cy - size * 0.26,
+        outline=color, width=width, tags=tag,
+    )
+    for offset in (-0.02, 0.16):
+        _line(canvas, [
+            cx - size * 0.16, cy + size * offset,
+            cx + size * 0.16, cy + size * offset,
+        ], color, width, tag)
+
+
 def gear(canvas, cx, cy, size, color, tag, bg=None):
     width = _stroke(size)
     canvas.create_oval(
@@ -277,6 +294,7 @@ ICONS = {
     "fog": fog,
     "spark": spark,
     "camera": camera,
+    "clipboard": clipboard,
     "gear": gear,
     "chevron_left": chevron_left,
     "chevron_right": chevron_right,

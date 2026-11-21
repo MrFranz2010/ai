@@ -2,7 +2,8 @@
 
 Barra da scrivania per NOKK: una piccola dock ancorata al bordo dello schermo,
 sempre sopra le altre finestre, che si espande al passaggio del mouse e mostra
-musica, meteo, ora e un pulsante per chiedere a NOKK cosa c'è sullo schermo.
+musica, meteo, ora, appunti e batteria, con un pulsante per chiedere a NOKK
+cosa c'è sullo schermo.
 
 Il dock è un programma della variante **desktop**: vive su `main`, non viene
 servito dall'hosting. Non modifica il backend: usa l'API HTTP pubblica
@@ -19,8 +20,8 @@ un'istanza su Render/Fly.
   srotola verso il basso nel pannello completo al passaggio del mouse. Il
   pannello aperto è **a schede**, come Nusa: in alto una barra pagine con icona
   ed etichetta e sotto una sola scheda larga quanto tutto il notch, così testo
-  e copertina non vengono mai compressi né tagliati. Le schede sono quattro —
-  musica, meteo, ora e **NOKK** — e quella dell'assistente tiene insieme lo
+  e copertina non vengono mai compressi né tagliati. Le schede sono cinque —
+  musica, meteo, ora, appunti e **NOKK** — e quella dell'assistente tiene insieme lo
   stato della connessione e «Cattura schermo»; le impostazioni non hanno una
   scheda, sono il pulsante a ingranaggio in fondo alla barra. A riposo, se
   qualcosa sta suonando, la pillola mostra copertina, titolo, artista e tempo
@@ -33,6 +34,11 @@ un'istanza su Render/Fly.
   il pannello aperto per passare da una scheda all'altra, `Esc` per richiudere
   subito. Uscendo con il mouse il pannello torna sempre compatto (c'è anche un
   controllo ogni secondo che lo riporta giù se il mouse è fuori).
+- **Appunti**: la scheda ricorda gli ultimi testi copiati (fino a 8), mostra
+  l'anteprima su una riga e con `‹` `›` scorre la cronologia; «Copia» rimette
+  negli appunti il testo scelto, con una conferma a comparsa.
+- **Batteria**: percentuale e stato di ricarica nella scheda Ora e nella
+  pillola a riposo; su un desktop senza batteria scrive «Rete elettrica».
 - **System tray**: icona accanto all'orologio per ridurre e riportare il dock;
   un clic alterna la visibilità, il menu offre le stesse azioni della dock.
   Ridotto, il dock continua a rispondere alla scorciatoia e ai comandi IPC.

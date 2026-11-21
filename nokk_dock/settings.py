@@ -23,7 +23,7 @@ POSITION_LABELS = {
     "left": "Sinistra",
     "right": "Destra",
 }
-WIDGETS = ("music", "weather", "clock", "nokk", "capture", "settings")
+WIDGETS = ("music", "weather", "clock", "clipboard", "nokk", "capture", "settings")
 STYLES = ("notch", "dock")
 STYLE_LABELS = {"notch": "Notch", "dock": "Dock"}
 
@@ -42,6 +42,7 @@ WIDGET_LABELS = {
     "music": "Musica",
     "weather": "Meteo",
     "clock": "Ora",
+    "clipboard": "Appunti",
     "nokk": "NOKK",
     "capture": "Schermo",
     "settings": "Impostazioni",
@@ -52,6 +53,7 @@ WIDGET_ICONS = {
     "music": "music",
     "weather": "sun",
     "clock": "clock",
+    "clipboard": "clipboard",
     "nokk": "spark",
     "capture": "camera",
     "settings": "gear",
@@ -94,7 +96,7 @@ def config_path(
 
 def default_config() -> dict:
     return {
-        "version": 1,
+        "version": 2,
         "nokk": {
             "base_url": "http://127.0.0.1:8000",
             "api_key": "",
@@ -252,6 +254,11 @@ def validate_config(saved) -> dict:
         if widget in clean_widgets:
             continue
         clean_widgets.append(widget)
+    # I file della versione 1 non conoscono la scheda Appunti: la si aggiunge
+    # dopo l'ora, lasciando intatto l'ordine scelto per gli altri widget.
+    if int(saved.get("version") or 1) < 2 and "clipboard" not in clean_widgets:
+        index = clean_widgets.index("clock") + 1 if "clock" in clean_widgets else len(clean_widgets)
+        clean_widgets.insert(index, "clipboard")
 
     weather = saved.get("weather") or {}
     if not isinstance(weather, dict):
@@ -281,7 +288,7 @@ def validate_config(saved) -> dict:
         raise ValueError("La sezione «ask» non è valida.")
 
     clean = {
-        "version": 1,
+        "version": 2,
         "nokk": {
             "base_url": base_url,
             "api_key": api_key,

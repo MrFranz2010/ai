@@ -18,6 +18,7 @@ TILE_SPANS = {
     "music": (168, 300),
     "weather": (118, 214),
     "clock": (112, 172),
+    "clipboard": (104, 220),
     "nokk": (100, 168),
     "capture": (62, 152),
     "settings": (62, 62),

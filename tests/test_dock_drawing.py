@@ -70,6 +70,19 @@ class FakeRoot:
         self.screen = screen
         self.geometry_value = ""
         self.attributes = {}
+        self.clipboard = ""
+
+    def clipboard_get(self):
+        return self.clipboard
+
+    def clipboard_clear(self):
+        self.clipboard = ""
+
+    def clipboard_append(self, text):
+        self.clipboard += text
+
+    def update_idletasks(self):
+        pass
 
     def winfo_screenwidth(self):
         return self.screen[0]
@@ -456,6 +469,52 @@ class DrawingTests(unittest.TestCase):
             capture_hit["command"]()
             self.assertEqual(opened, [True, "capture"])
 
+    def test_clipboard_page_previews_and_copies(self):
+        with stub_tkinter():
+            instance = self.build_app()
+            instance.expand = 1.0
+            instance._apply_geometry(1.0)
+            instance.clipboard_history = ("secondo testo", "primo testo")
+            instance.clipboard_index = 0
+            instance.set_active("clipboard")
+            self.assertEqual(instance.layout.tiles[0].key, "clipboard")
+            texts = [
+                str(item["kwargs"].get("text", ""))
+                for item in instance.canvas.items
+                if item["kind"] == "text"
+            ]
+            self.assertIn("Appunti", texts)
+            self.assertIn("1 di 2", texts)
+            self.assertTrue(any("secondo testo" in text for text in texts))
+
+            messages = []
+            instance.toast = lambda message, seconds=5: messages.append(message)
+            tile = instance.layout.tiles[0]
+            hit = instance._hit_at(tile.x + 20, tile.y + tile.height / 2)
+            self.assertIsNotNone(hit)
+            hit["command"]()
+            self.assertEqual(instance.root.clipboard, "secondo testo")
+            self.assertEqual(messages, ["Copiato negli appunti."])
+
+            instance._step_clipboard(-1)
+            self.assertEqual(instance._clipboard_value(), "primo testo")
+
+    def test_clock_shows_the_battery(self):
+        with stub_tkinter():
+            from nokk_dock.system import BatteryState
+
+            instance = self.build_app()
+            instance.expand = 1.0
+            instance._apply_geometry(1.0)
+            instance._battery = BatteryState(percent=82.0, plugged=False)
+            instance.set_active("clock")
+            texts = [
+                str(item["kwargs"].get("text", ""))
+                for item in instance.canvas.items
+                if item["kind"] == "text"
+            ]
+            self.assertIn("82% · batteria", texts)
+
     def test_notch_wheel_cycles_pages(self):
         with stub_tkinter():
             instance = self.build_app()
@@ -463,7 +522,9 @@ class DrawingTests(unittest.TestCase):
             instance._apply_geometry(1.0)
             instance._redraw()
             pages = [tab.key for tab in instance.layout.tabs]
-            self.assertEqual(pages, ["music", "weather", "clock", "nokk"])
+            self.assertEqual(
+                pages, ["music", "weather", "clock", "clipboard", "nokk"]
+            )
 
             down = types.SimpleNamespace(num=None, delta=-120)
             self.assertEqual(instance._on_notch_wheel(down), "break")

@@ -38,6 +38,7 @@ from .settings import (
     save_config,
     validate_config,
 )
+from .system import CLIPBOARD_HISTORY, BatteryState, clipboard_preview, read_battery
 from .theme import Theme, build_theme, mix, pick_font
 from .tray import create_tray
 from .weather import WeatherNow, WeatherService
@@ -125,6 +126,11 @@ class DockApp:
     _hidden = False
     _hide_job = None
     active_tab = "music"
+    _battery = BatteryState()
+    clipboard_history: tuple = ()
+    clipboard_index = 0
+    _battery_at = 0.0
+    _clipboard_at = 0.0
 
     def __init__(self, config, config_file=None):
         self.config = validate_config(config)
@@ -178,6 +184,11 @@ class DockApp:
         self._tray = None
         self._hidden = False
         self._hide_job = None
+        self._battery = BatteryState()
+        self._battery_at = 0.0
+        self._clipboard_at = 0.0
+        self.clipboard_history = ()
+        self.clipboard_index = 0
 
         self.font_family = pick_font(tkfont.families(self.root))
         self._bind_events()
@@ -401,6 +412,7 @@ class DockApp:
     def _schedule_clock(self):
         if not self._alive:
             return
+        self._refresh_system()
         self._redraw()
         self._watchdog()
         self._clock_job = self.root.after(1000, self._schedule_clock)
@@ -742,6 +754,72 @@ class DockApp:
         if not self._panels:
             self._hover_locked = self._pointer_inside()
 
+    # -------------------------------------------------------------- system
+    def _refresh_system(self):
+        """Aggiorna batteria (ogni 20 s) e cronologia degli appunti (ogni 1 s)."""
+        now = time.monotonic()
+        if now - self._battery_at >= 20.0:
+            self._battery_at = now
+            try:
+                state = read_battery()
+            except Exception:  # noqa: BLE001 - lo stato non deve fermare il dock
+                state = BatteryState()
+            self._battery = state
+        if now - self._clipboard_at >= 1.0:
+            self._clipboard_at = now
+            self._remember_clipboard(self._read_clipboard())
+
+    def _read_clipboard(self):
+        try:
+            value = self.root.clipboard_get()
+        except tk.TclError:
+            return ""
+        return value if isinstance(value, str) else ""
+
+    def _remember_clipboard(self, text):
+        """Tiene gli ultimi testi copiati, dal più recente al più vecchio."""
+        text = (text or "").strip("\r\n")
+        if not text.strip():
+            return
+        history = list(self.clipboard_history)
+        if history and history[0] == text:
+            return
+        if text in history:
+            history.remove(text)
+        history.insert(0, text)
+        del history[CLIPBOARD_HISTORY:]
+        self.clipboard_history = tuple(history)
+        self.clipboard_index = 0
+
+    def _clipboard_value(self):
+        history = self.clipboard_history
+        if not history:
+            return ""
+        index = max(0, min(len(history) - 1, int(self.clipboard_index)))
+        return history[index]
+
+    def _step_clipboard(self, step):
+        if len(self.clipboard_history) < 2:
+            return
+        index = min(self.clipboard_index, len(self.clipboard_history) - 1)
+        self.clipboard_index = (index + int(step)) % len(self.clipboard_history)
+        self._redraw()
+
+    def copy_clipboard(self):
+        """Rimette negli appunti il testo mostrato nella scheda Appunti."""
+        text = self._clipboard_value()
+        if not text:
+            self.toast("Nessun testo negli appunti.")
+            return
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.root.update_idletasks()
+        except tk.TclError:
+            self.toast("Impossibile scrivere negli appunti.")
+            return
+        self.toast("Copiato negli appunti.")
+
     # --------------------------------------------------------------- toast
     def toast(self, message, seconds=5):
         if not message:
@@ -917,6 +995,9 @@ class DockApp:
             return f"{text} · {self.music.title}"
         if tile.key == "weather" and self.weather.city and self.weather.updated_at:
             return f"{text} · {self.weather.city}"
+        if tile.key == "clipboard":
+            value = clipboard_preview(self._clipboard_value(), 40)
+            return f"Appunti · {value}" if value else "Appunti · vuoto"
         if tile.key == "nokk":
             return "Chiedi a NOKK"
         if tile.key == "capture":
@@ -1179,7 +1260,11 @@ class DockApp:
                 color=theme.muted,
             )
         else:
-            self._text(width - 12 * scale, center_y, "NOKK", 7.6,
+            battery = self._battery
+            label = (
+                f"{int(round(battery.percent))}%" if battery.present else "NOKK"
+            )
+            self._text(width - 12 * scale, center_y, label, 7.6,
                        fill=theme.muted, anchor="e")
 
     def _draw_music(self, tile, area, expanded):
@@ -1335,12 +1420,19 @@ class DockApp:
                 self._text(x + 2, center_y + 18 * scale,
                            now.strftime("%a %d %b"), 8.4 * growth, fill=theme.muted,
                            width=width - 6)
+                if self._battery.present:
+                    self._text(x + 2, center_y + 32 * scale, self._battery.label,
+                               7.4 * growth, fill=theme.muted, width=width - 6)
         else:
             self._text(x + width / 2, y + height / 2 - 10 * scale, time_text,
                        13.0 * growth, "bold", fill=theme.text, anchor="center")
             if expanded > 0.7:
                 self._text(x + width / 2, y + height / 2 + 12 * scale,
                            now.strftime("%d/%m"), 8.0 * growth, fill=theme.muted, anchor="n")
+                if self._battery.present:
+                    self._text(x + width / 2, y + height / 2 + 26 * scale,
+                               self._battery.label, 7.2 * growth,
+                               fill=theme.muted, anchor="n")
 
     def _draw_nokk(self, tile, area, expanded):
         if getattr(self.layout, "style", "dock") == "notch":
@@ -1375,6 +1467,85 @@ class DockApp:
                        24 * scale * growth, color, ("icon",), theme.panel)
             self._text(x + width / 2, y + 52 * scale, "NOKK", 9.5 * growth, "bold",
                        fill=theme.text, anchor="n")
+
+    def _draw_clipboard(self, tile, area, expanded):
+        """Scheda Appunti: testo copiato, cronologia con ‹ › e pulsante copia."""
+        theme = self.theme
+        canvas = self.canvas
+        scale = theme.scale
+        x, y, width, height = area
+        if getattr(self.layout, "style", "dock") != "notch":
+            # Nella barra classica resta un widget come gli altri.
+            growth = self._tile_growth(tile)
+            horizontal = self.layout.horizontal if self.layout else True
+            if horizontal:
+                center_y = y + height / 2
+                icons.draw(canvas, "clipboard", x + 10 * scale, center_y,
+                           20 * scale * growth, theme.text, ("icon",), theme.panel)
+                text_x = x + 26 * scale
+                self._text(text_x, center_y, "Appunti", 10 * growth, "bold",
+                           fill=theme.text, width=tile.right - 12 - text_x)
+            else:
+                icons.draw(canvas, "clipboard", x + width / 2, y + 30 * scale,
+                           20 * scale * growth, theme.text, ("icon",), theme.panel)
+                self._text(x + width / 2, y + 46 * scale, "Appunti", 8.4,
+                           fill=theme.muted, anchor="n")
+            return
+        center_y = y + height / 2
+        history = self.clipboard_history
+        text = self._clipboard_value()
+        preview = clipboard_preview(text, 400)
+        split = x + min(width * 0.34, 210 * scale)
+        self._register_hit(x, y, tile.right, tile.bottom, self.copy_clipboard)
+        # stato a sinistra
+        icons.draw(canvas, "clipboard", x + 12 * scale, center_y, 20 * scale,
+                   theme.text, ("icon",), theme.panel)
+        text_x = x + 28 * scale
+        available = max(10.0, split - 10 - text_x)
+        self._text(text_x, center_y - 8 * scale, "Appunti", 10.5, "bold",
+                   fill=theme.text, width=available)
+        if len(history) > 1:
+            index = max(0, min(len(history) - 1, self.clipboard_index))
+            detail = f"{index + 1} di {len(history)}"
+        else:
+            detail = "Vuoto" if not text else "Ultimo copiato"
+        self._text(text_x, center_y + 8 * scale, detail, 8.0, fill=theme.muted,
+                   width=available)
+        # a destra il pulsante copia, con le frecce della cronologia accanto
+        right = tile.right - 2
+        copy_left = right - 62 * scale
+        arrow = 22 * scale
+        next_left = copy_left - 8 * scale - arrow
+        prev_left = next_left - 3 * scale - arrow
+        preview_right = (
+            prev_left - 8 * scale if len(history) > 1 else copy_left - 8 * scale
+        )
+        preview_x = split + 4 * scale
+        if preview_right - preview_x > 30 * scale:
+            if preview:
+                self._text(preview_x, center_y, preview, 8.6, fill=theme.text,
+                           width=preview_right - preview_x)
+            else:
+                self._text(preview_x, center_y, "Copia un testo: lo ritrovi qui",
+                           8.6, fill=theme.muted, width=preview_right - preview_x)
+        if len(history) > 1:
+            for left, step, icon_name in (
+                (prev_left, -1, "chevron_left"),
+                (next_left, 1, "chevron_right"),
+            ):
+                icons.draw(canvas, icon_name, left + arrow / 2, center_y,
+                           12 * scale, theme.muted, ("icon",))
+                self._register_hit(
+                    left, center_y - height * 0.3, left + arrow,
+                    center_y + height * 0.3,
+                    lambda value=step: self._step_clipboard(value),
+                )
+        round_rect(canvas, copy_left, center_y - height * 0.28, right,
+                   center_y + height * 0.28,
+                   min(10 * scale, height * 0.28),
+                   fill=theme.panel_soft, outline="")
+        self._text((copy_left + right) / 2, center_y, "Copia", 8.4, "bold",
+                   fill=theme.text, anchor="center", width=62 * scale - 8)
 
     def _draw_assistant(self, tile, area, expanded):
         """Scheda unica dell'assistente: stato di NOKK e cattura schermo."""
