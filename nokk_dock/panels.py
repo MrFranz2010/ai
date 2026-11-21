@@ -8,9 +8,11 @@ domande successive.
 
 from __future__ import annotations
 
+import base64
 import copy
+import io
+import math
 import queue
-import sys
 import threading
 import tkinter as tk
 
@@ -28,8 +30,6 @@ from .settings import (
 )
 from .theme import PRESET_LABELS, PRESETS, mix
 
-WINDOWS = sys.platform.startswith("win")
-
 ACCENT_SWATCHES = ("#9b8cff", "#4f9dff", "#4fd1a5", "#f0b429", "#ff7a90", "#b4643a")
 
 
@@ -40,14 +40,10 @@ class _Panel:
         self.app = app
         self.theme = app.theme
         self.closed = False
-        self.frameless = not WINDOWS
         self.win = tk.Toplevel(app.root)
-        if self.frameless:
-            self.win.overrideredirect(True)
-        else:
-            # Su Windows una finestra senza cornice non riceve il focus da
-            # tastiera in modo affidabile: per i pannelli si usa quella nativa.
-            self.win.title(title)
+        # Anche su Windows i pannelli sono senza cornice: la barra di sistema
+        # chiara stona con il tema scuro e il titolo è già nell'intestazione.
+        self.win.overrideredirect(True)
         try:
             self.win.wm_attributes("-topmost", True)
         except tk.TclError:
@@ -83,13 +79,19 @@ class _Panel:
             font=self.theme.font(10, "bold"),
         )
         close.pack(side="right")
-        if self.frameless:
-            self._bind_drag(header)
+        self._bind_drag(header)
         self.win.bind("<Escape>", lambda _event: self.close())
         self.win.bind("<Button-1>", self._focus, add="+")
         app.panel_opened()
 
     def _focus(self, _event=None):
+        """Attiva il pannello senza togliere il focus al campo su cui si clicca."""
+        try:
+            widget = self.win.focus_get()
+            if widget is not None and widget.winfo_toplevel() is self.win:
+                return
+        except (tk.TclError, KeyError):
+            pass
         try:
             self.win.focus_force()
         except tk.TclError:
@@ -142,6 +144,9 @@ class _Panel:
         self.win.deiconify()
         self.win.lift()
         self._focus()
+        # Su Windows una finestra senza cornice appena mostrata non sempre
+        # riceve subito il focus: un secondo tentativo dopo il map lo aggancia.
+        self.win.after(60, self._focus)
 
     def close(self):
         if self.closed:
@@ -335,7 +340,8 @@ class AskPanel(_Panel):
         else:
             tk.Label(
                 holder,
-                text="Screenshot pronto, anteprima non disponibile per questo formato.",
+                text="Screenshot pronto: l'anteprima non è disponibile, "
+                     "l'immagine viene comunque allegata.",
                 bg=theme.panel_soft,
                 fg=theme.muted,
                 font=theme.font(8.6),
@@ -343,20 +349,55 @@ class AskPanel(_Panel):
                 pady=9,
             ).pack(fill="x")
 
+    def _preview_limits(self):
+        """Spazio massimo dell'anteprima, così il resto del pannello resta visibile."""
+        width = max(96, self.width - 48)
+        height = max(72, int(150 * self.theme.scale))
+        return width, height
+
     def _photo(self):
-        if not self.image:
+        if not self.image or not self.image.get("data"):
             return None
-        if self.image.get("mime_type") not in ("image/png", "image/gif"):
+        data = str(self.image["data"])
+        try:
+            raw = base64.b64decode(data + "=" * (-len(data) % 4))
+        except (ValueError, TypeError):
+            raw = b""
+        if raw:
+            photo = self._photo_with_pillow(raw)
+            if photo is not None:
+                return photo
+        return self._photo_with_tk(data, self.image.get("mime_type"))
+
+    def _photo_with_pillow(self, raw):
+        """Anteprima di qualsiasi formato (anche il JPEG degli scatti ridotti)."""
+        try:
+            from PIL import Image, ImageTk  # type: ignore[import-not-found]
+        except Exception:
             return None
         try:
-            photo = tk.PhotoImage(data=self.image["data"])
+            with Image.open(io.BytesIO(raw)) as opened:
+                frame = opened.convert("RGB")
+            frame.thumbnail(self._preview_limits(), Image.LANCZOS)
+            return ImageTk.PhotoImage(frame, master=self.win)
+        except Exception:
+            return None
+
+    def _photo_with_tk(self, data, mime_type):
+        """Ripiego senza Pillow: Tk carica da solo PNG e GIF."""
+        if mime_type not in ("image/png", "image/gif"):
+            return None
+        try:
+            photo = tk.PhotoImage(data=data, master=self.win)
         except tk.TclError:
             return None
-        factor = max(1, int(round(photo.width() / (self.width - 40))))
+        limit_width, limit_height = self._preview_limits()
+        factor = max(
+            1,
+            math.ceil(photo.width() / limit_width),
+            math.ceil(photo.height() / limit_height),
+        )
         if factor > 1:
-            photo = photo.subsample(factor, factor)
-        if photo.height() > int(150 * self.theme.scale):
-            factor = max(2, int(round(photo.height() / (150 * self.theme.scale))))
             photo = photo.subsample(factor, factor)
         return photo
 
