@@ -14,9 +14,12 @@ un'istanza su Render/Fly.
 - **Dock personalizzabile**: quattro bordi (basso, alto, sinistra, destra),
   posizione lungo il bordo, spessore, lunghezza, distanza dal bordo, opacità,
   scala, nascondiglio automatico.
-- **Espansione al passaggio del mouse**: molla smorzata (non interpolazione
-  lineare) come nelle dock native, con ritardo di apertura e chiusura
-  regolabili.
+- **Forma «notch»** (predefinita): una pillola compatta in alto al centro, con
+  ora e stato di NOKK, che si srotola nel pannello completo al passaggio del
+  mouse. Chi preferisce la barra classica sceglie `dock.style = "dock"`.
+- **Espansione al passaggio del mouse**: molla smorzata e rigida (non
+  interpolazione lineare), ~0,2 s dall'apertura alla posa, con ritardo di
+  apertura e chiusura regolabili.
 - **Ingrandimento magnetico**: i widget vicini al cursore si allargano e il
   contenuto cresce con loro; l'intensità è regolabile (`dock.magnify`).
 - **Etichette al passaggio del mouse**: una pillola compatta spiega ogni widget
@@ -33,10 +36,10 @@ un'istanza su Render/Fly.
 - **Temi**: cinque preset (NOKK, Midnight, Graphite, Mint, Sand), colore accento,
   angoli e dimensione; tutto modificabile anche dal pannello impostazioni.
 
-L'aspetto segue le dock moderne come **Nusa**: pillola compatta a riposo,
-panello che si apre con una molla, superfici in vetro (riflesso superiore,
-ombra interna, alone esterno), copertina del brano con accento cromatico
-derivato dall'immagine e ingrandimento magnetico sotto il puntatore.
+L'aspetto segue le notch moderne come **Nusa**: pillola compatta agganciata in
+alto al centro che si apre con una molla rapida, superfici in vetro (riflesso
+superiore, ombra interna, alone esterno), copertina del brano con accento
+cromatico derivato dall'immagine e ingrandimento magnetico sotto il puntatore.
 
 ## Requisiti
 
@@ -139,6 +142,7 @@ può indicare un altro percorso con `--config FILE` o con la variabile
 | `dock.length` | `660` | lunghezza massima del dock |
 | `dock.auto_hide` | `false` | nasconde il dock quando il mouse è altrove |
 | `dock.opacity` | `1.0` | trasparenza della finestra |
+| `dock.style` | `notch` | `notch` (pillola in alto al centro) o `dock` (barra sul bordo) |
 | `dock.magnify` | `1.25` | ingrandimento massimo del widget sotto il cursore (1.0–1.6) |
 | `dock.show_labels` | `true` | etichetta al passaggio del mouse |
 | `theme.preset` | `nokk` | `nokk`, `midnight`, `graphite`, `mint`, `sand` |
@@ -199,7 +203,7 @@ python -m unittest discover -s tests -p "test_dock*.py" -v
 python -m unittest discover -s tests
 ```
 
-I test coprono configurazione, geometria del dock, ingrandimento magnetico,
+I test coprono configurazione, geometria del notch e del dock, ingrandimento magnetico,
 molla dell'animazione, copertine (download, cache, miniature, accento), temi,
 client HTTP, cattura, meteo, MPRIS, scorciatoia, IPC e icone. Non aprono
 finestre: `tests/test_dock_drawing.py` sostituisce Tk con uno stub e verifica

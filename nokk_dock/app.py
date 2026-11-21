@@ -352,6 +352,7 @@ class DockApp:
             scale=self.theme.scale,
             pointer=self._pointer,
             magnify=dock["magnify"],
+            style=dock["style"],
         )
         self.layout = plan
         offset_x = 0
@@ -391,7 +392,7 @@ class DockApp:
         )
         self._apply_geometry(self.expand)
         self._redraw()
-        self._anim_job = self.root.after(16, self._anim_step)
+        self._anim_job = self.root.after(11, self._anim_step)
 
     # --------------------------------------------------------------- hover
     def _on_enter(self, _event=None):
@@ -458,6 +459,8 @@ class DockApp:
             hit["command"]()
             return
         if not self.layout:
+            return
+        if self.layout.style == "notch" and self.expand < 0.85:
             return
         tile = self.layout.tile_at(event.x, event.y)
         if tile is not None:
@@ -776,6 +779,10 @@ class DockApp:
     def _schedule_hover_label(self, tile):
         self._cancel(self._hover_label_job)
         self._hover_label_job = None
+        plan = self.layout
+        if plan is not None and plan.style == "notch" and self.expand < 0.85:
+            self._hide_hover_label()
+            return
         if tile is None:
             self._hide_hover_label()
             return
@@ -882,6 +889,9 @@ class DockApp:
                 radius, plan.height - 2.4, plan.width - radius, plan.height - 2.4,
                 fill=mix(theme.panel, theme.background, 0.55), width=1,
             )
+        if getattr(plan, "style", "dock") == "notch" and expanded < 0.85:
+            self._draw_notch(plan)
+            return
         for tile in plan.tiles:
             area = dock_layout.tile_content(tile, plan)
             hovered = tile.key == self._hovered
@@ -897,6 +907,33 @@ class DockApp:
             painter = getattr(self, f"_draw_{tile.key}", None)
             if painter is not None:
                 painter(tile, area, expanded)
+
+    def _draw_notch(self, plan):
+        """Pillola a riposo: stato di NOKK, ora e indicatore musicale."""
+        theme = self.theme
+        canvas = self.canvas
+        scale = theme.scale
+        width, height = plan.width, plan.height
+        center_x, center_y = width / 2, height / 2
+        color = theme.accent if self.connected else (
+            AMBER if self.connected is False else theme.muted
+        )
+        radius = max(2.0, 2.6 * scale)
+        dot_x = max(radius + 8 * scale, 16 * scale)
+        canvas.create_oval(
+            dot_x - radius, center_y - radius, dot_x + radius, center_y + radius,
+            fill=color, outline="",
+        )
+        if width > 90 * scale:
+            self._text(
+                center_x, center_y, datetime.now().strftime("%H:%M"), 11.0,
+                "bold", fill=theme.text, anchor="center",
+            )
+        if self.music.active and width > 60 * scale:
+            icons.draw(
+                canvas, "pause" if self.music.playing else "play",
+                width - dot_x, center_y, 10.5 * scale, theme.muted, ("icon",),
+            )
 
     def _draw_music(self, tile, area, expanded):
         theme = self.theme

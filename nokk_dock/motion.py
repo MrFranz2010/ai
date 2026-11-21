@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import math
 
-# Parametri tarati su un passo di 1/60 s: rigidi ma senza oscillazioni visibili.
-STIFFNESS = 210.0
-DAMPING = 26.0
-FRAME_SECONDS = 1.0 / 60.0
-SETTLE_EPSILON = 0.002
+# Parametri tarati su un passo di ~1/90 s: scatto immediato e posa senza
+# oscillazioni, come le notch native.
+STIFFNESS = 520.0
+DAMPING = 44.0
+FRAME_SECONDS = 1.0 / 90.0
+SETTLE_EPSILON = 0.004
 
 
 def spring_step(

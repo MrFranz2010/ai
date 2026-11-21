@@ -29,6 +29,11 @@ MIN_TILE = 44.0
 TIGHT_TILE = 24.0
 EXPANSION_HEADROOM = 0.75
 
+# Stile «notch»: pillola compatta in alto al centro che si srotola nel pannello.
+NOTCH_WIDTH = 208.0
+NOTCH_HEIGHT_RATIO = 0.55
+NOTCH_REVEAL = 0.85
+
 
 @dataclass(frozen=True)
 class Tile:
@@ -68,6 +73,7 @@ class DockLayout:
     horizontal: bool
     expanded: float
     scale: float
+    style: str = "dock"
 
     @property
     def geometry(self) -> str:
@@ -148,6 +154,7 @@ def compute_layout(
     pointer: float | None = None,
     magnify: float = 1.0,
     influence: float = 120.0,
+    style: str = "dock",
 ):
     """Calcola finestra e widget per il bordo richiesto.
 
@@ -163,20 +170,24 @@ def compute_layout(
     il dock cresce sotto il puntatore.
     """
     keys = [key for key in widgets if key in TILE_SPANS] or list(TILE_SPANS)
-    horizontal = position in ("bottom", "top")
+    notch = str(style) == "notch"
+    horizontal = True if notch else position in ("bottom", "top")
     progress = _clamp(expand, 0.0, 1.0)
     screen_length = float(screen_width if horizontal else screen_height)
-    cross = int(round(dock_thickness(thickness, progress, scale)))
+    # Nel notch il contenuto è già disposto per il pannello aperto: la finestra
+    # si allarga e lo rivela, invece di comprimere i widget in pochi pixel.
+    span_progress = 1.0 if notch else progress
+    cross = int(round(dock_thickness(thickness, span_progress, scale)))
 
     gap = GAP * scale
     padding = PADDING * scale
-    spans = [tile_span(key, progress, scale) for key in keys]
+    spans = [tile_span(key, span_progress, scale) for key in keys]
     factors = [1.0] * len(keys)
     if pointer is not None and magnify > 1.0 and len(keys) > 1:
         base = compute_layout(
             position, screen_width, screen_height, widgets,
             thickness=thickness, length=length, margin=margin, offset=offset,
-            expand=progress, scale=scale,
+            expand=progress, scale=scale, style=style,
         )
         reach = max(1.0, float(influence) * scale)
         centers = [
@@ -192,15 +203,19 @@ def compute_layout(
 
     fixed = gap * (len(spans) - 1) + padding * 2
     # L'ingrandimento può superare la lunghezza scelta: il limite reale resta
-    # lo schermo, così la reazione al puntatore non viene annullata.
-    limit = min(
-        screen_length,
-        max(
-            float(length) * (1.0 + EXPANSION_HEADROOM * progress),
-            MIN_TILE * len(spans),
-            sum(spans) + fixed,
-        ),
-    )
+    # lo schermo, così la reazione al puntatore non viene annullata. Il notch
+    # invece resta della larghezza scelta: è una pillola, non una barra.
+    if notch:
+        limit = min(screen_length, max(float(length), MIN_TILE * len(spans)))
+    else:
+        limit = min(
+            screen_length,
+            max(
+                float(length) * (1.0 + EXPANSION_HEADROOM * progress),
+                MIN_TILE * len(spans),
+                sum(spans) + fixed,
+            ),
+        )
     spans, gap, padding = _fit(spans, gap, padding, limit)
     tiles, total_length = _build_tiles(keys, spans, gap, padding, cross, horizontal, factors)
 
@@ -224,6 +239,26 @@ def compute_layout(
              tile.magnify)
         for tile in tiles
     )
+
+    if notch:
+        reveal = 1.0 if progress >= NOTCH_REVEAL else progress / NOTCH_REVEAL
+        compact_width = min(float(width), NOTCH_WIDTH * scale)
+        compact_height = thickness * NOTCH_HEIGHT_RATIO * scale
+        wide = int(round(compact_width + (width - compact_width) * reveal))
+        tall = int(round(compact_height + (height - compact_height) * reveal))
+        wide = max(1, min(wide, int(screen_width)))
+        tall = max(1, min(tall, int(screen_height)))
+        return DockLayout(
+            x=int(round((screen_width - wide) / 2)),
+            y=int(round(_clamp(margin, 0, max(0, screen_height - tall)))),
+            width=wide,
+            height=tall,
+            tiles=final_tiles,
+            horizontal=True,
+            expanded=progress,
+            scale=scale,
+            style="notch",
+        )
 
     if position == "bottom":
         x = _clamp(screen_width - width, 0, screen_width) * offset
@@ -250,6 +285,7 @@ def compute_layout(
         horizontal=horizontal,
         expanded=progress,
         scale=scale,
+        style=str(style),
     )
 
 

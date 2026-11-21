@@ -130,7 +130,64 @@ class LayoutMagnificationTests(unittest.TestCase):
         self.assertLessEqual(plan.y + plan.height, 1080)
 
 
+class NotchLayoutTests(unittest.TestCase):
+    widgets = LayoutMagnificationTests.widgets
+
+    def build(self, expand, **kwargs):
+        options = dict(
+            position="bottom",
+            screen_width=1920,
+            screen_height=1080,
+            widgets=self.widgets,
+            thickness=60,
+            length=660,
+            margin=18,
+            offset=0.0,
+            expand=expand,
+            scale=1.0,
+            style="notch",
+        )
+        options.update(kwargs)
+        return layout.compute_layout(**options)
+
+    def test_collapsed_is_a_compact_pill_at_top_centre(self):
+        plan = self.build(0.0)
+        self.assertEqual(plan.style, "notch")
+        self.assertTrue(plan.horizontal)
+        self.assertLessEqual(plan.width, int(layout.NOTCH_WIDTH) + 1)
+        self.assertLess(plan.height, 45)
+        self.assertEqual(plan.y, 18)
+        self.assertAlmostEqual(plan.x + plan.width / 2, 960, delta=1)
+
+    def test_opening_reveals_the_full_panel(self):
+        collapsed = self.build(0.0)
+        opened = self.build(1.0)
+        self.assertGreater(opened.width, collapsed.width * 2)
+        self.assertGreater(opened.height, collapsed.height)
+        self.assertLessEqual(opened.x + opened.width, 1920)
+        self.assertLessEqual(opened.y + opened.height, 1080)
+        # il contenuto non viene compresso: si svela crescendo
+        self.assertEqual(opened.tiles[0].width, collapsed.tiles[0].width)
+
+    def test_offset_does_not_move_the_notch(self):
+        self.assertEqual(self.build(1.0, offset=0.0).x, self.build(1.0, offset=1.0).x)
+
+    def test_dock_style_keeps_the_edge_bar(self):
+        plan = self.build(0.0, style="dock")
+        self.assertEqual(plan.style, "dock")
+        self.assertGreater(plan.width, 300)
+
+
 class SettingsMagnifyTests(unittest.TestCase):
+    def test_style_default_and_validation(self):
+        config = settings.default_config()
+        self.assertEqual(config["dock"]["style"], "notch")
+        config["dock"]["style"] = "Dock"
+        self.assertEqual(settings.validate_config(config)["dock"]["style"], "dock")
+        config["dock"]["style"] = "boh"
+        with self.assertRaises(ValueError):
+            settings.validate_config(config)
+
     def test_defaults(self):
         config = settings.default_config()
         self.assertAlmostEqual(config["dock"]["magnify"], 1.25)

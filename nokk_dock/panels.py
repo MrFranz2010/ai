@@ -18,6 +18,8 @@ from .client import NokkError
 from .settings import (
     POSITIONS,
     POSITION_LABELS,
+    STYLE_LABELS,
+    STYLES,
     WIDGET_LABELS,
     WIDGETS,
     default_config,
@@ -558,6 +560,18 @@ class SettingsPanel(_Panel):
     def _build_position_section(self):
         section = self._section("Posizione sullo schermo")
         self.var_position = tk.StringVar(value=self.draft["dock"]["position"])
+        self.var_style = tk.StringVar(value=self.draft["dock"]["style"])
+        self._segmented(
+            section,
+            self.var_style,
+            [(style, STYLE_LABELS[style]) for style in STYLES],
+        ).pack(anchor="w", pady=(0, 4))
+        self._label(
+            section,
+            "Notch: pillola compatta in alto al centro che si apre al passaggio "
+            "del mouse. Dock: barra sul bordo scelto.",
+            7.8,
+        ).pack(fill="x", pady=(0, 4))
         segmented = self._segmented(
             section,
             self.var_position,
@@ -861,6 +875,7 @@ class SettingsPanel(_Panel):
     def _collect(self):
         config = copy.deepcopy(self.draft)
         enabled = [key for key in self.widget_order if self.widget_vars[key].get()]
+        config["dock"]["style"] = self.var_style.get()
         config["dock"]["position"] = self.var_position.get()
         config["dock"]["offset"] = float(self.var_offset.get())
         config["dock"]["opacity"] = float(self.var_opacity.get())
@@ -910,6 +925,7 @@ class SettingsPanel(_Panel):
         for key, variable in self.widget_vars.items():
             variable.set(key in self.widget_order)
         self._render_widget_rows()
+        self.var_style.set(defaults["dock"]["style"])
         self.var_position.set(defaults["dock"]["position"])
         self.var_offset.set(defaults["dock"]["offset"])
         self.var_opacity.set(defaults["dock"]["opacity"])

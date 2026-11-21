@@ -339,6 +339,25 @@ class DrawingTests(unittest.TestCase):
                 instance._tile_growth(dock_layout.Tile("clock", 0, 0, 10, 10, 1.4)), 1.0
             )
 
+    def test_redraw_notch_collapsed(self):
+        with stub_tkinter():
+            from nokk_dock import layout as dock_layout
+
+            instance = self.build_app()
+            instance.layout = dock_layout.compute_layout(
+                "bottom", 1920, 1080, instance.config["widgets"],
+                thickness=60, length=660, margin=18, offset=0.5,
+                expand=0.0, style="notch",
+            )
+            instance._redraw()
+            texts = [
+                str(item["kwargs"].get("text", ""))
+                for item in instance.canvas.items
+                if item["kind"] == "text"
+            ]
+            self.assertTrue(any(":" in text for text in texts))
+            self.assertGreater(len(instance.canvas.items), 3)
+
     def test_hover_label_text(self):
         with stub_tkinter():
             from nokk_dock import layout as dock_layout
